@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SSL Terminal</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+    
+    <!-- Material Icons -->
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    
+    <!-- Tailwind Configuration -->
+    <script>
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              primary: "#0df259",
+              "primary-dark": "#0ab845",
+              "primary-dim": "rgba(13, 242, 89, 0.1)",
+              "background-dark": "#050505",
+              "surface-dark": "#0f1210",
+              "surface-lighter": "#161b18",
+              "border-dark": "#1e293b",
+              "obsidian": "#020202",
+            },
+            fontFamily: {
+              display: ["Inter", "sans-serif"],
+              mono: ["JetBrains Mono", "monospace"],
+            },
+            backgroundImage: {
+               'grid-pattern': "linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px)",
+               'stripes': "repeating-linear-gradient(45deg, #0f1210, #0f1210 10px, #0a0c0b 10px, #0a0c0b 20px)"
+            },
+            boxShadow: {
+              'glow': '0 0 10px rgba(13, 242, 89, 0.15)',
+              'glow-strong': '0 0 15px rgba(13, 242, 89, 0.3)',
+            },
+            animation: {
+              marquee: 'marquee 30s linear infinite',
+              scan: 'scan 4s linear infinite',
+              pulse: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              appear: 'appear 0.2s ease-out forwards',
+            },
+            keyframes: {
+              marquee: {
+                '0%': { transform: 'translateX(0)' },
+                '100%': { transform: 'translateX(-50%)' },
+              },
+              scan: {
+                '0%': { top: '0%', opacity: 0 },
+                '10%': { opacity: 0.5 },
+                '90%': { opacity: 0.5 },
+                '100%': { top: '100%', opacity: 0 },
+              },
+              appear: {
+                '0%': { opacity: 0, transform: 'scale(0.95)' },
+                '100%': { opacity: 1, transform: 'scale(1)' },
+              }
+            }
+          },
+        },
+      }
+    </script>
+
+    <style>
+      /* Custom Scrollbar */
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #050505;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #1e293b;
+        border-radius: 2px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #0df259;
+      }
+
+      /* CRT Effect Overlay */
+      .crt-overlay {
+        background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+        background-size: 100% 2px, 3px 100%;
+        pointer-events: none;
+      }
+
+      .clip-path-polygon {
+        clip-path: polygon(0 0, 100% 0, 100% 85%, 95% 100%, 0% 100%);
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "react": "https://esm.sh/react@^19.2.4",
+    "recharts": "https://esm.sh/recharts@^3.7.0"
+  }
+}
+</script>
+</head>
+  <body class="bg-background-dark text-slate-300 font-display selection:bg-primary selection:text-black antialiased overflow-hidden">
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>
