@@ -8,11 +8,12 @@ import "../src/ccip/SSLCCIPSender.sol";
 import "../src/ccip/SSLCCIPReceiver.sol";
 import "../src/mocks/MockBondToken.sol";
 import "../src/mocks/MockUSDC.sol";
+import "../src/interfaces/IACEComplianceAdapter.sol";
 
 /**
  * @title DeploySSL
  * @notice Deployment script for the Stealth Settlement Layer
- * @dev Deploys all contracts and configures them for demo use
+ * @dev Deploys all contracts and configures ACE compliance with CCID + credentials
  *
  *      Usage:
  *        forge script script/Deploy.s.sol:DeploySSL --rpc-url $RPC_URL --broadcast
@@ -33,11 +34,10 @@ contract DeploySSL is Script {
         // ── 1. Deploy mock tokens ──
         MockBondToken bondToken = new MockBondToken();
         MockUSDC usdc = new MockUSDC();
-
         console.log("MockBondToken:", address(bondToken));
         console.log("MockUSDC:", address(usdc));
 
-        // ── 2. Deploy compliance adapter ──
+        // ── 2. Deploy ACE compliance adapter ──
         ACEComplianceAdapter compliance = new ACEComplianceAdapter();
         console.log("ACEComplianceAdapter:", address(compliance));
 
@@ -52,14 +52,30 @@ contract DeploySSL is Script {
                 ccipRouterAddress,
                 address(vault)
             );
-
             console.log("SSLCCIPSender:", address(ccipSender));
             console.log("SSLCCIPReceiver:", address(ccipReceiver));
         }
 
-        // ── 5. Mint demo tokens ──
-        bondToken.mint(deployer, 1_000_000e18); // 1M bonds
-        usdc.mint(deployer, 100_000_000e6); // 100M USDC
+        // ── 5. Onboard deployer as demo institution (CCID) ──
+        compliance.registerIdentity(
+            deployer,
+            keccak256("DEPLOYER_IDENTITY"),
+            "US"
+        );
+        compliance.issueCredential(
+            deployer,
+            IACEComplianceAdapter.CredentialType.KYC,
+            365 days
+        );
+        compliance.issueCredential(
+            deployer,
+            IACEComplianceAdapter.CredentialType.SANCTIONS_CLEAR,
+            365 days
+        );
+
+        // ── 6. Mint demo tokens ──
+        bondToken.mint(deployer, 1_000_000e18);
+        usdc.mint(deployer, 100_000_000e6);
 
         vm.stopBroadcast();
 

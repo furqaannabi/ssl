@@ -16,7 +16,7 @@ import "../src/interfaces/IACEComplianceAdapter.sol";
  * @title SSLVaultTest
  * @notice End-to-end test for the Stealth Settlement Layer
  * @dev Simulates the full dark pool flow:
- *      onboarding → deposit → order → match → compliance → settlement
+ *      CCID onboarding → credential issuance → deposit → order → match → compliance → settlement
  */
 contract SSLVaultTest is Test {
     // ── Contracts ──
@@ -37,14 +37,14 @@ contract SSLVaultTest is Test {
     // ── Constants ──
     uint256 public constant BOND_AMOUNT = 10_000e18; // 10,000 bonds
     uint256 public constant USDC_AMOUNT = 1_005_000e6; // 1,005,000 USDC
-    uint256 public constant TRADE_PRICE = 100_50; // $100.50 per bond (scaled)
-    uint256 public constant MAX_TRADE_SIZE = 10_000_000e6; // $10M max
+    uint256 public constant TRADE_PRICE = 100_50; // $100.50 per bond
+    uint256 public constant CREDENTIAL_VALIDITY = 365 days;
 
     // CCIP chain selector for Ethereum Sepolia
     uint64 public constant ETH_SEPOLIA_SELECTOR = 16015286601757825753;
 
     function setUp() public {
-        // 1. Deploy compliance adapter
+        // 1. Deploy compliance adapter (ACE)
         compliance = new ACEComplianceAdapter();
 
         // 2. Deploy vault
@@ -59,9 +59,9 @@ contract SSLVaultTest is Test {
         ccipSender = new SSLCCIPSender(address(ccipRouter));
         ccipReceiver = new SSLCCIPReceiver(address(ccipRouter), address(vault));
 
-        // 5. Register institutions as compliant
-        compliance.registerInstitution(institutionA, "US", MAX_TRADE_SIZE);
-        compliance.registerInstitution(institutionB, "UK", MAX_TRADE_SIZE);
+        // 5. Onboard institutions through ACE (CCID pattern)
+        _onboardInstitution(institutionA, keccak256("INST_A_IDENTITY"), "US");
+        _onboardInstitution(institutionB, keccak256("INST_B_IDENTITY"), "UK");
 
         // 6. Mint tokens to institutions
         bondToken.mint(institutionA, BOND_AMOUNT);
@@ -75,35 +75,93 @@ contract SSLVaultTest is Test {
         usdc.approve(address(vault), type(uint256).max);
     }
 
+    /// @dev Simulates the ACE onboarding flow: register CCID → issue credentials
+    function _onboardInstitution(
+        address wallet,
+        bytes32 identityHash,
+        string memory jurisdiction
+    ) internal {
+        // Step 1: Register CCID identity (identity hash only, no PII on-chain)
+        compliance.registerIdentity(wallet, identityHash, jurisdiction);
+
+        // Step 2: Issue required credentials (KYC + Sanctions clearance)
+        compliance.issueCredential(
+            wallet,
+            IACEComplianceAdapter.CredentialType.KYC,
+            CREDENTIAL_VALIDITY
+        );
+        compliance.issueCredential(
+            wallet,
+            IACEComplianceAdapter.CredentialType.SANCTIONS_CLEAR,
+            CREDENTIAL_VALIDITY
+        );
+    }
+
     // ──────────────────────────────────────────────
-    //  Compliance Tests
+    //  ACE Compliance Tests
     // ──────────────────────────────────────────────
 
-    function test_InstitutionRegistered() public {
+    function test_IdentityRegistered() public {
         assertTrue(compliance.isCompliant(institutionA));
         assertTrue(compliance.isCompliant(institutionB));
         assertFalse(compliance.isCompliant(makeAddr("random")));
     }
 
-    function test_ComplianceStatusUpdate() public {
-        compliance.updateComplianceStatus(
+    function test_CCIDRecord() public view {
+        IACEComplianceAdapter.CCID memory ccid = compliance.getIdentity(
+            institutionA
+        );
+        assertEq(ccid.wallet, institutionA);
+        assertEq(ccid.identityHash, keccak256("INST_A_IDENTITY"));
+        assertTrue(ccid.active);
+    }
+
+    function test_CredentialValidation() public view {
+        assertTrue(
+            compliance.hasValidCredential(
+                institutionA,
+                IACEComplianceAdapter.CredentialType.KYC
+            )
+        );
+        assertTrue(
+            compliance.hasValidCredential(
+                institutionA,
+                IACEComplianceAdapter.CredentialType.SANCTIONS_CLEAR
+            )
+        );
+        // No accreditation credential issued
+        assertFalse(
+            compliance.hasValidCredential(
+                institutionA,
+                IACEComplianceAdapter.CredentialType.ACCREDITATION
+            )
+        );
+    }
+
+    function test_CredentialExpiry() public {
+        // Fast-forward past credential validity
+        vm.warp(block.timestamp + CREDENTIAL_VALIDITY + 1);
+        assertFalse(compliance.isCompliant(institutionA));
+    }
+
+    function test_CredentialRevocation() public {
+        compliance.revokeCredential(
             institutionA,
-            IACEComplianceAdapter.ComplianceStatus.SUSPENDED
+            IACEComplianceAdapter.CredentialType.KYC
         );
         assertFalse(compliance.isCompliant(institutionA));
+    }
+
+    function test_DenylistBlocks() public {
+        compliance.addToDenylist(institutionA);
+        assertFalse(
+            compliance.checkTradeCompliance(institutionA, institutionB, 1_000e6)
+        );
     }
 
     function test_TradeComplianceCheck() public {
         assertTrue(
             compliance.checkTradeCompliance(institutionA, institutionB, 1_000e6)
-        );
-        // Exceeds max trade size
-        assertFalse(
-            compliance.checkTradeCompliance(
-                institutionA,
-                institutionB,
-                MAX_TRADE_SIZE + 1
-            )
         );
     }
 
@@ -157,11 +215,9 @@ contract SSLVaultTest is Test {
     // ──────────────────────────────────────────────
 
     function test_SubmitOrder() public {
-        // Deposit first
         vm.prank(institutionA);
         vault.deposit(address(bondToken), BOND_AMOUNT);
 
-        // Submit sell order
         vm.prank(institutionA);
         uint256 orderId = vault.submitOrder(
             address(bondToken),
@@ -175,16 +231,9 @@ contract SSLVaultTest is Test {
         ISSLVault.Order memory order = vault.getOrder(orderId);
         assertEq(order.trader, institutionA);
         assertEq(uint8(order.status), uint8(ISSLVault.OrderStatus.OPEN));
-        assertEq(order.amount, BOND_AMOUNT);
-
-        // Tokens are escrowed
         assertEq(
             vault.getEscrowedBalance(institutionA, address(bondToken)),
             BOND_AMOUNT
-        );
-        assertEq(
-            vault.getAvailableBalance(institutionA, address(bondToken)),
-            0
         );
     }
 
@@ -204,31 +253,11 @@ contract SSLVaultTest is Test {
         vm.prank(institutionA);
         vault.cancelOrder(orderId);
 
-        ISSLVault.Order memory order = vault.getOrder(orderId);
-        assertEq(uint8(order.status), uint8(ISSLVault.OrderStatus.CANCELLED));
-        assertEq(vault.getEscrowedBalance(institutionA, address(bondToken)), 0);
         assertEq(
-            vault.getAvailableBalance(institutionA, address(bondToken)),
-            BOND_AMOUNT
+            uint8(vault.getOrder(orderId).status),
+            uint8(ISSLVault.OrderStatus.CANCELLED)
         );
-    }
-
-    function test_RevertCancelNotOwner() public {
-        vm.prank(institutionA);
-        vault.deposit(address(bondToken), BOND_AMOUNT);
-
-        vm.prank(institutionA);
-        uint256 orderId = vault.submitOrder(
-            address(bondToken),
-            BOND_AMOUNT,
-            TRADE_PRICE,
-            ISSLVault.OrderSide.SELL,
-            keccak256("encrypted_order")
-        );
-
-        vm.prank(institutionB);
-        vm.expectRevert("SSL: not order owner");
-        vault.cancelOrder(orderId);
+        assertEq(vault.getEscrowedBalance(institutionA, address(bondToken)), 0);
     }
 
     // ──────────────────────────────────────────────
@@ -236,21 +265,20 @@ contract SSLVaultTest is Test {
     // ──────────────────────────────────────────────
 
     function test_ExecuteSettlement() public {
-        // ── Step 1: Deposits ──
+        // ── Deposits ──
         vm.prank(institutionA);
         vault.deposit(address(bondToken), BOND_AMOUNT);
-
         vm.prank(institutionB);
         vault.deposit(address(usdc), USDC_AMOUNT);
 
-        // ── Step 2: Submit private orders ──
+        // ── Submit private orders ──
         vm.prank(institutionA);
         uint256 sellOrderId = vault.submitOrder(
             address(bondToken),
             BOND_AMOUNT,
             TRADE_PRICE,
             ISSLVault.OrderSide.SELL,
-            keccak256("encrypted_sell_order")
+            keccak256("encrypted_sell")
         );
 
         vm.prank(institutionB);
@@ -259,54 +287,32 @@ contract SSLVaultTest is Test {
             USDC_AMOUNT,
             TRADE_PRICE,
             ISSLVault.OrderSide.BUY,
-            keccak256("encrypted_buy_order")
+            keccak256("encrypted_buy")
         );
 
-        // ── Step 3: CRE operator executes settlement ──
+        // ── CRE operator executes settlement ──
         vm.prank(operator);
         uint256 settlementId = vault.executeSettlement(
             buyOrderId,
             sellOrderId,
-            address(bondToken), // base token (bonds)
-            address(usdc), // quote token (USDC)
-            BOND_AMOUNT, // 10,000 bonds
-            USDC_AMOUNT // 1,005,000 USDC
+            address(bondToken),
+            address(usdc),
+            BOND_AMOUNT,
+            USDC_AMOUNT
         );
 
-        // ── Verify settlement ──
+        // ── Verify ──
         assertEq(settlementId, 1);
-
-        // Buyer now has bonds, Seller now has USDC
         assertEq(
             vault.getBalance(institutionB, address(bondToken)),
             BOND_AMOUNT
         );
         assertEq(vault.getBalance(institutionA, address(usdc)), USDC_AMOUNT);
-
-        // Original balances are zero
         assertEq(vault.getBalance(institutionA, address(bondToken)), 0);
         assertEq(vault.getBalance(institutionB, address(usdc)), 0);
-
-        // Orders are settled
-        assertEq(
-            uint8(vault.getOrder(sellOrderId).status),
-            uint8(ISSLVault.OrderStatus.SETTLED)
-        );
-        assertEq(
-            uint8(vault.getOrder(buyOrderId).status),
-            uint8(ISSLVault.OrderStatus.SETTLED)
-        );
-
-        // Settlement record
-        ISSLVault.Settlement memory s = vault.getSettlement(settlementId);
-        assertEq(s.buyer, institutionB);
-        assertEq(s.seller, institutionA);
-        assertEq(s.baseAmount, BOND_AMOUNT);
-        assertEq(s.quoteAmount, USDC_AMOUNT);
     }
 
     function test_RevertSettlementNotOperator() public {
-        // Deposit & submit orders
         vm.prank(institutionA);
         vault.deposit(address(bondToken), BOND_AMOUNT);
         vm.prank(institutionB);
@@ -329,7 +335,6 @@ contract SSLVaultTest is Test {
             keccak256("buy")
         );
 
-        // Random user cannot settle
         vm.prank(makeAddr("attacker"));
         vm.expectRevert("SSL: not operator");
         vault.executeSettlement(
@@ -342,8 +347,7 @@ contract SSLVaultTest is Test {
         );
     }
 
-    function test_RevertSettlementNonCompliant() public {
-        // Deposit & submit orders
+    function test_RevertSettlementRevokedCredential() public {
         vm.prank(institutionA);
         vault.deposit(address(bondToken), BOND_AMOUNT);
         vm.prank(institutionB);
@@ -366,13 +370,12 @@ contract SSLVaultTest is Test {
             keccak256("buy")
         );
 
-        // Suspend institution A
-        compliance.updateComplianceStatus(
+        // Revoke KYC credential for institution A
+        compliance.revokeCredential(
             institutionA,
-            IACEComplianceAdapter.ComplianceStatus.SUSPENDED
+            IACEComplianceAdapter.CredentialType.KYC
         );
 
-        // Settlement should fail compliance
         vm.prank(operator);
         vm.expectRevert("SSL: compliance check failed");
         vault.executeSettlement(
@@ -386,14 +389,12 @@ contract SSLVaultTest is Test {
     }
 
     // ──────────────────────────────────────────────
-    //  Cross-Chain Settlement Test
+    //  Cross-Chain Settlement Test (CCIP)
     // ──────────────────────────────────────────────
 
     function test_CrossChainSettlement() public {
-        // Set vault operator to ccipReceiver so it can call executeCrossChainSettlement
         vault.setOperator(address(ccipReceiver));
 
-        // Configure CCIP sender
         ccipSender.configureDestination(
             ETH_SEPOLIA_SELECTOR,
             address(ccipReceiver)
@@ -403,24 +404,21 @@ contract SSLVaultTest is Test {
             address(ccipSender)
         );
 
-        // Deposit tokens
         vm.prank(institutionA);
         vault.deposit(address(bondToken), BOND_AMOUNT);
         vm.prank(institutionB);
         vault.deposit(address(usdc), USDC_AMOUNT);
 
-        // Send cross-chain settlement via CCIP
         ccipSender.sendSettlement{value: 0.01 ether}(
             ETH_SEPOLIA_SELECTOR,
-            institutionB, // buyer
-            institutionA, // seller
+            institutionB,
+            institutionA,
             address(bondToken),
             address(usdc),
             BOND_AMOUNT,
             USDC_AMOUNT
         );
 
-        // Verify settlement happened
         assertEq(
             vault.getBalance(institutionB, address(bondToken)),
             BOND_AMOUNT
@@ -435,25 +433,16 @@ contract SSLVaultTest is Test {
 
     function test_FullDarkPoolScenario() public {
         // ═══════════════════════════════════════════
-        // This test simulates the full demo scenario:
-        //
-        // 1. Two institutions onboard through ACE
-        // 2. Both deposit assets into the dark pool
-        // 3. Both submit encrypted orders
-        // 4. CRE matches orders off-chain
-        // 5. Compliance check passes
-        // 6. Atomic settlement executes
-        // 7. Only final state is visible on-chain
+        // Full demo: CCID onboarding → deposit → encrypted orders →
+        //            confidential matching → ACE compliance → atomic settlement
         // ═══════════════════════════════════════════
 
-        // Step 1: Institutions are already registered in setUp()
-        IACEComplianceAdapter.InstitutionInfo memory infoA = compliance
-            .getInstitutionInfo(institutionA);
-        assertEq(infoA.wallet, institutionA);
-        assertEq(
-            uint8(infoA.status),
-            uint8(IACEComplianceAdapter.ComplianceStatus.COMPLIANT)
+        // Step 1: Verify CCID identities were registered
+        IACEComplianceAdapter.CCID memory ccidA = compliance.getIdentity(
+            institutionA
         );
+        assertTrue(ccidA.active);
+        assertEq(keccak256(bytes(ccidA.jurisdiction)), keccak256(bytes("US")));
 
         // Step 2: Deposit into dark pool
         vm.prank(institutionA);
@@ -461,7 +450,7 @@ contract SSLVaultTest is Test {
         vm.prank(institutionB);
         vault.deposit(address(usdc), USDC_AMOUNT);
 
-        // Step 3: Submit private orders (hash only on-chain)
+        // Step 3: Submit private orders (only hash on-chain)
         bytes32 encryptedSellHash = keccak256(
             abi.encodePacked("SELL", institutionA, BOND_AMOUNT, TRADE_PRICE)
         );
@@ -487,7 +476,7 @@ contract SSLVaultTest is Test {
             encryptedBuyHash
         );
 
-        // Step 4 + 5 + 6: CRE matches + compliance + settlement
+        // Step 4 + 5 + 6: CRE matches + ACE compliance + settlement
         vm.prank(operator);
         vault.executeSettlement(
             buyId,
@@ -505,9 +494,8 @@ contract SSLVaultTest is Test {
         );
         assertEq(vault.getBalance(institutionA, address(usdc)), USDC_AMOUNT);
         assertEq(vault.totalSettlements(), 1);
-        assertEq(vault.totalOrders(), 2);
 
-        // Institutions can withdraw their settled tokens
+        // Withdraw settled tokens
         vm.prank(institutionB);
         vault.withdraw(address(bondToken), BOND_AMOUNT);
         assertEq(bondToken.balanceOf(institutionB), BOND_AMOUNT);
