@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, NavItem } from './types';
 import { Icon } from './components/UI';
+import { loadSpendingKeypair, getMetaAddress } from './lib/stealth';
 import { Portfolio } from './components/Portfolio';
 import { Terminal } from './components/Terminal';
 import { Compliance } from './components/Compliance';
@@ -19,6 +20,21 @@ function App() {
   const [activeView, setActiveView] = useState<View>(View.TERMINAL);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [userAddress, setUserAddress] = useState<string>("");
+
+  useEffect(() => {
+    const updateIdentity = () => {
+        const keys = loadSpendingKeypair();
+        if (keys) {
+            const meta = getMetaAddress(keys.publicKey);
+            setUserAddress(meta.slice(0, 6) + "..." + meta.slice(-4));
+        }
+    };
+    
+    updateIdentity();
+    window.addEventListener('storage', updateIdentity);
+    return () => window.removeEventListener('storage', updateIdentity);
+  }, []);
 
   const renderView = () => {
     switch (activeView) {
@@ -71,7 +87,11 @@ function App() {
             onClick={() => setIsProfileOpen(true)}
             className="w-8 h-8 rounded-full overflow-hidden border border-border-dark hover:border-primary transition-all grayscale hover:grayscale-0 shadow-lg hover:shadow-glow"
           >
-            <img src="https://picsum.photos/100/100" alt="User" className="w-full h-full object-cover" />
+            <img 
+               src={userAddress ? `https://api.dicebear.com/7.x/identicon/svg?seed=${userAddress}` : "https://api.dicebear.com/7.x/identicon/svg?seed=fallback"} 
+               alt="User" 
+               className="w-full h-full object-cover" 
+            />
           </button>
           <button 
             onClick={() => setIsSettingsOpen(true)}
@@ -119,12 +139,14 @@ function App() {
            <div className="flex items-center justify-end gap-6 w-1/3">
               <div className="flex flex-col items-end cursor-pointer hover:bg-white/5 p-2 rounded transition-colors" onClick={() => setIsProfileOpen(true)}>
                  <div className="flex items-center gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-primary shadow-glow"></span>
-                    <span className="text-xs font-mono text-slate-300">0x8A...4F21</span>
+                    <span className={`w-1.5 h-1.5 rounded-full ${userAddress ? 'bg-primary shadow-glow' : 'bg-slate-700'}`}></span>
+                    <span className="text-xs font-mono text-slate-300 uppercase">{userAddress || "Identity Inactive"}</span>
                  </div>
                  <div className="flex items-center gap-1 mt-0.5">
-                    <Icon name="fingerprint" className="text-[10px] text-primary" />
-                    <span className="text-[10px] font-mono text-primary uppercase tracking-wide">WorldID Verified</span>
+                    <Icon name={userAddress ? "fingerprint" : "lock_open"} className={`text-[10px] ${userAddress ? 'text-primary' : 'text-slate-500'}`} />
+                    <span className={`text-[10px] font-mono uppercase tracking-wide ${userAddress ? 'text-primary' : 'text-slate-500'}`}>
+                        {userAddress ? "Stealth Identity" : "Layer Offline"}
+                    </span>
                  </div>
               </div>
               <div className="h-8 w-px bg-border-dark hidden lg:block"></div>

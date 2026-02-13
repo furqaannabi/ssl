@@ -1,16 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Button, Icon } from './UI';
-import { getOrCreateSpendingKeypair, SpendingKeypair } from '../lib/stealth';
+import { getOrCreateSpendingKeypair, SpendingKeypair, getMetaAddress } from '../lib/stealth';
 import WorldIdKit from './WorldIdKit';
 
 export const ProfileModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen, onClose }) => {
     const [spendingKeypair, setSpendingKeypair] = useState<SpendingKeypair | null>(null);
     const [revealKey, setRevealKey] = useState(false);
+    const [displayAddress, setDisplayAddress] = useState<string>("");
 
     useEffect(() => {
         if (isOpen) {
             const stored = localStorage.getItem("ssl_spending_keypair");
-            if (stored) setSpendingKeypair(JSON.parse(stored));
+            if (stored) {
+                const keys = JSON.parse(stored);
+                setSpendingKeypair(keys);
+                const fullAddress = getMetaAddress(keys.publicKey);
+                setDisplayAddress(fullAddress.slice(0, 6) + "..." + fullAddress.slice(-4));
+            }
         }
     }, [isOpen]);
 
@@ -24,18 +30,35 @@ export const ProfileModal: React.FC<{ isOpen: boolean; onClose: () => void }> = 
             <div className="flex flex-col items-center mb-6 relative">
                 <div className="absolute inset-0 bg-gradient-to-b from-primary/5 to-transparent -z-10 rounded-full blur-xl transform -translate-y-4"></div>
                 <div className="w-20 h-20 rounded-full border-2 border-primary/30 p-1 mb-3 relative group cursor-pointer">
-                     <img src="https://picsum.photos/100/100" alt="Profile" className="w-full h-full rounded-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500" />
+                     <img 
+                        src={displayAddress ? `https://api.dicebear.com/7.x/identicon/svg?seed=${displayAddress}` : "https://api.dicebear.com/7.x/identicon/svg?seed=fallback"} 
+                        alt="Profile" 
+                        className="w-full h-full rounded-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500" 
+                     />
                      <div className="absolute bottom-0 right-0 bg-background-dark border border-primary rounded-full p-1 text-primary shadow-glow">
                         <Icon name="verified_user" className="text-xs block" />
                      </div>
                 </div>
-                <h2 className="text-lg font-bold text-white tracking-wide font-display">ALEXANDER K.</h2>
+                {/* <h2 className="text-lg font-bold text-white tracking-wide font-display">ALEXANDER K.</h2> */}
                 <div className="flex items-center gap-2 mt-1">
-                     <span className="text-xs font-mono text-slate-400 bg-surface-lighter px-2 py-1 rounded border border-border-dark flex items-center gap-2 cursor-pointer hover:text-white hover:border-slate-500 transition-colors active:scale-95 transform">
-                        <span className="w-1.5 h-1.5 rounded-full bg-primary shadow-glow"></span>
-                        0x8A72...4F21 
-                        <Icon name="content_copy" className="text-[10px] opacity-70" />
-                     </span>
+                     {displayAddress ? (
+                         <span 
+                            onClick={() => {
+                                navigator.clipboard.writeText(displayAddress);
+                                // could add a toast here
+                            }}
+                            className="text-xs font-mono text-slate-400 bg-surface-lighter px-2 py-1 rounded border border-border-dark flex items-center gap-2 cursor-pointer hover:text-white hover:border-slate-500 transition-colors active:scale-95 transform"
+                         >
+                            <span className="w-1.5 h-1.5 rounded-full bg-primary shadow-glow"></span>
+                            {displayAddress} 
+                            <Icon name="content_copy" className="text-[10px] opacity-70" />
+                         </span>
+                     ) : (
+                         <span className="text-[10px] font-mono text-slate-500 uppercase tracking-wider flex items-center gap-2 opacity-60">
+                            <span className="w-1.5 h-1.5 rounded-full bg-slate-700"></span>
+                            Confidential Layer Inactive
+                         </span>
+                     )}
                 </div>
             </div>
 
@@ -99,7 +122,7 @@ export const ProfileModal: React.FC<{ isOpen: boolean; onClose: () => void }> = 
                 <div className="py-2">
                     <WorldIdKit 
                         onSuccess={() => console.log("World ID Verified!")} 
-                        signal="0x8A72...4F21" 
+                        signal={displayAddress} 
                     />
                 </div>
 
