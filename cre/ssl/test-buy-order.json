@@ -1,0 +1,10 @@
+{
+  "worldIdProof": "zk_proof_buyer_def456",
+  "nullifierHash": "0xdef456abc789",
+  "asset": "0xBondTokenAddress",
+  "quoteToken": "0xUSDCAddress",
+  "amount": "1005000000000",
+  "price": "10050",
+  "side": "BUY",
+  "stealthPublicKey": "buyer_stealth_pub_key_002"
+}

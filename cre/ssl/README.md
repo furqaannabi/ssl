@@ -1,53 +1,91 @@
-# Typescript Simple Workflow Example
+# SSL — Stealth Settlement Layer (CRE Workflow)
 
-This template provides a simple Typescript workflow example. It shows how to create a simple "Hello World" workflow using Typescript.
+Confidential trading workflow powered by Chainlink CRE. Verified humans submit private orders via HTTP, CRE matches them off-chain, and settlement is delivered to one-time stealth addresses.
 
-Steps to run the example
+## Flow
 
-## 1. Update .env file
+1. User verifies identity via World ID (zero-knowledge, no PII)
+2. User generates stealth keypair locally (private key never leaves client)
+3. User submits order via HTTP trigger with World ID proof + stealth public key
+4. CRE verifies World ID proof and checks nullifier uniqueness
+5. CRE stores order in confidential memory (not visible on-chain)
+6. CRE matches counterparties privately
+7. CRE generates stealth settlement addresses from public keys
+8. CRE triggers `vault.settle()` — funds sent to stealth addresses
+9. User withdraws from stealth address using private key
 
-You need to add a private key to env file. This is specifically required if you want to simulate chain writes. For that to work the key should be valid and funded.
-If your workflow does not do any chain write then you can just put any dummy key as a private key. e.g.
+## Setup
+
+### 1. Set environment
 
 ```
-CRE_ETH_PRIVATE_KEY=0000000000000000000000000000000000000000000000000000000000000001
+CRE_ETH_PRIVATE_KEY=<your-funded-private-key>
 ```
 
-Note: Make sure your `workflow.yaml` file is pointing to the config.json, example:
-
-```yaml
-staging-settings:
-  user-workflow:
-    workflow-name: "hello-world"
-  workflow-artifacts:
-    workflow-path: "./main.ts"
-    config-path: "./config.json"
-```
-
-## 2. Install dependencies
-
-If `bun` is not already installed, see https://bun.com/docs/installation for installing in your environment.
+### 2. Install dependencies
 
 ```bash
-cd <workflow-name> && bun install
+cd ssl && bun install
 ```
 
-Example: For a workflow directory named `hello-world` the command would be:
+### 3. Update config
+
+Edit `config.staging.json` with deployed contract addresses:
+
+```json
+{
+  "vaultAddress": "<StealthSettlementVault address>",
+  "chainSelector": "16015286601757825753",
+  "authorizedEVMAddress": "<your EVM address authorized to trigger>"
+}
+```
+
+Token addresses (`asset` and `quoteToken`) are provided by users per order via HTTP payload.
+
+### 4. Simulate
+
+From the project root (`cre/`):
+
+**Submit a sell order (from file):**
 
 ```bash
-cd hello-world && bun install
+cre workflow simulate ./ssl --non-interactive --trigger-index 0 --http-payload test-sell-order.json --target staging-settings
 ```
 
-## 3. Simulate the workflow
-
-Run the command from <b>project root directory</b>
+**Submit a buy order (inline):**
 
 ```bash
-cre workflow simulate <path-to-workflow-directory> --target=staging-settings
+cre workflow simulate ./ssl --non-interactive --trigger-index 0 --http-payload '{"worldIdProof":"zk_proof_buyer","nullifierHash":"0xdef456","asset":"0xBondToken","quoteToken":"0xUSDC","amount":"1005000000000","price":"10050","side":"BUY","stealthPublicKey":"buyer_pub_key"}' --target staging-settings
 ```
 
-Example: For workflow named `hello-world` the command would be:
+**Interactive mode:**
 
 ```bash
-cre workflow simulate ./hello-world --target=staging-settings
+cre workflow simulate ./ssl --target staging-settings
 ```
+
+### HTTP Payload Format
+
+```json
+{
+  "worldIdProof": "zk_proof_...",
+  "nullifierHash": "0x...",
+  "asset": "0xBondTokenAddress",
+  "quoteToken": "0xUSDCAddress",
+  "amount": "10000000000000000000000",
+  "price": "10050",
+  "side": "SELL",
+  "stealthPublicKey": "stealth_pub_key_..."
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `worldIdProof` | Zero-knowledge proof from World ID |
+| `nullifierHash` | Unique hash preventing double-participation |
+| `asset` | Token address to trade |
+| `quoteToken` | Settlement token address |
+| `amount` | Token amount (in smallest unit) |
+| `price` | Price in cents (e.g. 10050 = $100.50) |
+| `side` | `"BUY"` or `"SELL"` |
+| `stealthPublicKey` | User's one-time stealth public key |
