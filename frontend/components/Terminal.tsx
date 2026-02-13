@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { Icon, Card, Button, Badge } from './UI';
-import { SpendingKeypair } from '../lib/stealth';
+import { SpendingKeypair, deriveStealthPrivateKey, saveStealthKey } from '../lib/stealth';
 import { useConnection, useSignMessage } from 'wagmi';
 
 export const Terminal: React.FC = () => {
   const [side, setSide] = useState<'BUY' | 'SELL'>('BUY');
   const [privacyLevel, setPrivacyLevel] = useState(3);
   const [spendingKeypair, setSpendingKeypair] = useState<SpendingKeypair | null>(null);
-  const [status, setStatus] = useState<'IDLE' | 'SIGNING' | 'ENCRYPTING' | 'MATCHING' | 'SETTLED'>('IDLE');
+  const [status, setStatus] = useState<'IDLE' | 'SIGNING' | 'SENDING' | 'ENCRYPTING' | 'MATCHING' | 'SETTLED'>('IDLE');
+  const [assetSymbol, setAssetSymbol] = useState<'TBILL' | 'PAXG'>('TBILL');
+  const [amount, setAmount] = useState('50000');
+  const [price, setPrice] = useState('98.40');
   
   const { address: eoaAddress, isConnected } = useConnection();
   const { signMessageAsync } = useSignMessage();
@@ -36,28 +39,74 @@ export const Terminal: React.FC = () => {
     }
 
     try {
+        const nullifierHash = localStorage.getItem("ssl_nullifier_hash");
+        if (!nullifierHash) {
+            alert("No verified identity found. Please verify with World ID first.");
+            return;
+        }
+
         setStatus('SIGNING');
         
         // 1. Sign Authorization Message with EOA
-        const message = `Authorize SSL Order: ${side} 50,000 UNITS @ 98.40 USDC\nRecipient: ${spendingKeypair.publicKey}\nNonce: ${Date.now()}`;
+        const message = `Authorize SSL Order: ${side} ${amount} ${assetSymbol} @ ${price} USDC\nRecipient: ${spendingKeypair.publicKey}\nNonce: ${Date.now()}`;
         console.log("Requesting EOA signature...");
         
-        // In wagmi v3, signMessageAsync typically takes { message }
-        // If it requires account, we pass the connected eoaAddress
-        await signMessageAsync({ message, account: eoaAddress });
+        await signMessageAsync({ message, account: eoaAddress as `0x${string}` });
 
-        // 2. Encrypt & Place (Simulated)
-        setStatus('ENCRYPTING');
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        // 2. Submit to Backend
+        setStatus('SENDING');
+        const orderPayload = {
+            nullifierHash,
+            asset: assetSymbol,
+            quoteToken: "USDC",
+            amount,
+            price,
+            side,
+            stealthPublicKey: spendingKeypair.publicKey
+        };
+
+        const response = await fetch("http://localhost:3001/api/order", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(orderPayload)
+        });
+
+        if (!response.ok) {
+            const errData = await response.json();
+            throw new Error(errData.error || "Order submission failed");
+        }
+
+        const result = await response.json();
+        console.log("Order result:", result);
+
+        // UI Feedback sequence based on CRE state
+        const creData = result.cre;
+        if (creData?.status === 'settled') {
+            setStatus('SETTLED');
+            
+            // Derive and save the stealth key for this settlement
+            try {
+                const ephemeralKey = side === 'BUY' ? creData.ephemeralPublicKeyBuyer : creData.ephemeralPublicKeySeller;
+                const stealthAddr = side === 'BUY' ? creData.stealthBuyer : creData.stealthSeller;
+                
+                const derivedPriv = deriveStealthPrivateKey(spendingKeypair.privateKey, ephemeralKey);
+                saveStealthKey(creData.orderId, stealthAddr, derivedPriv, ephemeralKey);
+                
+                console.log("Stealth key derived and saved for address:", stealthAddr);
+            } catch (deriveError) {
+                console.error("Failed to derive stealth key:", deriveError);
+            }
+        } else {
+            setStatus('MATCHING'); // Queued in matching engine
+        }
         
-        setStatus('MATCHING');
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        setStatus('SETTLED');
         setTimeout(() => setStatus('IDLE'), 5000);
 
-    } catch (err) {
+    } catch (err: any) {
         console.error("Order failed:", err);
+        alert(`Order failed: ${err.message || String(err)}`);
         setStatus('IDLE');
     }
   };
@@ -95,10 +144,13 @@ export const Terminal: React.FC = () => {
                <div className="space-y-2 relative bg-surface-dark/95 p-4 border border-border-dark backdrop-blur-sm">
                   <label className="text-[10px] text-primary font-mono uppercase tracking-wider block mb-1">Asset Class</label>
                   <div className="relative">
-                     <select className="w-full bg-black border border-border-dark text-white text-sm px-3 py-2.5 focus:ring-1 focus:ring-primary focus:border-primary appearance-none font-mono rounded-none">
-                        <option>US T-Bill (Short-Term)</option>
-                        <option>Paxos Gold (PAXG)</option>
-                        <option>Corporate Bonds (INV-G)</option>
+                     <select 
+                        className="w-full bg-black border border-border-dark text-white text-sm px-3 py-2.5 focus:ring-1 focus:ring-primary focus:border-primary appearance-none font-mono rounded-none"
+                        value={assetSymbol}
+                        onChange={(e) => setAssetSymbol(e.target.value as any)}
+                     >
+                        <option value="TBILL">US T-Bill (Short-Term)</option>
+                        <option value="PAXG">Paxos Gold (PAXG)</option>
                      </select>
                      <Icon name="expand_more" className="absolute right-3 top-2.5 text-primary pointer-events-none text-lg" />
                   </div>
@@ -135,7 +187,13 @@ export const Terminal: React.FC = () => {
                         <span className="text-[10px] text-primary font-mono cursor-pointer underline decoration-primary/50">Max</span>
                      </div>
                      <div className="relative">
-                        <input className="w-full bg-black border border-border-dark text-white font-mono text-sm px-3 py-2.5 focus:ring-1 focus:ring-primary focus:border-primary text-right rounded-none" placeholder="0.00" defaultValue="50,000" type="text" />
+                        <input 
+                            className="w-full bg-black border border-border-dark text-white font-mono text-sm px-3 py-2.5 focus:ring-1 focus:ring-primary focus:border-primary text-right rounded-none" 
+                            placeholder="0.00" 
+                            value={amount}
+                            onChange={(e) => setAmount(e.target.value)}
+                            type="text" 
+                        />
                         <span className="absolute left-3 top-2.5 text-slate-600 font-mono text-xs">UNITS</span>
                      </div>
                   </div>
@@ -145,7 +203,13 @@ export const Terminal: React.FC = () => {
                         <span className="text-[10px] text-slate-500 font-mono">Mid: <span className="text-white">98.42</span></span>
                      </div>
                      <div className="relative">
-                        <input className="w-full bg-black border border-border-dark text-white font-mono text-sm px-3 py-2.5 focus:ring-1 focus:ring-primary focus:border-primary text-right rounded-none" placeholder="0.00" defaultValue="98.40" type="text" />
+                        <input 
+                            className="w-full bg-black border border-border-dark text-white font-mono text-sm px-3 py-2.5 focus:ring-1 focus:ring-primary focus:border-primary text-right rounded-none" 
+                            placeholder="0.00" 
+                            value={price}
+                            onChange={(e) => setPrice(e.target.value)}
+                            type="text" 
+                        />
                         <span className="absolute left-3 top-2.5 text-slate-600 font-mono text-xs">USDC</span>
                      </div>
                   </div>
@@ -178,6 +242,7 @@ export const Terminal: React.FC = () => {
                 disabled={status !== 'IDLE'}
                >
                 {status === 'SIGNING' ? "Requesting Signature..." :
+                 status === 'SENDING' ? "Sending to Enclave..." :
                  status === 'ENCRYPTING' ? "Encrypting Order..." :
                  status === 'MATCHING' ? "Matching Engine..." :
                  status === 'SETTLED' ? "Order Settled!" :
@@ -210,7 +275,7 @@ export const Terminal: React.FC = () => {
                  {/* Steps */}
                  {[
                    { id: '01', title: 'Authority Sign', desc: 'EOA signing order authorization.', active: status === 'SIGNING' },
-                   { id: '02', title: 'Enclave Encryption', desc: 'Symmetric encryption via TEE.', active: status === 'ENCRYPTING' },
+                   { id: '02', title: 'Enclave Submission', desc: 'Secure transit to CRE.', active: status === 'SENDING' },
                    { id: '03', title: 'Matching', desc: 'Dark pool liquidity search.', active: status === 'MATCHING' },
                    { id: '04', title: 'Settlement', desc: 'Report submitted to Vault.', active: status === 'SETTLED' }
                  ].map((step, i) => (

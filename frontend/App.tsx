@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, NavItem } from './types';
+import { Routes, Route, NavLink, useLocation } from 'react-router-dom';
 import { Icon } from './components/UI';
 import { loadSpendingKeypair, getMetaAddress } from './lib/stealth';
 import { Portfolio } from './components/Portfolio';
@@ -32,18 +32,18 @@ const config = getDefaultConfig({
 
 const queryClient = new QueryClient();
 
-const navItems: NavItem[] = [
-  { id: View.TERMINAL, label: 'Trade', icon: 'candlestick_chart', iconType: 'outlined' },
-  { id: View.DASHBOARD, label: 'Portfolio', icon: 'pie_chart', iconType: 'outlined' },
-  { id: View.COMPLIANCE, label: 'Compliance', icon: 'verified_user', iconType: 'outlined' },
-  { id: View.HISTORY, label: 'History', icon: 'history', iconType: 'outlined' },
+const navItems = [
+  { path: '/', label: 'Trade', icon: 'candlestick_chart', iconType: 'outlined' },
+  { path: '/portfolio', label: 'Portfolio', icon: 'pie_chart', iconType: 'outlined' },
+  { path: '/compliance', label: 'Compliance', icon: 'verified_user', iconType: 'outlined' },
+  { path: '/history', label: 'History', icon: 'history', iconType: 'outlined' },
 ];
 
 function AppContent() {
-  const [activeView, setActiveView] = useState<View>(View.TERMINAL);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [stealthAddress, setStealthAddress] = useState<string>("");
+  const location = useLocation();
   
   const { address: eoaAddress, isConnected } = useConnection();
 
@@ -65,15 +65,7 @@ function AppContent() {
 
   const formattedEOA = eoaAddress ? eoaAddress.slice(0, 6) + "..." + eoaAddress.slice(-4) : "Connect Wallet";
 
-  const renderView = () => {
-    switch (activeView) {
-      case View.DASHBOARD: return <Portfolio />;
-      case View.TERMINAL: return <Terminal />;
-      case View.COMPLIANCE: return <Compliance />;
-      case View.HISTORY: return <History />;
-      default: return <div className="p-10 text-center text-slate-500">Module Under Construction</div>;
-    }
-  };
+
 
   return (
     <div className="flex h-screen w-full bg-background-dark text-slate-300 font-display">
@@ -92,11 +84,11 @@ function AppContent() {
 
         <nav className="flex flex-col gap-4">
           {navItems.map((item) => {
-            const isActive = activeView === item.id;
+            const isActive = location.pathname === item.path || (item.path === '/' && location.pathname === '/');
             return (
-              <button
-                key={item.id}
-                onClick={() => setActiveView(item.id)}
+              <NavLink
+                key={item.path}
+                to={item.path}
                 className={`group relative w-10 h-10 flex items-center justify-center transition-all duration-300 ${isActive ? 'text-primary' : 'text-slate-500 hover:text-slate-200'}`}
               >
                 <Icon name={item.icon} className={`text-2xl transition-all ${isActive ? 'scale-110 drop-shadow-[0_0_5px_rgba(13,242,89,0.5)]' : ''}`} />
@@ -106,7 +98,7 @@ function AppContent() {
                 <span className="absolute left-14 bg-surface-lighter border border-border-dark px-2 py-1 text-xs text-primary opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 font-mono shadow-xl pointer-events-none">
                   {item.label}
                 </span>
-              </button>
+              </NavLink>
             );
           })}
         </nav>
@@ -166,7 +158,12 @@ function AppContent() {
          {/* Content View */}
          <main className="flex-1 overflow-hidden relative">
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(13,242,89,0.03)_0%,transparent_50%)] pointer-events-none"></div>
-            {renderView()}
+            <Routes>
+              <Route path="/" element={<Terminal />} />
+              <Route path="/portfolio" element={<Portfolio />} />
+              <Route path="/compliance" element={<Compliance />} />
+              <Route path="/history" element={<History />} />
+            </Routes>
          </main>
       </div>
     </div>

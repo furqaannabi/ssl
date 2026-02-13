@@ -30,7 +30,11 @@ export const Portfolio: React.FC = () => {
   const [isFundingOpen, setIsFundingOpen] = useState(false);
 
   useEffect(() => {
-    setStealthKeys(loadStealthKeys());
+    const refreshKeys = () => setStealthKeys(loadStealthKeys());
+    refreshKeys();
+    
+    window.addEventListener('storage', refreshKeys);
+    return () => window.removeEventListener('storage', refreshKeys);
   }, []);
 
   return (
