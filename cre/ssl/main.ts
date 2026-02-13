@@ -266,16 +266,18 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
     )
   );
 
-  // Encode settle report
+  // Encode settle report (includes nullifiers for vault balance checks)
   const reportData = encodeAbiParameters(
     parseAbiParameters(
-      "uint8 reportType, bytes32 orderId, address stealthBuyer, address stealthSeller, address tokenA, address tokenB, uint256 amountA, uint256 amountB"
+      "uint8 reportType, bytes32 orderId, address stealthBuyer, address stealthSeller, uint256 buyerNullifier, uint256 sellerNullifier, address tokenA, address tokenB, uint256 amountA, uint256 amountB"
     ),
     [
       1,
       orderId as `0x${string}`,
       buyerStealth.stealthAddress as `0x${string}`,
       sellerStealth.stealthAddress as `0x${string}`,
+      BigInt(match.buyer.nullifierHash),
+      BigInt(match.seller.nullifierHash),
       match.seller.order.asset as `0x${string}`,
       match.seller.order.quoteToken as `0x${string}`,
       tradeAmount,

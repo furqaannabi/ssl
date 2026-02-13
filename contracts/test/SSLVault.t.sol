@@ -14,15 +14,16 @@ contract SSLVaultTest is Test {
     MockUSDC public usdc;
 
     address public forwarder = makeAddr("forwarder");
-    address public funder = makeAddr("funder");
+    address public seller = makeAddr("seller");
+    address public buyer = makeAddr("buyer");
     address public stealthBuyer = makeAddr("stealthBuyer");
     address public stealthSeller = makeAddr("stealthSeller");
 
     uint256 public constant BOND_AMOUNT = 10_000e18;
     uint256 public constant USDC_AMOUNT = 1_005_000e6;
 
-    uint256 public constant NULLIFIER_1 = 100;
-    uint256 public constant NULLIFIER_2 = 200;
+    uint256 public constant NULLIFIER_SELLER = 100;
+    uint256 public constant NULLIFIER_BUYER = 200;
 
     function setUp() public {
         bondToken = new MockBondToken();
@@ -30,9 +31,9 @@ contract SSLVaultTest is Test {
 
         vault = new StealthSettlementVault(forwarder);
 
-        // Mint tokens to funder
-        bondToken.mint(funder, BOND_AMOUNT);
-        usdc.mint(funder, USDC_AMOUNT);
+        // Mint tokens
+        bondToken.mint(seller, BOND_AMOUNT);
+        usdc.mint(buyer, USDC_AMOUNT);
     }
 
     // ── Helpers ──
@@ -60,83 +61,132 @@ contract SSLVaultTest is Test {
         bytes32 orderId,
         address _stealthBuyer,
         address _stealthSeller,
+        uint256 _buyerNullifier,
+        uint256 _sellerNullifier,
         address tokenA,
         address tokenB,
         uint256 amountA,
         uint256 amountB
     ) internal pure returns (bytes memory) {
-        return abi.encode(uint8(1), orderId, _stealthBuyer, _stealthSeller, tokenA, tokenB, amountA, amountB);
+        return abi.encode(
+            uint8(1), orderId, _stealthBuyer, _stealthSeller,
+            _buyerNullifier, _sellerNullifier,
+            tokenA, tokenB, amountA, amountB
+        );
     }
 
     function _settleViaReport(
         bytes32 orderId,
-        address _stealthBuyer,
-        address _stealthSeller,
-        address tokenA,
-        address tokenB,
         uint256 amountA,
         uint256 amountB
     ) internal {
         bytes memory report = _encodeSettleReport(
-            orderId, _stealthBuyer, _stealthSeller, tokenA, tokenB, amountA, amountB
+            orderId, stealthBuyer, stealthSeller,
+            NULLIFIER_BUYER, NULLIFIER_SELLER,
+            address(bondToken), address(usdc),
+            amountA, amountB
         );
         vm.prank(forwarder);
         vault.onReport("", report);
     }
 
+    function _setupFundedVault() internal {
+        // Seller deposits bondToken, buyer deposits USDC
+        _fundAfterVerify(seller, address(bondToken), BOND_AMOUNT, NULLIFIER_SELLER);
+        _fundAfterVerify(buyer, address(usdc), USDC_AMOUNT, NULLIFIER_BUYER);
+    }
+
     // ── Verify via Report ──
 
     function test_VerifyViaReport() public {
-        _verifyViaReport(NULLIFIER_1);
-        assertTrue(vault.isVerified(NULLIFIER_1));
+        _verifyViaReport(NULLIFIER_SELLER);
+        assertTrue(vault.isVerified(NULLIFIER_SELLER));
     }
 
     function test_VerifyEmitsEvent() public {
         vm.expectEmit(true, false, false, false);
-        emit ISSLVault.Verified(NULLIFIER_1);
-        _verifyViaReport(NULLIFIER_1);
+        emit ISSLVault.Verified(NULLIFIER_SELLER);
+        _verifyViaReport(NULLIFIER_SELLER);
     }
 
     function test_RevertVerifyAlreadyVerified() public {
-        _verifyViaReport(NULLIFIER_1);
+        _verifyViaReport(NULLIFIER_SELLER);
 
-        bytes memory report = abi.encode(uint8(0), NULLIFIER_1);
+        bytes memory report = abi.encode(uint8(0), NULLIFIER_SELLER);
         vm.prank(forwarder);
         vm.expectRevert("SSL: already verified");
         vault.onReport("", report);
     }
 
-    // ── Fund ──
+    // ── Fund + Nullifier Binding ──
 
-    function test_FundAfterVerify() public {
-        _fundAfterVerify(funder, address(bondToken), BOND_AMOUNT, NULLIFIER_1);
+    function test_FundBindsNullifierToWallet() public {
+        _fundAfterVerify(seller, address(bondToken), BOND_AMOUNT, NULLIFIER_SELLER);
+
+        assertEq(vault.nullifierOwner(NULLIFIER_SELLER), seller);
+        assertEq(vault.balances(NULLIFIER_SELLER, address(bondToken)), BOND_AMOUNT);
         assertEq(bondToken.balanceOf(address(vault)), BOND_AMOUNT);
     }
 
-    function test_FundEmitsEvent() public {
-        _verifyViaReport(NULLIFIER_1);
+    function test_FundMultipleDeposits() public {
+        _verifyViaReport(NULLIFIER_SELLER);
 
-        vm.prank(funder);
+        // First deposit
+        bondToken.mint(seller, BOND_AMOUNT);
+        vm.prank(seller);
+        bondToken.approve(address(vault), BOND_AMOUNT);
+        vm.prank(seller);
+        vault.fund(address(bondToken), BOND_AMOUNT, NULLIFIER_SELLER);
+
+        // Second deposit (same nullifier, same wallet)
+        bondToken.mint(seller, BOND_AMOUNT);
+        vm.prank(seller);
+        bondToken.approve(address(vault), BOND_AMOUNT);
+        vm.prank(seller);
+        vault.fund(address(bondToken), BOND_AMOUNT, NULLIFIER_SELLER);
+
+        assertEq(vault.balances(NULLIFIER_SELLER, address(bondToken)), BOND_AMOUNT * 2);
+    }
+
+    function test_FundEmitsEvent() public {
+        _verifyViaReport(NULLIFIER_SELLER);
+
+        vm.prank(seller);
         bondToken.approve(address(vault), BOND_AMOUNT);
 
         vm.expectEmit(true, false, false, true);
-        emit ISSLVault.Funded(address(bondToken), BOND_AMOUNT, NULLIFIER_1);
+        emit ISSLVault.Funded(address(bondToken), BOND_AMOUNT, NULLIFIER_SELLER);
 
-        vm.prank(funder);
-        vault.fund(address(bondToken), BOND_AMOUNT, NULLIFIER_1);
+        vm.prank(seller);
+        vault.fund(address(bondToken), BOND_AMOUNT, NULLIFIER_SELLER);
     }
 
     function test_RevertFundZeroAmount() public {
-        _verifyViaReport(NULLIFIER_1);
-        vm.prank(funder);
+        _verifyViaReport(NULLIFIER_SELLER);
+        vm.prank(seller);
         vm.expectRevert("SSL: zero amount");
-        vault.fund(address(bondToken), 0, NULLIFIER_1);
+        vault.fund(address(bondToken), 0, NULLIFIER_SELLER);
     }
 
     function test_RevertFundNotVerified() public {
-        vm.prank(funder);
+        vm.prank(seller);
         vm.expectRevert("SSL: not verified");
-        vault.fund(address(bondToken), BOND_AMOUNT, NULLIFIER_1);
+        vault.fund(address(bondToken), BOND_AMOUNT, NULLIFIER_SELLER);
+    }
+
+    function test_RevertFundWrongWallet() public {
+        // Seller funds first, binding nullifier
+        _fundAfterVerify(seller, address(bondToken), BOND_AMOUNT, NULLIFIER_SELLER);
+
+        // Attacker tries to use same nullifier
+        address attacker = makeAddr("attacker");
+        bondToken.mint(attacker, BOND_AMOUNT);
+        vm.prank(attacker);
+        bondToken.approve(address(vault), BOND_AMOUNT);
+
+        vm.prank(attacker);
+        vm.expectRevert("SSL: not owner");
+        vault.fund(address(bondToken), BOND_AMOUNT, NULLIFIER_SELLER);
     }
 
     // ── IReceiver / ERC165 ──
@@ -152,44 +202,37 @@ contract SSLVaultTest is Test {
     // ── Settlement via onReport ──
 
     function test_SettleViaReport() public {
-        _fundAfterVerify(funder, address(bondToken), BOND_AMOUNT, NULLIFIER_1);
-
-        usdc.mint(funder, USDC_AMOUNT);
-        _fundAfterVerify(funder, address(usdc), USDC_AMOUNT, NULLIFIER_2);
+        _setupFundedVault();
 
         bytes32 orderId = keccak256("order_1");
-        _settleViaReport(
-            orderId, stealthBuyer, stealthSeller,
-            address(bondToken), address(usdc),
-            BOND_AMOUNT, USDC_AMOUNT
-        );
+        _settleViaReport(orderId, BOND_AMOUNT, USDC_AMOUNT);
 
-        assertEq(bondToken.balanceOf(stealthSeller), BOND_AMOUNT);
-        assertEq(usdc.balanceOf(stealthBuyer), USDC_AMOUNT);
+        // Stealth addresses received tokens
+        assertEq(bondToken.balanceOf(stealthBuyer), BOND_AMOUNT);
+        assertEq(usdc.balanceOf(stealthSeller), USDC_AMOUNT);
         assertTrue(vault.settledOrders(orderId));
+
+        // Balances deducted
+        assertEq(vault.balances(NULLIFIER_SELLER, address(bondToken)), 0);
+        assertEq(vault.balances(NULLIFIER_BUYER, address(usdc)), 0);
     }
 
     function test_SettleEmitsEvent() public {
-        _fundAfterVerify(funder, address(bondToken), BOND_AMOUNT, NULLIFIER_1);
-        usdc.mint(funder, USDC_AMOUNT);
-        _fundAfterVerify(funder, address(usdc), USDC_AMOUNT, NULLIFIER_2);
+        _setupFundedVault();
 
         bytes32 orderId = keccak256("order_event");
 
         vm.expectEmit(true, false, false, true);
         emit ISSLVault.Settled(orderId, stealthBuyer, stealthSeller);
 
-        _settleViaReport(
-            orderId, stealthBuyer, stealthSeller,
-            address(bondToken), address(usdc),
-            BOND_AMOUNT, USDC_AMOUNT
-        );
+        _settleViaReport(orderId, BOND_AMOUNT, USDC_AMOUNT);
     }
 
     function test_RevertSettleNotForwarder() public {
         address attacker = makeAddr("attacker");
         bytes memory report = _encodeSettleReport(
             keccak256("x"), stealthBuyer, stealthSeller,
+            NULLIFIER_BUYER, NULLIFIER_SELLER,
             address(bondToken), address(usdc),
             BOND_AMOUNT, USDC_AMOUNT
         );
@@ -202,24 +245,64 @@ contract SSLVaultTest is Test {
     }
 
     function test_RevertSettleAlreadySettled() public {
-        _fundAfterVerify(funder, address(bondToken), BOND_AMOUNT, NULLIFIER_1);
-        usdc.mint(funder, USDC_AMOUNT);
-        _fundAfterVerify(funder, address(usdc), USDC_AMOUNT, NULLIFIER_2);
+        _setupFundedVault();
 
         bytes32 orderId = keccak256("order_dup");
-        _settleViaReport(
-            orderId, stealthBuyer, stealthSeller,
-            address(bondToken), address(usdc),
-            BOND_AMOUNT, USDC_AMOUNT
-        );
+        _settleViaReport(orderId, BOND_AMOUNT / 2, USDC_AMOUNT / 2);
 
         vm.prank(forwarder);
         vm.expectRevert("settled");
         vault.onReport("", _encodeSettleReport(
             orderId, stealthBuyer, stealthSeller,
+            NULLIFIER_BUYER, NULLIFIER_SELLER,
             address(bondToken), address(usdc),
-            BOND_AMOUNT, USDC_AMOUNT
+            BOND_AMOUNT / 2, USDC_AMOUNT / 2
         ));
+    }
+
+    function test_RevertSettleSellerInsufficientBalance() public {
+        _setupFundedVault();
+
+        vm.prank(forwarder);
+        vm.expectRevert("SSL: seller insufficient balance");
+        vault.onReport("", _encodeSettleReport(
+            keccak256("over"), stealthBuyer, stealthSeller,
+            NULLIFIER_BUYER, NULLIFIER_SELLER,
+            address(bondToken), address(usdc),
+            BOND_AMOUNT + 1, USDC_AMOUNT
+        ));
+    }
+
+    function test_RevertSettleBuyerInsufficientBalance() public {
+        _setupFundedVault();
+
+        vm.prank(forwarder);
+        vm.expectRevert("SSL: buyer insufficient balance");
+        vault.onReport("", _encodeSettleReport(
+            keccak256("over_b"), stealthBuyer, stealthSeller,
+            NULLIFIER_BUYER, NULLIFIER_SELLER,
+            address(bondToken), address(usdc),
+            BOND_AMOUNT, USDC_AMOUNT + 1
+        ));
+    }
+
+    function test_PartialSettlement() public {
+        _setupFundedVault();
+
+        uint256 halfBond = BOND_AMOUNT / 2;
+        uint256 halfUsdc = USDC_AMOUNT / 2;
+
+        // First partial settle
+        _settleViaReport(keccak256("partial_1"), halfBond, halfUsdc);
+
+        assertEq(vault.balances(NULLIFIER_SELLER, address(bondToken)), BOND_AMOUNT - halfBond);
+        assertEq(vault.balances(NULLIFIER_BUYER, address(usdc)), USDC_AMOUNT - halfUsdc);
+
+        // Second partial settle with remaining
+        _settleViaReport(keccak256("partial_2"), BOND_AMOUNT - halfBond, USDC_AMOUNT - halfUsdc);
+
+        assertEq(vault.balances(NULLIFIER_SELLER, address(bondToken)), 0);
+        assertEq(vault.balances(NULLIFIER_BUYER, address(usdc)), 0);
     }
 
     function test_RevertUnknownReportType() public {
@@ -232,43 +315,48 @@ contract SSLVaultTest is Test {
     // ── Full flow ──
 
     function test_FullFlow() public {
-        address user1 = makeAddr("user1");
-        address user2 = makeAddr("user2");
+        // 1. CRE verifies both users
+        _verifyViaReport(NULLIFIER_SELLER);
+        _verifyViaReport(NULLIFIER_BUYER);
 
-        bondToken.mint(user1, 5_000e18);
-        usdc.mint(user2, 502_500e6);
+        assertTrue(vault.isVerified(NULLIFIER_SELLER));
+        assertTrue(vault.isVerified(NULLIFIER_BUYER));
 
-        // CRE verifies both users via reports
-        _verifyViaReport(NULLIFIER_1);
-        _verifyViaReport(NULLIFIER_2);
-
-        assertTrue(vault.isVerified(NULLIFIER_1));
-        assertTrue(vault.isVerified(NULLIFIER_2));
-
-        // Users fund after verification
-        vm.prank(user1);
+        // 2. Users fund (binds nullifier to wallet)
+        vm.prank(seller);
         bondToken.approve(address(vault), 5_000e18);
-        vm.prank(user1);
-        vault.fund(address(bondToken), 5_000e18, NULLIFIER_1);
+        vm.prank(seller);
+        vault.fund(address(bondToken), 5_000e18, NULLIFIER_SELLER);
 
-        vm.prank(user2);
+        vm.prank(buyer);
         usdc.approve(address(vault), 502_500e6);
-        vm.prank(user2);
-        vault.fund(address(usdc), 502_500e6, NULLIFIER_2);
+        vm.prank(buyer);
+        vault.fund(address(usdc), 502_500e6, NULLIFIER_BUYER);
 
-        // CRE settles via forwarder
-        _settleViaReport(
+        assertEq(vault.nullifierOwner(NULLIFIER_SELLER), seller);
+        assertEq(vault.nullifierOwner(NULLIFIER_BUYER), buyer);
+        assertEq(vault.balances(NULLIFIER_SELLER, address(bondToken)), 5_000e18);
+        assertEq(vault.balances(NULLIFIER_BUYER, address(usdc)), 502_500e6);
+
+        // 3. CRE settles (includes nullifiers for balance checks)
+        address s1Buyer = makeAddr("s1Buyer");
+        address s1Seller = makeAddr("s1Seller");
+
+        bytes memory report = _encodeSettleReport(
             keccak256("trade_1"),
-            makeAddr("s1Buyer"),
-            makeAddr("s1Seller"),
-            address(bondToken),
-            address(usdc),
-            5_000e18,
-            502_500e6
+            s1Buyer, s1Seller,
+            NULLIFIER_BUYER, NULLIFIER_SELLER,
+            address(bondToken), address(usdc),
+            5_000e18, 502_500e6
         );
+        vm.prank(forwarder);
+        vault.onReport("", report);
 
-        assertEq(bondToken.balanceOf(makeAddr("s1Seller")), 5_000e18);
-        assertEq(usdc.balanceOf(makeAddr("s1Buyer")), 502_500e6);
+        // 4. Verify final state
+        assertEq(bondToken.balanceOf(s1Buyer), 5_000e18);
+        assertEq(usdc.balanceOf(s1Seller), 502_500e6);
+        assertEq(vault.balances(NULLIFIER_SELLER, address(bondToken)), 0);
+        assertEq(vault.balances(NULLIFIER_BUYER, address(usdc)), 0);
         assertEq(bondToken.balanceOf(address(vault)), 0);
         assertEq(usdc.balanceOf(address(vault)), 0);
     }

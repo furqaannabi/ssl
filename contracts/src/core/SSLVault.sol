@@ -11,21 +11,32 @@ import "./ReceiverTemplate.sol";
  * @title StealthSettlementVault
  * @notice Stealth Settlement Layer
  * @dev
- *   1. User sends World ID proof to Backend → Backend sends to CRE
- *   2. CRE verifies World ID → sends report(type=0) → vault marks nullifier verified
- *   3. User calls fund() → vault checks isVerified, accepts deposit
- *   4. Backend sends order to CRE → CRE matches → sends report(type=1) → vault settles
+ *   1. CRE verifies World ID -> report(type=0) -> vault marks nullifier verified
+ *   2. User calls fund() -> vault binds nullifier to wallet, tracks balance
+ *   3. CRE matches orders -> report(type=1) -> vault checks balances, settles
  *
  *   Report types:
- *     0 = verify  — (uint8, uint256 nullifierHash)
- *     1 = settle   — (uint8, bytes32 orderId, address stealthBuyer, address stealthSeller,
- *                      address tokenA, address tokenB, uint256 amountA, uint256 amountB)
+ *     0 = verify  -- (uint8, uint256 nullifierHash)
+ *     1 = settle  -- (uint8, bytes32 orderId, address stealthBuyer, address stealthSeller,
+ *                     uint256 buyerNullifier, uint256 sellerNullifier,
+ *                     address tokenA, address tokenB, uint256 amountA, uint256 amountB)
+ *
+ *   Security:
+ *     - Nullifier permanently bound to first wallet that funds (prevents identity sharing)
+ *     - Per-nullifier balance tracking (prevents over-settlement)
+ *     - Settlement deducts from balances before transferring (never trust CRE blindly)
  */
 contract StealthSettlementVault is ISSLVault, ReceiverTemplate, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     /// @notice nullifierHash => verified
     mapping(uint256 => bool) public override isVerified;
+
+    /// @notice nullifierHash => bound wallet (set on first fund, immutable)
+    mapping(uint256 => address) public override nullifierOwner;
+
+    /// @notice nullifierHash => token => balance
+    mapping(uint256 => mapping(address => uint256)) public override balances;
 
     /// @notice orderId => settled
     mapping(bytes32 => bool) public override settledOrders;
@@ -47,13 +58,23 @@ contract StealthSettlementVault is ISSLVault, ReceiverTemplate, ReentrancyGuard 
         require(amount > 0, "SSL: zero amount");
         require(isVerified[nullifierHash], "SSL: not verified");
 
+        // Bind nullifier to wallet on first fund
+        if (nullifierOwner[nullifierHash] == address(0)) {
+            nullifierOwner[nullifierHash] = msg.sender;
+        } else {
+            require(nullifierOwner[nullifierHash] == msg.sender, "SSL: not owner");
+        }
+
+        // Track balance per nullifier per token
+        balances[nullifierHash][token] += amount;
+
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
 
         emit Funded(token, amount, nullifierHash);
     }
 
     // ──────────────────────────────────────────────
-    //  Reports (via KeystoneForwarder → onReport)
+    //  Reports (via KeystoneForwarder -> onReport)
     // ──────────────────────────────────────────────
 
     function _processReport(bytes calldata report) internal override nonReentrant {
@@ -81,16 +102,31 @@ contract StealthSettlementVault is ISSLVault, ReceiverTemplate, ReentrancyGuard 
             bytes32 orderId,
             address stealthBuyer,
             address stealthSeller,
+            uint256 buyerNullifier,
+            uint256 sellerNullifier,
             address tokenA,
             address tokenB,
             uint256 amountA,
             uint256 amountB
-        ) = abi.decode(report, (uint8, bytes32, address, address, address, address, uint256, uint256));
+        ) = abi.decode(
+            report,
+            (uint8, bytes32, address, address, uint256, uint256, address, address, uint256, uint256)
+        );
 
         require(!settledOrders[orderId], "settled");
 
-        IERC20(tokenA).safeTransfer(stealthSeller, amountA);
-        IERC20(tokenB).safeTransfer(stealthBuyer, amountB);
+        // Enforce balance checks — never trust CRE blindly
+        // Seller provides tokenA, buyer provides tokenB
+        require(balances[sellerNullifier][tokenA] >= amountA, "SSL: seller insufficient balance");
+        require(balances[buyerNullifier][tokenB] >= amountB, "SSL: buyer insufficient balance");
+
+        // Deduct balances
+        balances[sellerNullifier][tokenA] -= amountA;
+        balances[buyerNullifier][tokenB] -= amountB;
+
+        // Transfer to stealth addresses
+        IERC20(tokenA).safeTransfer(stealthBuyer, amountA);
+        IERC20(tokenB).safeTransfer(stealthSeller, amountB);
 
         settledOrders[orderId] = true;
 
