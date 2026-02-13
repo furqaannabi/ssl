@@ -50,7 +50,11 @@ export const Portfolio: React.FC = () => {
           <h2 className="text-xl font-bold text-white font-display tracking-tight uppercase">Portfolio Overview</h2>
           <p className="text-[10px] text-slate-500 font-mono tracking-widest mt-1">CONFIDENTIAL ASSET MANAGEMENT SYSTEM</p>
         </div>
-        <Button variant="primary" icon="add" onClick={() => setIsFundingOpen(true)}>
+        <Button variant="primary" icon="add" onClick={() => {
+          console.log("Deposit Assets button clicked - opening modal");
+          setIsFundingOpen(true);
+          
+        }}>
           Deposit Assets
         </Button>
       </div>

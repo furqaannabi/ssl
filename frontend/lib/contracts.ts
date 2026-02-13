@@ -3,9 +3,15 @@ import { parseUnits, encodeFunctionData, type Address, type Hex } from 'viem';
 // Constants (Placeholders - to be filled with actual deployment addresses)
 export const VAULT_ADDRESS: Address = "0x8920C3A0C83526E69D8A9E32BD4F4f218A720C3A";
 export const TOKENS = {
-    USDC: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" as Address,
+    USDC: "0x036CbD53842c5426634e7929541eC2318f3dCF7e" as Address,
     PAXG: "0x45804880De22913dAFE09f4980848ECE6Eec956D" as Address,
-    TBILL: "0x..." as Address
+    TBILL: "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" as Address
+};
+
+export const TOKEN_DECIMALS: Record<string, number> = {
+    USDC: 6,
+    PAXG: 18,
+    TBILL: 18
 };
 
 // ABI fragments
@@ -20,6 +26,30 @@ export const VAULT_ABI = [
             { name: 'nullifierHash', type: 'uint256' }
         ],
         outputs: []
+    },
+    {
+        name: 'isVerified',
+        type: 'function',
+        stateMutability: 'view',
+        inputs: [{ name: 'nullifierHash', type: 'uint256' }],
+        outputs: [{ type: 'bool' }]
+    },
+    {
+        name: 'nullifierOwner',
+        type: 'function',
+        stateMutability: 'view',
+        inputs: [{ name: 'nullifierHash', type: 'uint256' }],
+        outputs: [{ type: 'address' }]
+    },
+    {
+        name: 'balances',
+        type: 'function',
+        stateMutability: 'view',
+        inputs: [
+            { name: 'nullifierHash', type: 'uint256' },
+            { name: 'token', type: 'address' }
+        ],
+        outputs: [{ type: 'uint256' }]
     }
 ] as const;
 

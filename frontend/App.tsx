@@ -165,7 +165,7 @@ function AppContent() {
 
          {/* Content View */}
          <main className="flex-1 overflow-hidden relative">
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(13,242,89,0.03)_0%,transparent_50%)]"></div>
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(13,242,89,0.03)_0%,transparent_50%)] pointer-events-none"></div>
             {renderView()}
          </main>
       </div>

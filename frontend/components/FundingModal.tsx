@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { Modal, Button, Icon } from './UI';
-import { VAULT_ADDRESS, TOKENS } from '../lib/contracts';
-import { useConnection } from 'wagmi';
+import { VAULT_ADDRESS, TOKENS, TOKEN_DECIMALS, ERC20_ABI, VAULT_ABI } from '../lib/contracts';
+import { useConnection, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { baseSepolia } from 'wagmi/chains';
+import { parseUnits } from 'viem';
 
 interface FundingModalProps {
     isOpen: boolean;
@@ -16,7 +18,15 @@ export const FundingModal: React.FC<FundingModalProps> = ({
     const [amount, setAmount] = useState("1000");
     const [token, setToken] = useState<keyof typeof TOKENS>("USDC");
     const [error, setError] = useState<string | null>(null);
-    const { isConnected, address: eoaAddress } = useConnection();
+    const [txHash, setTxHash] = useState<`0x${string}` | undefined>();
+    
+    const { isConnected, address: eoaAddress , chain} = useConnection();
+    const { writeContract } = useWriteContract();
+
+    // Hook to wait for receipts
+    const { isLoading: isWaitingForReceipt, isSuccess: isTxSuccess } = useWaitForTransactionReceipt({
+        hash: txHash,
+    });
 
     const handleFund = async () => {
         if (!isConnected) {
@@ -31,24 +41,67 @@ export const FundingModal: React.FC<FundingModalProps> = ({
         }
 
         setError(null);
-        setStep('APPROVING');
         
         try {
-            // Simulate approval (direct wallet interaction)
-            console.log(`Approving ${VAULT_ADDRESS} to spend ${amount} ${token}...`);
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            const decimals = TOKEN_DECIMALS[token] || 18;
+            const amountUnits = parseUnits(amount, decimals);
             
-            setStep('FUNDING');
-            // Simulate fund(token, amount, nullifierHash)
-            console.log(`Funding vault with ${amount} ${token} for nullifier ${nullifierHash}...`);
-            await new Promise(resolve => setTimeout(resolve, 2500));
+            // 1. APPROVAL PHASE
+            setStep('APPROVING');
+            console.log(`Requesting approval for ${amount} ${token}...`);
             
-            setStep('SUCCESS');
+            const approveHash = await writeContract({
+                address: TOKENS[token] as `0x${string}`,
+                abi: ERC20_ABI,
+                functionName: 'approve',
+                args: [VAULT_ADDRESS as `0x${string}`, amountUnits],
+                account: eoaAddress as `0x${string}`,
+                chain,
+            });
+            
+            setTxHash(approveHash);
         } catch (err: any) {
+            console.error("Funding failed:", err);
             setError(err.message || "Transaction failed");
             setStep('DETAILS');
         }
     };
+
+    // Sequence controller for the two-step process
+    React.useEffect(() => {
+        if (isTxSuccess && txHash) {
+            if (step === 'APPROVING') {
+                // Approval confirmed, now start funding
+                const startFunding = async () => {
+                    setStep('FUNDING');
+                    try {
+                        const nullifierHash = localStorage.getItem("ssl_nullifier_hash");
+                        const decimals = TOKEN_DECIMALS[token] || 18;
+                        const amountUnits = parseUnits(amount, decimals);
+                        
+                        console.log(`Funding vault with ${amount} ${token}...`);
+                        const fundHash = await writeContract({
+                            address: VAULT_ADDRESS as `0x${string}`,
+                            abi: VAULT_ABI,
+                            functionName: 'fund',
+                            args: [TOKENS[token] as `0x${string}`, amountUnits, BigInt(nullifierHash!)],
+                            account: eoaAddress as `0x${string}`,
+                            chain,
+                        });
+                        setTxHash(fundHash);
+                    } catch (err: any) {
+                        setError(err.message || "Funding failed");
+                        setStep('DETAILS');
+                    }
+                };
+                startFunding();
+            } else if (step === 'FUNDING') {
+                // Funding confirmed
+                setStep('SUCCESS');
+                setTxHash(undefined);
+            }
+        }
+    }, [isTxSuccess, txHash, step, token, amount, writeContract, eoaAddress, chain]);
 
     return (
         <Modal isOpen={isOpen} onClose={onClose} title="Deposit Confidential Assets">
@@ -105,12 +158,26 @@ export const FundingModal: React.FC<FundingModalProps> = ({
 
                 {(step === 'APPROVING' || step === 'FUNDING') && (
                     <div className="py-12 flex flex-col items-center justify-center space-y-4 text-center">
-                        <div className="w-12 h-12 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                        <div className="w-12 h-12 border-2 border-primary border-t-transparent rounded-full animate-spin relative">
+                            {isWaitingForReceipt && (
+                                <div className="absolute inset-0 bg-primary/20 rounded-full animate-ping"></div>
+                            )}
+                        </div>
                         <div>
                             <h3 className="text-white font-bold uppercase tracking-wider text-xs">
-                                {step === 'APPROVING' ? 'Requesting Approval...' : 'Processing Deposit...'}
+                                {isWaitingForReceipt 
+                                    ? (step === 'APPROVING' ? 'Confirming Approval...' : 'Confirming Deposit...')
+                                    : (step === 'APPROVING' ? 'Requesting Approval...' : 'Processing Deposit...')
+                                }
                             </h3>
-                            <p className="text-[10px] text-slate-500 mt-1 font-mono uppercase tracking-widest">Please confirm in your wallet</p>
+                            <p className="text-[10px] text-slate-500 mt-1 font-mono uppercase tracking-widest">
+                                {isWaitingForReceipt ? 'Waiting for block confirmation...' : 'Please confirm in your wallet'}
+                            </p>
+                            {txHash && (
+                                <p className="text-[8px] text-primary/60 mt-2 font-mono break-all max-w-[200px] mx-auto opacity-50">
+                                    TX: {txHash}
+                                </p>
+                            )}
                         </div>
                     </div>
                 )}
