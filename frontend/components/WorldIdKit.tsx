@@ -6,20 +6,24 @@ import {
   ISuccessResult,
 } from "@worldcoin/idkit";
 import { Button } from "./UI";
+import { useConnection } from "wagmi";
 
 interface WorldIdKitProps {
   onSuccess?: (result: ISuccessResult) => void;
   action?: string;
   app_id?: string;
+  signal?: string;
 }
 
 const WorldIdKit: React.FC<WorldIdKitProps> = ({ 
   onSuccess: externalOnSuccess,
   action = import.meta.env.VITE_WORLD_ID_ACTION,
-  app_id = import.meta.env.VITE_WORLD_ID_APP_ID
+  app_id = import.meta.env.VITE_WORLD_ID_APP_ID,
+  signal
 }) => {
   const [isVerifying, setIsVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { address } = useConnection();
 
   // Validate configuration
   if (!app_id || !action) {
@@ -43,13 +47,18 @@ const WorldIdKit: React.FC<WorldIdKitProps> = ({
         body: JSON.stringify({
           ...proof,
           action,
-          signal: "", // Signal can be empty if not used, but usually required by backends
+          signal: signal || "", // Signal can be empty if not used, but usually required by backends
         }),
       });
       
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
         throw new Error(errorData.message || "Verification failed on backend.");
+      }
+
+      // Store nullifier hash for future funding/actions
+      if (proof.nullifier_hash) {
+          localStorage.setItem("ssl_nullifier_hash", proof.nullifier_hash);
       }
     } catch (err: any) {
       console.error("World ID verification error:", err);

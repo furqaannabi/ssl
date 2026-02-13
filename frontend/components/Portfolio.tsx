@@ -4,6 +4,7 @@ import { Asset } from '../types';
 import { Icon, Badge, Card, Button } from './UI';
 import { loadStealthKeys, SpendingKeypair } from '../lib/stealth';
 import { StealthKeyReveal } from './StealthKeyReveal';
+import { FundingModal } from './FundingModal';
 
 const assets: Asset[] = [
   { symbol: 'US-Gov-042', name: 'Tokenized T-Bills', type: 'Fixed Income', allocation: 45, value: '$5,602,590.00', status: 'Active', icon: 'account_balance', colorClass: 'text-blue-400' },
@@ -26,6 +27,7 @@ const yieldData = [
 export const Portfolio: React.FC = () => {
   const [stealthKeys, setStealthKeys] = useState<any[]>([]);
   const [revealTarget, setRevealTarget] = useState<any | null>(null);
+  const [isFundingOpen, setIsFundingOpen] = useState(false);
 
   useEffect(() => {
     setStealthKeys(loadStealthKeys());
@@ -42,6 +44,16 @@ export const Portfolio: React.FC = () => {
           title={`Stealth Key: ${revealTarget.orderId.slice(0, 8)}...`}
         />
       )}
+
+      <div className="flex justify-between items-center shrink-0">
+        <div>
+          <h2 className="text-xl font-bold text-white font-display tracking-tight uppercase">Portfolio Overview</h2>
+          <p className="text-[10px] text-slate-500 font-mono tracking-widest mt-1">CONFIDENTIAL ASSET MANAGEMENT SYSTEM</p>
+        </div>
+        <Button variant="primary" icon="add" onClick={() => setIsFundingOpen(true)}>
+          Deposit Assets
+        </Button>
+      </div>
 
       {/* Metrics Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 shrink-0">
@@ -238,6 +250,11 @@ export const Portfolio: React.FC = () => {
           </Card>
         </div>
       </div>
+
+      <FundingModal 
+        isOpen={isFundingOpen} 
+        onClose={() => setIsFundingOpen(false)} 
+      />
     </div>
   );
 };

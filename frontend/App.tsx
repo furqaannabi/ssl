@@ -9,6 +9,29 @@ import { History } from './components/History';
 import { SettingsModal } from './components/SettingsModal';
 import { ProfileModal } from './components/ProfileModal';
 
+// RainbowKit & Wagmi
+import '@rainbow-me/rainbowkit/styles.css';
+import {
+  getDefaultConfig,
+  RainbowKitProvider,
+  darkTheme,
+} from '@rainbow-me/rainbowkit';
+import { WagmiProvider, useConnection } from 'wagmi';
+import { baseSepolia } from 'wagmi/chains';
+import {
+  QueryClientProvider,
+  QueryClient,
+} from "@tanstack/react-query";
+
+const config = getDefaultConfig({
+  appName: 'SSL Terminal',
+  projectId: import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || '',
+  chains: [baseSepolia],
+  ssr: false,
+});
+
+const queryClient = new QueryClient();
+
 const navItems: NavItem[] = [
   { id: View.TERMINAL, label: 'Trade', icon: 'candlestick_chart', iconType: 'outlined' },
   { id: View.DASHBOARD, label: 'Portfolio', icon: 'pie_chart', iconType: 'outlined' },
@@ -16,25 +39,31 @@ const navItems: NavItem[] = [
   { id: View.HISTORY, label: 'History', icon: 'history', iconType: 'outlined' },
 ];
 
-function App() {
+function AppContent() {
   const [activeView, setActiveView] = useState<View>(View.TERMINAL);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
-  const [userAddress, setUserAddress] = useState<string>("");
+  const [stealthAddress, setStealthAddress] = useState<string>("");
+  
+  const { address: eoaAddress, isConnected } = useConnection();
 
   useEffect(() => {
-    const updateIdentity = () => {
+    const updateStealthIdentity = () => {
         const keys = loadSpendingKeypair();
         if (keys) {
             const meta = getMetaAddress(keys.publicKey);
-            setUserAddress(meta.slice(0, 6) + "..." + meta.slice(-4));
+            setStealthAddress(meta.slice(0, 6) + "..." + meta.slice(-4));
+        } else {
+            setStealthAddress("");
         }
     };
     
-    updateIdentity();
-    window.addEventListener('storage', updateIdentity);
-    return () => window.removeEventListener('storage', updateIdentity);
+    updateStealthIdentity();
+    window.addEventListener('storage', updateStealthIdentity);
+    return () => window.removeEventListener('storage', updateStealthIdentity);
   }, []);
+
+  const formattedEOA = eoaAddress ? eoaAddress.slice(0, 6) + "..." + eoaAddress.slice(-4) : "Connect Wallet";
 
   const renderView = () => {
     switch (activeView) {
@@ -60,8 +89,8 @@ function App() {
              <Icon name="security" className="text-primary text-xl" />
            </div>
         </div>
-        
-        <nav className="flex-1 w-full flex flex-col gap-6 items-center">
+
+        <nav className="flex flex-col gap-4">
           {navItems.map((item) => {
             const isActive = activeView === item.id;
             return (
@@ -88,7 +117,7 @@ function App() {
             className="w-8 h-8 rounded-full overflow-hidden border border-border-dark hover:border-primary transition-all grayscale hover:grayscale-0 shadow-lg hover:shadow-glow"
           >
             <img 
-               src={userAddress ? `https://api.dicebear.com/7.x/identicon/svg?seed=${userAddress}` : "https://api.dicebear.com/7.x/identicon/svg?seed=fallback"} 
+               src={eoaAddress ? `https://api.dicebear.com/7.x/identicon/svg?seed=${eoaAddress}` : "https://api.dicebear.com/7.x/identicon/svg?seed=fallback"} 
                alt="User" 
                className="w-full h-full object-cover" 
             />
@@ -102,50 +131,27 @@ function App() {
         </div>
       </aside>
 
-      {/* Main Layout */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
-        
-        {/* Header */}
-        <header className="h-16 border-b border-border-dark bg-surface-dark/95 backdrop-blur flex items-center justify-between px-6 z-20 shrink-0 shadow-lg relative">
-           <div className="flex items-center gap-6 w-1/3">
-              <h1 className="text-lg font-bold tracking-tight text-white uppercase font-mono hidden md:block">
-                 SSL <span className="text-primary font-light">///</span> {activeView}
-              </h1>
-              <div className="h-8 w-px bg-border-dark hidden md:block"></div>
-              <div className="flex flex-col">
-                 <span className="text-[10px] uppercase text-slate-500 font-mono tracking-wider">Network</span>
-                 <div className="flex items-center gap-1.5 text-xs font-mono text-slate-300">
-                    <Icon name="link" className="text-[10px] text-primary" />
-                    CCIP <span className="text-slate-500">::</span> MAINNET
-                 </div>
-              </div>
-           </div>
+      {/* Main Area */}
+      <div className="flex-1 flex flex-col min-w-0">
+         {/* Header */}
+         <header className="h-16 border-b border-border-dark bg-surface-dark/50 backdrop-blur-md flex items-center justify-between px-8 shrink-0 z-20">
+            <div className="flex items-center gap-4">
+               <h1 className="text-lg font-bold text-white tracking-widest font-display flex items-center gap-2">
+                 SSL <span className="text-primary font-mono text-sm px-2 py-0.5 border border-primary/20 bg-primary/5 rounded">TERMINAL v1.0</span>
+               </h1>
+            </div>
 
-           {/* Status Center */}
-           <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 hidden md:block">
-              <div className="flex items-center gap-3 px-6 py-2 bg-black/40 border border-primary/30 shadow-glow clip-path-polygon">
-                 <div className="relative flex items-center justify-center w-5 h-5">
-                    <Icon name="shield" className="text-primary text-sm z-10" />
-                    <div className="absolute inset-0 bg-primary/20 rounded-full animate-pulse"></div>
-                 </div>
-                 <div className="flex flex-col leading-none">
-                    <span className="text-[10px] text-primary/70 uppercase tracking-widest font-mono mb-0.5">Status</span>
-                    <span className="text-xs font-bold text-white tracking-wide uppercase font-mono">Secure Enclave Active</span>
-                 </div>
-              </div>
-           </div>
-
-           {/* Right Info */}
-           <div className="flex items-center justify-end gap-6 w-1/3">
+            {/* Top Identity - EOA (Authority) and Stealth (Privacy) */}
+            <div className="flex items-center justify-end gap-6 w-1/3">
               <div className="flex flex-col items-end cursor-pointer hover:bg-white/5 p-2 rounded transition-colors" onClick={() => setIsProfileOpen(true)}>
                  <div className="flex items-center gap-2">
-                    <span className={`w-1.5 h-1.5 rounded-full ${userAddress ? 'bg-primary shadow-glow' : 'bg-slate-700'}`}></span>
-                    <span className="text-xs font-mono text-slate-300 uppercase">{userAddress || "Identity Inactive"}</span>
+                    <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-primary shadow-glow' : 'bg-slate-700'}`}></span>
+                    <span className="text-xs font-mono text-slate-300 uppercase">{formattedEOA}</span>
                  </div>
                  <div className="flex items-center gap-1 mt-0.5">
-                    <Icon name={userAddress ? "fingerprint" : "lock_open"} className={`text-[10px] ${userAddress ? 'text-primary' : 'text-slate-500'}`} />
-                    <span className={`text-[10px] font-mono uppercase tracking-wide ${userAddress ? 'text-primary' : 'text-slate-500'}`}>
-                        {userAddress ? "Stealth Identity" : "Layer Offline"}
+                    <Icon name={stealthAddress ? "fingerprint" : "lock_open"} className={`text-[10px] ${stealthAddress ? 'text-primary' : 'text-slate-500'}`} />
+                    <span className={`text-[10px] font-mono uppercase tracking-wide ${stealthAddress ? 'text-primary' : 'text-slate-500'}`}>
+                        {stealthAddress ? `Stealth: ${stealthAddress}` : "Privacy Offline"}
                     </span>
                  </div>
               </div>
@@ -154,28 +160,34 @@ function App() {
                  <div className="text-[10px] text-slate-500 font-mono uppercase tracking-wider">Net Liquidity</div>
                  <div className="text-sm font-mono font-bold text-white tracking-tight">$42,592,104.00</div>
               </div>
-           </div>
-        </header>
+            </div>
+         </header>
 
-        {/* Content View */}
-        <main className="flex-1 overflow-hidden relative">
-          {renderView()}
-        </main>
-        
-        {/* Universal Footer */}
-        {activeView !== View.TERMINAL && activeView !== View.HISTORY && (
-          <footer className="h-8 bg-obsidian border-t border-border-dark flex items-center px-4 overflow-hidden z-20 shrink-0">
-             <div className="flex items-center gap-2 mr-4 border-r border-border-dark pr-4 h-full">
-                <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></div>
-                <span className="text-[9px] font-bold text-slate-300 font-mono whitespace-nowrap tracking-wider">SYSTEM OPTIMAL</span>
-             </div>
-             <div className="flex-1 text-[10px] text-slate-500 font-mono flex justify-end">
-                SSL ENCRYPTED CONNECTION V2.4.0
-             </div>
-          </footer>
-        )}
+         {/* Content View */}
+         <main className="flex-1 overflow-hidden relative">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(13,242,89,0.03)_0%,transparent_50%)]"></div>
+            {renderView()}
+         </main>
       </div>
     </div>
+  );
+}
+
+function App() {
+  return (
+    <WagmiProvider config={config}>
+      <QueryClientProvider client={queryClient}>
+        <RainbowKitProvider theme={darkTheme({
+          accentColor: '#0df259',
+          accentColorForeground: 'black',
+          borderRadius: 'small',
+          fontStack: 'system',
+          overlayBlur: 'small',
+        })}>
+          <AppContent />
+        </RainbowKitProvider>
+      </QueryClientProvider>
+    </WagmiProvider>
   );
 }
 

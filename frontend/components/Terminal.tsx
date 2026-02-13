@@ -1,11 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { Icon, Card, Button, Badge } from './UI';
 import { SpendingKeypair } from '../lib/stealth';
+import { useConnection, useSignMessage } from 'wagmi';
 
 export const Terminal: React.FC = () => {
   const [side, setSide] = useState<'BUY' | 'SELL'>('BUY');
   const [privacyLevel, setPrivacyLevel] = useState(3);
   const [spendingKeypair, setSpendingKeypair] = useState<SpendingKeypair | null>(null);
+  const [status, setStatus] = useState<'IDLE' | 'SIGNING' | 'ENCRYPTING' | 'MATCHING' | 'SETTLED'>('IDLE');
+  
+  const { address: eoaAddress, isConnected } = useConnection();
+  const { signMessageAsync } = useSignMessage();
 
   useEffect(() => {
     const stored = localStorage.getItem("ssl_spending_keypair");
@@ -20,13 +25,41 @@ export const Terminal: React.FC = () => {
     return () => window.removeEventListener('storage', handleStorage);
   }, []);
 
-  const handlePlaceOrder = () => {
+  const handlePlaceOrder = async () => {
+    if (!isConnected) {
+        alert("Please connect your Authority Wallet (EOA) first.");
+        return;
+    }
     if (!spendingKeypair) {
         alert("Stealth Layer not initialized. Please go to Profile and initialize your security layer first.");
         return;
     }
-    // Logic for placing order with spendingKeypair.publicKey
-    console.log("Placing order with stealth public key:", spendingKeypair.publicKey);
+
+    try {
+        setStatus('SIGNING');
+        
+        // 1. Sign Authorization Message with EOA
+        const message = `Authorize SSL Order: ${side} 50,000 UNITS @ 98.40 USDC\nRecipient: ${spendingKeypair.publicKey}\nNonce: ${Date.now()}`;
+        console.log("Requesting EOA signature...");
+        
+        // In wagmi v3, signMessageAsync typically takes { message }
+        // If it requires account, we pass the connected eoaAddress
+        await signMessageAsync({ message, account: eoaAddress });
+
+        // 2. Encrypt & Place (Simulated)
+        setStatus('ENCRYPTING');
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        
+        setStatus('MATCHING');
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        setStatus('SETTLED');
+        setTimeout(() => setStatus('IDLE'), 5000);
+
+    } catch (err) {
+        console.error("Order failed:", err);
+        setStatus('IDLE');
+    }
   };
 
   return (
@@ -46,10 +79,16 @@ export const Terminal: React.FC = () => {
             </div>
             
             <div className="p-5 flex-1 overflow-y-auto space-y-6 bg-stripes bg-[length:20px_20px]">
-               {!spendingKeypair && (
+               {!isConnected && (
+                   <div className="p-3 bg-primary/10 border border-primary/40 rounded text-[10px] text-primary font-mono mb-2 flex items-center gap-2">
+                       <Icon name="link_off" className="text-xs" />
+                       EOA DISCONNECTED: Link authority wallet to sign orders.
+                   </div>
+               )}
+               {isConnected && !spendingKeypair && (
                    <div className="p-3 bg-red-900/10 border border-red-900/40 rounded text-[10px] text-red-400 font-mono mb-2">
                        <Icon name="error_outline" className="text-xs mr-1 align-middle" />
-                       STEALTH LAYER INACTIVE: Initialize spending keys in Profile to trade.
+                       STEALTH LAYER INACTIVE: Initialize spending keys to trade.
                    </div>
                )}
 
@@ -133,11 +172,16 @@ export const Terminal: React.FC = () => {
 
                <Button 
                 fullWidth 
-                icon={spendingKeypair ? "lock" : "lock_open"} 
+                icon={status === 'IDLE' ? (spendingKeypair ? "lock" : "lock_open") : "pending"} 
                 className="py-4 mt-2 uppercase tracking-wider"
                 onClick={handlePlaceOrder}
+                disabled={status !== 'IDLE'}
                >
-                {spendingKeypair ? "Encrypt & Place Order" : "Initialize Stealth Layer"}
+                {status === 'SIGNING' ? "Requesting Signature..." :
+                 status === 'ENCRYPTING' ? "Encrypting Order..." :
+                 status === 'MATCHING' ? "Matching Engine..." :
+                 status === 'SETTLED' ? "Order Settled!" :
+                 spendingKeypair ? "Encrypt & Place Order" : "Initialize Stealth Layer"}
                </Button>
                <div className="text-[9px] text-slate-600 text-center font-mono uppercase tracking-wide">
                   TEE Verification: <span className="text-slate-400">{spendingKeypair ? "READY (0x..." + spendingKeypair.publicKey.slice(-6) + ")" : "OFFLINE"}</span>
@@ -149,12 +193,12 @@ export const Terminal: React.FC = () => {
         {/* Center Engine & Logs */}
         <div className="col-span-12 md:col-span-5 flex flex-col gap-4 z-10">
            {/* Execution Engine */}
-           <Card className="flex-1 flex flex-col shadow-heavy relative">
+           <Card className="flex-1 flex flex-col shadow-heavy relative transition-all duration-500">
               <div className="absolute inset-0 z-0 opacity-10 bg-[radial-gradient(#1f3324_1px,transparent_1px)] bg-[length:20px_20px]"></div>
               <div className="px-4 py-3 border-b border-border-dark bg-obsidian flex justify-between items-center z-10">
                  <h2 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2 font-mono">
                     <Icon name="memory" className="text-primary text-sm" />
-                    Execution Engine <span className="text-[10px] text-primary border border-primary/30 px-1 py-0.5 ml-2 font-normal">LIVE</span>
+                    Secure Execution Engine <span className="text-[10px] text-primary border border-primary/30 px-1 py-0.5 ml-2 font-normal">LIVE</span>
                  </h2>
                  <div className="flex items-center gap-2 text-[10px] font-mono text-slate-400 uppercase">
                     <span className="w-1.5 h-1.5 bg-primary animate-pulse"></span>
@@ -165,29 +209,28 @@ export const Terminal: React.FC = () => {
               <div className="flex-1 relative z-10 p-6 flex flex-col justify-between bg-black/50 backdrop-blur-sm">
                  {/* Steps */}
                  {[
-                   { id: '01', title: 'Ingestion', desc: 'Order encrypted locally. Handshake initiated.', active: false },
-                   { id: '02', title: 'TEE Decryption', desc: 'Processing inside Intel SGX enclave.', active: true, extra: '> Verifying ZK Proofs...' },
-                   { id: '03', title: 'Matching', desc: 'Dark pool liquidity search. Volume splitting.', active: false },
-                   { id: '04', title: 'Settlement', desc: 'Atomic swap execution. Chainlink verification.', active: false }
+                   { id: '01', title: 'Authority Sign', desc: 'EOA signing order authorization.', active: status === 'SIGNING' },
+                   { id: '02', title: 'Enclave Encryption', desc: 'Symmetric encryption via TEE.', active: status === 'ENCRYPTING' },
+                   { id: '03', title: 'Matching', desc: 'Dark pool liquidity search.', active: status === 'MATCHING' },
+                   { id: '04', title: 'Settlement', desc: 'Report submitted to Vault.', active: status === 'SETTLED' }
                  ].map((step, i) => (
-                   <div key={i} className={`flex items-center gap-4 group ${step.active ? '' : 'opacity-40'}`}>
-                      <div className={`w-8 h-8 border flex items-center justify-center text-xs font-mono font-bold ${step.active ? 'bg-primary/10 border-primary text-primary shadow-glow' : 'bg-black border-border-dark text-slate-500'}`}>
+                    <div key={i} className={`flex items-center gap-4 group transition-all duration-500 ${step.active ? 'scale-105' : 'opacity-40'}`}>
+                       <div className={`w-8 h-8 border flex items-center justify-center text-xs font-mono font-bold transition-all ${step.active ? 'bg-primary/10 border-primary text-primary shadow-glow' : 'bg-black border-border-dark text-slate-500'}`}>
                         {step.id}
                       </div>
                       {i < 3 && <div className={`flex-1 border-b ${step.active ? 'border-primary/50 overflow-hidden relative' : 'border-dashed border-border-dark'} top-3 relative`}>
                           {step.active && <div className="absolute inset-0 bg-gradient-to-r from-transparent via-primary/50 to-transparent w-1/2 h-full animate-shimmer"></div>}
                       </div>}
-                      <div className={`w-64 border p-3 ${step.active ? 'bg-surface-lighter border-primary shadow-glow-strong/20' : 'bg-black border-border-dark'}`}>
+                      <div className={`w-64 border p-3 transition-all ${step.active ? 'bg-surface-lighter border-primary shadow-glow-strong/20' : 'bg-black border-border-dark'}`}>
                          <div className={`text-[10px] font-bold uppercase tracking-wide mb-1 flex justify-between ${step.active ? 'text-primary' : 'text-white'}`}>
                             {step.title}
                             {step.active && <Icon name="settings" className="text-[12px] animate-spin" />}
                          </div>
-                         <div className="text-[10px] font-mono text-slate-500">
+                         <div className="text-[10px] font-mono text-slate-500 line-clamp-2">
                            {step.desc}
-                           {step.extra && <><br/><span className="text-primary/70">{step.extra}</span></>}
                          </div>
                       </div>
-                   </div>
+                    </div>
                  ))}
               </div>
            </Card>

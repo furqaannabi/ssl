@@ -1,4 +1,4 @@
-  {
+{
   "name": "ssl-terminal",
   "private": true,
   "version": "0.0.0",
@@ -9,12 +9,17 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@coinbase/wallet-sdk": "^4.3.7",
+    "@metamask/sdk": "^0.34.0",
+    "@rainbow-me/rainbowkit": "^2.2.10",
+    "@tanstack/react-query": "^5.90.21",
     "@worldcoin/idkit": "^2.4.2",
     "lucide-react": "^0.563.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "recharts": "^3.7.0",
-    "viem": "^2.45.3"
+    "viem": "^2.45.3",
+    "wagmi": "^3.4.3"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
