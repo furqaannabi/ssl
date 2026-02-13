@@ -1,0 +1,51 @@
+// ──────────────────────────────────────────────
+// SSL Backend — Entry Point
+// ──────────────────────────────────────────────
+
+import { Hono } from "hono";
+import { cors } from "hono/cors";
+import { logger } from "hono/logger";
+import { config } from "./lib/config";
+import { health } from "./routes/health";
+import { verify } from "./routes/verify";
+import { order } from "./routes/order";
+
+const app = new Hono();
+
+// ── Middleware ──
+app.use("*", logger());
+app.use(
+    "*",
+    cors({
+        origin: ["http://localhost:5173", "http://localhost:3000"],
+        allowMethods: ["GET", "POST", "OPTIONS"],
+        allowHeaders: ["Content-Type", "Authorization"],
+    })
+);
+
+// ── Routes ──
+app.route("/api/health", health);
+app.route("/api/verify", verify);
+app.route("/api/order", order);
+
+// ── 404 ──
+app.notFound((c) => c.json({ error: "Not found" }, 404));
+
+// ── Error handler ──
+app.onError((err, c) => {
+    console.error("[server] Unhandled error:", err);
+    return c.json({ error: "Internal server error" }, 500);
+});
+
+// ── Start ──
+console.log(`
+╔══════════════════════════════════════╗
+║   SSL Backend — Stealth Settlement  ║
+║   Port: ${String(config.port).padEnd(28)}║
+╚══════════════════════════════════════╝
+`);
+
+export default {
+    port: config.port,
+    fetch: app.fetch,
+};

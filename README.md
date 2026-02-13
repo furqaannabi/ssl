@@ -138,33 +138,61 @@ CRE (on match found)                            Vault
 
 | Component | Description |
 |---|---|
-| **contracts/** | Solidity - `StealthSettlementVault`, `ReceiverTemplate`, interfaces, mocks |
-| **cre/** | Chainlink CRE workflow - HTTP trigger, order matching, stealth address generation, on-chain write |
-| **frontend/** | Web UI |
+| **contracts/** | Solidity — `StealthSettlementVault`, `ReceiverTemplate`, interfaces, mocks |
+| **cre/** | Chainlink CRE workflow — HTTP trigger, order matching, stealth address generation, on-chain report |
+| **be/** | Bun + Hono backend — World ID verification, order forwarding, EVM-signed CRE requests |
+| **frontend/** | React + Vite trading terminal with World ID integration |
 
 ### Contracts
 
-- **StealthSettlementVault** - Holds deposited tokens. Accepts two report types from CRE via `KeystoneForwarder`:
-  - `type 0` (verify) - Marks a World ID nullifier as verified
-  - `type 1` (settle) - Transfers tokens to stealth addresses
-- **ReceiverTemplate** - Abstract base that validates reports come from the trusted forwarder
-- **IWorldID** - Interface for World ID on-chain verifier
+- **StealthSettlementVault** — Holds deposited tokens. Accepts two report types from CRE via `KeystoneForwarder`:
+  - `type 0` (verify) — Marks a World ID nullifier as verified
+  - `type 1` (settle) — Checks per-nullifier balances, transfers tokens to stealth addresses
+- **ReceiverTemplate** — Abstract base that validates reports come from the trusted forwarder
+- **ISSLVault** — Vault interface (fund, balances, settledOrders, events)
+- **IWorldID** — Interface for World ID on-chain verifier
+- **Mocks** — `MockBondToken`, `MockUSDC`, `MockWorldID` for testing
 
-### CRE Workflow
+### CRE Workflow (`cre/ssl/main.ts`)
 
 Single HTTP trigger with two actions:
 
-- `verify` - Receives World ID nullifier, writes verify report to vault
-- `order` - Receives trade order, stores in pool, attempts match. On match: generates stealth addresses, writes settlement report to vault
+- `verify` — Receives World ID nullifier, writes verify report to vault
+- `order` — Receives trade order, stores in in-memory pool, attempts match. On match: derives ECDH stealth addresses (EIP-5564 style via `@noble/curves` secp256k1), writes settlement report to vault
+
+### Backend (`be/`)
+
+Bun + Hono HTTP server bridging the frontend to CRE:
+
+- `POST /api/verify` — Verifies World ID proof via cloud API, then forwards `{action: "verify", nullifierHash}` to CRE (signed with EVM key)
+- `POST /api/order` — Validates order fields, signs and forwards `{action: "order", ...}` to CRE
+- `GET /api/health` — Returns server status and signer address
+
+### Frontend (`frontend/`)
+
+React 19 + Vite + TailwindCSS trading terminal:
+
+- **Terminal** — Order entry (buy/sell), price/amount inputs
+- **Portfolio** — Token balances and positions
+- **Compliance** — World ID verification status
+- **History** — Past trades and settlements
+- **WorldIdKit** — `@worldcoin/idkit` integration for proof generation
 
 ### Key Properties
 
-- **Sybil-resistant** - World ID ensures one person = one identity
-- **Private settlement** - Stealth addresses prevent linking trades to user wallets
-- **Confidential matching** - Order book lives in CRE, never on-chain
-- **Trustless execution** - Only CRE (via KeystoneForwarder) can trigger vault operations
+- **Sybil-resistant** — World ID ensures one person = one identity
+- **Private settlement** — Stealth addresses prevent linking trades to user wallets
+- **Confidential matching** — Order book lives in CRE, never on-chain
+- **Trustless execution** — Only CRE (via KeystoneForwarder) can trigger vault operations
+- **Balance enforcement** — Vault checks per-nullifier balances before settlement (never trusts CRE blindly)
 
 ## Setup
+
+### Prerequisites
+
+- [Foundry](https://book.getfoundry.sh/) (forge, cast)
+- [Bun](https://bun.sh/) (v1.2+)
+- [CRE CLI](https://docs.chain.link/cre) (`cre`)
 
 ### Contracts
 
@@ -175,14 +203,57 @@ forge build
 forge test -vv
 ```
 
+### Backend
+
+```bash
+cd be
+cp .env.example .env   # configure CRE_WORKFLOW_URL, EVM_PRIVATE_KEY, WORLD_APP_ID
+bun install
+bun run dev
+```
+
 ### CRE Workflow
 
 ```bash
 cd cre/ssl
-npm install
+bun install
 ```
 
-### Deploy
+Configure `cre/ssl/config.staging.json`:
+
+```json
+{
+  "vaultAddress": "0x...",
+  "chainSelectorName": "ethereum-testnet-sepolia",
+  "authorizedEVMAddress": "0x...",
+  "worldAppId": "app_YOUR_WORLD_APP_ID",
+  "gasLimit": "500000"
+}
+```
+
+Set your private key in `cre/.env`:
+
+```
+CRE_ETH_PRIVATE_KEY=<your-private-key>
+CRE_TARGET=staging-settings
+```
+
+Simulate locally:
+
+```bash
+cd cre
+cre workflow simulate ssl --target staging-settings
+```
+
+### Frontend
+
+```bash
+cd frontend
+bun install
+bun run dev
+```
+
+### Deploy Contracts
 
 ```bash
 cd contracts
@@ -190,16 +261,20 @@ forge script script/Deploy.s.sol:DeploySSL --rpc-url $RPC_URL --broadcast
 ```
 
 Environment variables:
-- `PRIVATE_KEY` - Deployer private key
-- `FORWARDER_ADDRESS` - KeystoneForwarder address (defaults to mock)
+- `PRIVATE_KEY` — Deployer private key
+- `FORWARDER_ADDRESS` — KeystoneForwarder address (defaults to mock)
 
 ## Tech Stack
 
-- **Solidity** (Foundry) - Smart contracts
-- **Chainlink CRE** - Off-chain confidential runtime
-- **World ID** - Sybil-resistant identity verification
-- **Stealth Addresses** - ECDH-derived one-time addresses (EIP-5564 style, secp256k1). See [STEALTH.md](STEALTH.md)
-- **OpenZeppelin** - SafeERC20, ReentrancyGuard, Ownable
+- **Solidity** (Foundry) — Smart contracts
+- **Chainlink CRE** — Off-chain confidential compute runtime
+- **World ID** (`@worldcoin/idkit`) — Sybil-resistant identity verification
+- **Stealth Addresses** — ECDH-derived one-time addresses (EIP-5564 style, secp256k1)
+- **viem** — ABI encoding, keccak256, packed encoding
+- **@noble/curves** — secp256k1 ECDH for stealth address derivation
+- **OpenZeppelin** — SafeERC20, ReentrancyGuard
+- **React 19 + Vite** — Frontend trading terminal
+- **TailwindCSS** — Frontend styling
 
 ## License
 
