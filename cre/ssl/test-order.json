@@ -1,5 +1,5 @@
 {
-  "worldIdProof": "zk_proof_seller_abc123",
+  "action": "order",
   "nullifierHash": "0xabc123def456",
   "asset": "0xBondTokenAddress",
   "quoteToken": "0xUSDCAddress",

@@ -1,0 +1,7 @@
+{
+  "action": "verify",
+  "nullifierHash": "0xabc123def456",
+  "proof": "zk_proof_seller_abc123",
+  "merkleRoot": "0x1234567890abcdef",
+  "verificationLevel": "orb"
+}

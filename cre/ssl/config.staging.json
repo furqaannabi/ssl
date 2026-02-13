@@ -1,5 +1,7 @@
 {
   "vaultAddress": "0x0000000000000000000000000000000000000000",
-  "chainSelector": "16015286601757825753",
-  "authorizedEVMAddress": "0x0000000000000000000000000000000000000000"
+  "chainSelectorName": "ethereum-testnet-sepolia",
+  "authorizedEVMAddress": "0x0000000000000000000000000000000000000000",
+  "worldAppId": "app_YOUR_WORLD_APP_ID",
+  "gasLimit": "500000"
 }

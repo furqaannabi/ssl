@@ -5,21 +5,32 @@ import {
   type Runtime,
   type HTTPPayload,
   decodeJson,
+  EVMClient,
+  getNetwork,
+  hexToBase64,
+  bytesToHex,
+  TxStatus,
 } from "@chainlink/cre-sdk";
-import { keccak256, encodePacked } from "viem";
+import { keccak256, encodePacked, encodeAbiParameters, parseAbiParameters } from "viem";
 
 // ──────────────────────────────────────────────
-//  Types
+// Types
 // ──────────────────────────────────────────────
 
 type Config = {
   vaultAddress: string;
-  chainSelector: string;
+  chainSelectorName: string;
   authorizedEVMAddress: string;
+  gasLimit: string;
 };
 
+interface VerifyPayload {
+  action: "verify";
+  nullifierHash: string;
+}
+
 interface OrderPayload {
-  worldIdProof: string;
+  action: "order";
   nullifierHash: string;
   asset: string;
   quoteToken: string;
@@ -29,8 +40,9 @@ interface OrderPayload {
   stealthPublicKey: string;
 }
 
+type Payload = VerifyPayload | OrderPayload;
+
 interface Order {
-  worldIdProof: string;
   nullifierHash: string;
   order: {
     asset: string;
@@ -42,77 +54,38 @@ interface Order {
   stealthPublicKey: string;
 }
 
-interface MatchedTrade {
-  orderId: string;
-  buyer: Order;
-  seller: Order;
-  stealthBuyer: string;
-  stealthSeller: string;
-  amountA: string;
-  amountB: string;
-}
-
 // ──────────────────────────────────────────────
-//  World ID Verification (off-chain in CRE)
-// ──────────────────────────────────────────────
-
-const usedNullifiers = new Set<string>();
-
-function verifyWorldID(proof: string, nullifierHash: string): boolean {
-  if (!proof || proof.length === 0) {
-    return false;
-  }
-
-  if (usedNullifiers.has(nullifierHash)) {
-    return false;
-  }
-
-  usedNullifiers.add(nullifierHash);
-  return true;
-}
-
-// ──────────────────────────────────────────────
-//  Stealth Address Generation
-// ──────────────────────────────────────────────
-
-function generateStealthAddress(
-  stealthPublicKey: string,
-  tradeNonce: string
-): string {
-  const hash = keccak256(
-    encodePacked(
-      ["string", "string"],
-      [stealthPublicKey, tradeNonce]
-    )
-  );
-  return ("0x" + hash.slice(26)) as string;
-}
-
-// ──────────────────────────────────────────────
-//  Order Matching Engine (confidential in CRE)
+// State
 // ──────────────────────────────────────────────
 
 const buyOrders: Order[] = [];
 const sellOrders: Order[] = [];
 
-function storeOrder(order: Order): void {
-  if (order.order.side === "BUY") {
-    buyOrders.push(order);
-  } else {
-    sellOrders.push(order);
-  }
+// ──────────────────────────────────────────────
+// Stealth address generation
+// ──────────────────────────────────────────────
+
+function generateStealthAddress(stealthPublicKey: string, tradeNonce: string): string {
+  const hash = keccak256(
+    encodePacked(["string", "string"], [stealthPublicKey, tradeNonce])
+  );
+  return ("0x" + hash.slice(26)) as string;
+}
+
+// ──────────────────────────────────────────────
+// Matching engine
+// ──────────────────────────────────────────────
+
+function storeOrder(order: Order) {
+  if (order.order.side === "BUY") buyOrders.push(order);
+  else sellOrders.push(order);
 }
 
 function matchOrders(): { buyer: Order; seller: Order } | null {
-  if (buyOrders.length === 0 || sellOrders.length === 0) {
-    return null;
-  }
-
   for (let i = 0; i < buyOrders.length; i++) {
     for (let j = 0; j < sellOrders.length; j++) {
       const buy = buyOrders[i];
       const sell = sellOrders[j];
-
       if (
         buy.order.asset === sell.order.asset &&
         BigInt(buy.order.price) >= BigInt(sell.order.price)
@@ -123,27 +96,82 @@ function matchOrders(): { buyer: Order; seller: Order } | null {
       }
     }
   }
-
   return null;
 }
 
 // ──────────────────────────────────────────────
-//  HTTP Trigger Handler
+// Report helpers
+// ──────────────────────────────────────────────
+
+function sendReport(runtime: Runtime<Config>, reportData: `0x${string}`) {
+  const network = getNetwork({
+    chainFamily: "evm",
+    chainSelectorName: runtime.config.chainSelectorName,
+    isTestnet: true,
+  });
+
+  if (!network) {
+    throw new Error("Network not found: " + runtime.config.chainSelectorName);
+  }
+
+  const evmClient = new EVMClient(network.chainSelector.selector);
+
+  const reportResponse = runtime
+    .report({
+      encodedPayload: hexToBase64(reportData),
+      encoderName: "evm",
+      signingAlgo: "ecdsa",
+      hashingAlgo: "keccak256",
+    })
+    .result();
+
+  const writeResult = evmClient
+    .writeReport(runtime, {
+      receiver: runtime.config.vaultAddress,
+      report: reportResponse,
+      gasConfig: { gasLimit: runtime.config.gasLimit },
+    })
+    .result();
+
+  if (writeResult.txStatus !== TxStatus.SUCCESS) {
+    throw new Error("Report tx failed: " + writeResult.txStatus);
+  }
+
+  return bytesToHex(writeResult.txHash || new Uint8Array(32));
+}
+
+// ──────────────────────────────────────────────
+// HTTP trigger handler
 // ──────────────────────────────────────────────
 
 const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string => {
-  runtime.log("═══════════════════════════════════════════");
-  runtime.log("SSL: Stealth Settlement Layer — Order Received");
-  runtime.log("═══════════════════════════════════════════");
+  const data = decodeJson(payload.input) as Payload;
 
-  // ── Step 1: Decode user order from HTTP payload ──
-  runtime.log("");
-  runtime.log("Step 1: Decoding order from HTTP request...");
+  // ── Action: verify ──
+  if (data.action === "verify") {
+    runtime.log("Verify request for nullifier: " + data.nullifierHash);
 
-  const data = decodeJson(payload.input) as OrderPayload;
+    // Encode verify report: type=0, nullifierHash
+    const reportData = encodeAbiParameters(
+      parseAbiParameters("uint8 reportType, uint256 nullifierHash"),
+      [0, BigInt(data.nullifierHash)]
+    );
 
+    const txHash = sendReport(runtime, reportData);
+    runtime.log("Verify tx: " + txHash);
+
+    return JSON.stringify({
+      status: "verified",
+      nullifierHash: data.nullifierHash,
+      txHash,
+    });
+  }
+
+  // ── Action: order ──
+  runtime.log("Order received: " + data.side + " " + data.amount + " @ " + data.price);
+
+  // Store order
   const order: Order = {
-    worldIdProof: data.worldIdProof,
     nullifierHash: data.nullifierHash,
     order: {
       asset: data.asset,
@@ -155,54 +183,24 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
     stealthPublicKey: data.stealthPublicKey,
   };
 
-  runtime.log("  Side: " + order.order.side);
-  runtime.log("  Asset: " + order.order.asset);
-  runtime.log("  Quote: " + order.order.quoteToken);
-  runtime.log("  Amount: " + order.order.amount);
-  runtime.log("  Price: " + order.order.price);
-
-  // ── Step 2: Verify World ID (anti-sybil) ──
-  runtime.log("");
-  runtime.log("Step 2: Verifying World ID proof...");
-
-  const verified = verifyWorldID(order.worldIdProof, order.nullifierHash);
-
-  if (!verified) {
-    runtime.log("  REJECTED: World ID verification failed");
-    return JSON.stringify({ error: "World ID verification failed" });
-  }
-
-  runtime.log("  Unique human verified (zero-knowledge)");
-
-  // ── Step 3: Store order in confidential memory ──
-  runtime.log("");
-  runtime.log("Step 3: Storing order in CRE confidential memory...");
-
   storeOrder(order);
+  runtime.log("Order stored. Buy pool: " + buyOrders.length + " Sell pool: " + sellOrders.length);
 
-  runtime.log("  Order stored (not visible on-chain)");
-  runtime.log("  Buy orders in pool: " + buyOrders.length);
-  runtime.log("  Sell orders in pool: " + sellOrders.length);
-
-  // ── Step 4: Attempt confidential matching ──
-  runtime.log("");
-  runtime.log("Step 4: Attempting confidential match...");
-
+  // Try match
   const match = matchOrders();
-
   if (!match) {
-    runtime.log("  No matching counterparty yet. Order queued.");
-    return JSON.stringify({ status: "queued", side: order.order.side });
+    runtime.log("No match — queued");
+    return JSON.stringify({ status: "queued", side: data.side });
   }
 
-  runtime.log("  MATCH FOUND!");
-  runtime.log("  Asset: " + match.buyer.order.asset);
-  runtime.log("  Price: $" + (parseInt(match.buyer.order.price) / 100).toFixed(2));
+  runtime.log("Match found!");
 
-  // ── Step 5: Generate stealth settlement addresses ──
-  runtime.log("");
-  runtime.log("Step 5: Generating stealth addresses...");
+  // Compute trade amount
+  const amountBuy = BigInt(match.buyer.order.amount);
+  const amountSell = BigInt(match.seller.order.amount);
+  const tradeAmount = amountBuy < amountSell ? amountBuy : amountSell;
 
+  // Generate stealth addresses
   const tradeNonce = keccak256(
     encodePacked(
       ["string", "string", "string"],
@@ -210,21 +208,8 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
     )
   );
 
-  const stealthBuyer = generateStealthAddress(
-    match.buyer.stealthPublicKey,
-    tradeNonce
-  );
-  const stealthSeller = generateStealthAddress(
-    match.seller.stealthPublicKey,
-    tradeNonce
-  );
-
-  runtime.log("  Buyer stealth:  " + stealthBuyer);
-  runtime.log("  Seller stealth: " + stealthSeller);
-
-  // ── Step 6: Prepare settlement ──
-  runtime.log("");
-  runtime.log("Step 6: Preparing settlement...");
+  const stealthBuyer = generateStealthAddress(match.buyer.stealthPublicKey, tradeNonce);
+  const stealthSeller = generateStealthAddress(match.seller.stealthPublicKey, tradeNonce);
 
   const orderId = keccak256(
     encodePacked(
@@ -233,45 +218,38 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
     )
   );
 
-  const settlement: MatchedTrade = {
-    orderId,
-    buyer: match.buyer,
-    seller: match.seller,
-    stealthBuyer,
-    stealthSeller,
-    amountA: match.seller.order.amount,
-    amountB: match.buyer.order.amount,
-  };
+  // Encode settle report: type=1, orderId, stealthBuyer, stealthSeller, tokenA, tokenB, amountA, amountB
+  const reportData = encodeAbiParameters(
+    parseAbiParameters(
+      "uint8 reportType, bytes32 orderId, address stealthBuyer, address stealthSeller, address tokenA, address tokenB, uint256 amountA, uint256 amountB"
+    ),
+    [
+      1,
+      orderId as `0x${string}`,
+      stealthBuyer as `0x${string}`,
+      stealthSeller as `0x${string}`,
+      match.seller.order.asset as `0x${string}`,
+      match.seller.order.quoteToken as `0x${string}`,
+      tradeAmount,
+      tradeAmount,
+    ]
+  );
 
-  runtime.log("  Order ID: " + settlement.orderId);
-  runtime.log("  Vault: " + runtime.config.vaultAddress);
-  runtime.log("  Token A (asset): " + match.seller.order.asset);
-  runtime.log("  Token B (quote): " + match.seller.order.quoteToken);
-  runtime.log("  Amount A: " + settlement.amountA);
-  runtime.log("  Amount B: " + settlement.amountB);
-
-  // ── Step 7: Settlement instruction ──
-  runtime.log("");
-  runtime.log("Step 7: Settlement instruction ready");
-  runtime.log("  → vault.settle(orderId, stealthBuyer, stealthSeller, tokenA, tokenB, amountA, amountB)");
-
-  runtime.log("");
-  runtime.log("═══════════════════════════════════════════");
-  runtime.log("SSL Settlement Complete");
-  runtime.log("═══════════════════════════════════════════");
+  const txHash = sendReport(runtime, reportData);
+  runtime.log("Settlement tx: " + txHash);
 
   return JSON.stringify({
     status: "settled",
-    orderId: settlement.orderId,
-    stealthBuyer: settlement.stealthBuyer,
-    stealthSeller: settlement.stealthSeller,
-    amountA: settlement.amountA,
-    amountB: settlement.amountB,
+    orderId,
+    stealthBuyer,
+    stealthSeller,
+    tradeAmount: tradeAmount.toString(),
+    txHash,
   });
 };
 
 // ──────────────────────────────────────────────
-//  Workflow Init
+// Init workflow
 // ──────────────────────────────────────────────
 
 const initWorkflow = (config: Config) => {

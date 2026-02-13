@@ -8,50 +8,44 @@ import "../src/mocks/MockUSDC.sol";
 
 /**
  * @title DeploySSL
- * @notice Deployment script for the Stealth Settlement Layer
- * @dev Deploys the stealth settlement vault and mock tokens on a Tenderly Virtual TestNet.
- *      Identity verification is handled off-chain via World ID inside CRE.
+ * @notice Deploys the Stealth Settlement Layer
  *
  *      Usage:
  *        forge script script/Deploy.s.sol:DeploySSL --rpc-url $RPC_URL --broadcast
  *
  *      Env vars:
- *        PRIVATE_KEY  - deployer private key
- *        CRE_SIGNER   - CRE signer address (defaults to deployer)
+ *        PRIVATE_KEY        - deployer private key
+ *        FORWARDER_ADDRESS  - KeystoneForwarder or MockForwarder address
  */
 contract DeploySSL is Script {
+    address constant MOCK_FORWARDER = 0x15fC6ae953E024d975e77382eEeC56A9101f9F88;
+
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
-        address creSignerAddress = vm.envOr("CRE_SIGNER", deployer);
+        address forwarder = vm.envOr("FORWARDER_ADDRESS", MOCK_FORWARDER);
 
         vm.startBroadcast(deployerPrivateKey);
 
-        // ── 1. Deploy mock tokens ──
+        // 1. Deploy mock tokens
         MockBondToken bondToken = new MockBondToken();
         MockUSDC usdc = new MockUSDC();
         console.log("MockBondToken:", address(bondToken));
         console.log("MockUSDC:", address(usdc));
 
-        // ── 2. Deploy stealth settlement vault ──
-        StealthSettlementVault vault = new StealthSettlementVault(creSignerAddress);
+        // 2. Deploy vault
+        StealthSettlementVault vault = new StealthSettlementVault(forwarder);
         console.log("StealthSettlementVault:", address(vault));
 
-        // ── 3. Mint demo tokens and fund vault ──
+        // 3. Mint demo tokens
         bondToken.mint(deployer, 1_000_000e18);
         usdc.mint(deployer, 100_000_000e6);
-
-        // Fund vault so it can execute settlements
-        bondToken.approve(address(vault), 1_000_000e18);
-        usdc.approve(address(vault), 100_000_000e6);
-        vault.fund(address(bondToken), 1_000_000e18);
-        vault.fund(address(usdc), 100_000_000e6);
 
         vm.stopBroadcast();
 
         console.log("");
         console.log("=== SSL Deployment Complete ===");
         console.log("Deployer:", deployer);
-        console.log("CRE Signer:", creSignerAddress);
+        console.log("Forwarder:", forwarder);
     }
 }
