@@ -1,4 +1,4 @@
-{
+  {
   "name": "ssl-terminal",
   "private": true,
   "version": "0.0.0",
@@ -13,7 +13,8 @@
     "lucide-react": "^0.563.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "recharts": "^3.7.0"
+    "recharts": "^3.7.0",
+    "viem": "^2.45.3"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

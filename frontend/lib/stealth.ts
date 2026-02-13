@@ -71,6 +71,16 @@ export function stealthPrivateKeyToAddress(
   return `0x${addressHash.slice(-40)}` as `0x${string}`;
 }
 
+/**
+ * Derives a canonical "Meta-Identity" address from the static spending public key.
+ * This can be used as a stable UI identity for the stealth layer.
+ */
+export function getMetaAddress(publicKey: `0x${string}`): string {
+    const pubWithoutPrefix = hexToBytes(publicKey).slice(1);
+    const hash = keccak256(toHex(pubWithoutPrefix));
+    return `0x${hash.slice(-40)}`;
+}
+
 // ──────────────────────────────────────────────
 // LocalStorage helpers
 // ──────────────────────────────────────────────

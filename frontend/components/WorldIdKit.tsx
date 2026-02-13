@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import React from 'react';
+import React, { useState } from 'react';
 import {
   IDKitWidget,
   VerificationLevel,
@@ -18,17 +18,45 @@ const WorldIdKit: React.FC<WorldIdKitProps> = ({
   action = import.meta.env.VITE_WORLD_ID_ACTION,
   app_id = import.meta.env.VITE_WORLD_ID_APP_ID
 }) => {
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Validate configuration
+  if (!app_id || !action) {
+    return (
+      <div className="p-4 border border-red-900/50 bg-red-900/10 rounded text-red-500 text-sm">
+        <strong>Config Error:</strong> World ID APP_ID or ACTION is missing.
+      </div>
+    );
+  }
+
   const handleVerify = async (proof: ISuccessResult) => {
-    const res = await fetch("/api/verify", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(proof),
-    });
+    setIsVerifying(true);
+    setError(null);
     
-    if (!res.ok) {
-      throw new Error("Verification failed.");
+    try {
+      const res = await fetch("/api/verify", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...proof,
+          action,
+          signal: "", // Signal can be empty if not used, but usually required by backends
+        }),
+      });
+      
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || "Verification failed on backend.");
+      }
+    } catch (err: any) {
+      console.error("World ID verification error:", err);
+      setError(err.message || "An unexpected error occurred during verification.");
+      throw err; // IDKit handles the error UI if we throw
+    } finally {
+      setIsVerifying(false);
     }
   };
 
@@ -42,24 +70,38 @@ const WorldIdKit: React.FC<WorldIdKitProps> = ({
   };
 
   return (
-    <IDKitWidget
-      app_id={app_id}
-      action={action}
-      onSuccess={onSuccess}
-      handleVerify={handleVerify}
-      verification_level={VerificationLevel.Device}
-    >
-      {({ open }) => (
-        <Button 
-          onClick={open} 
-          variant="primary" 
-          icon="verified_user"
-          className="w-full"
-        >
-          Verify with World ID
-        </Button>
+    <div className="space-y-4">
+      <IDKitWidget
+        app_id={app_id}
+        action={action}
+        onSuccess={onSuccess}
+        handleVerify={handleVerify}
+        verification_level={VerificationLevel.Device}
+      >
+        {({ open }) => (
+          <Button 
+            onClick={open} 
+            variant="primary" 
+            icon={isVerifying ? undefined : "verified_user"}
+            disabled={isVerifying}
+            className="w-full"
+          >
+            {isVerifying ? (
+              <span className="flex items-center gap-2">
+                <span className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin"></span>
+                Verifying...
+              </span>
+            ) : "Verify with World ID"}
+          </Button>
+        )}
+      </IDKitWidget>
+      
+      {error && (
+        <p className="text-xs text-red-500 bg-red-500/10 p-2 rounded border border-red-500/20 text-center">
+          {error}
+        </p>
       )}
-    </IDKitWidget>
+    </div>
   );
 };
 

@@ -1,9 +1,33 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Icon, Card, Button, Badge } from './UI';
+import { SpendingKeypair } from '../lib/stealth';
 
 export const Terminal: React.FC = () => {
   const [side, setSide] = useState<'BUY' | 'SELL'>('BUY');
   const [privacyLevel, setPrivacyLevel] = useState(3);
+  const [spendingKeypair, setSpendingKeypair] = useState<SpendingKeypair | null>(null);
+
+  useEffect(() => {
+    const stored = localStorage.getItem("ssl_spending_keypair");
+    if (stored) setSpendingKeypair(JSON.parse(stored));
+    
+    // Listen for storage changes (e.g. from ProfileModal)
+    const handleStorage = () => {
+        const updated = localStorage.getItem("ssl_spending_keypair");
+        if (updated) setSpendingKeypair(JSON.parse(updated));
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
+
+  const handlePlaceOrder = () => {
+    if (!spendingKeypair) {
+        alert("Stealth Layer not initialized. Please go to Profile and initialize your security layer first.");
+        return;
+    }
+    // Logic for placing order with spendingKeypair.publicKey
+    console.log("Placing order with stealth public key:", spendingKeypair.publicKey);
+  };
 
   return (
     <div className="h-full grid grid-cols-12 gap-4 p-4 overflow-hidden bg-background-dark relative">
@@ -22,6 +46,13 @@ export const Terminal: React.FC = () => {
             </div>
             
             <div className="p-5 flex-1 overflow-y-auto space-y-6 bg-stripes bg-[length:20px_20px]">
+               {!spendingKeypair && (
+                   <div className="p-3 bg-red-900/10 border border-red-900/40 rounded text-[10px] text-red-400 font-mono mb-2">
+                       <Icon name="error_outline" className="text-xs mr-1 align-middle" />
+                       STEALTH LAYER INACTIVE: Initialize spending keys in Profile to trade.
+                   </div>
+               )}
+
                <div className="space-y-2 relative bg-surface-dark/95 p-4 border border-border-dark backdrop-blur-sm">
                   <label className="text-[10px] text-primary font-mono uppercase tracking-wider block mb-1">Asset Class</label>
                   <div className="relative">
@@ -100,9 +131,16 @@ export const Terminal: React.FC = () => {
                   </div>
                </div>
 
-               <Button fullWidth icon="lock" className="py-4 mt-2 uppercase tracking-wider">Encrypt & Place Order</Button>
+               <Button 
+                fullWidth 
+                icon={spendingKeypair ? "lock" : "lock_open"} 
+                className="py-4 mt-2 uppercase tracking-wider"
+                onClick={handlePlaceOrder}
+               >
+                {spendingKeypair ? "Encrypt & Place Order" : "Initialize Stealth Layer"}
+               </Button>
                <div className="text-[9px] text-slate-600 text-center font-mono uppercase tracking-wide">
-                  TEE Verification: <span className="text-slate-400">0x8a...4f21</span>
+                  TEE Verification: <span className="text-slate-400">{spendingKeypair ? "READY (0x..." + spendingKeypair.publicKey.slice(-6) + ")" : "OFFLINE"}</span>
                </div>
             </div>
           </Card>
