@@ -8,13 +8,131 @@ Private, sybil-resistant token settlement using **World ID**, **stealth addresse
 User ──> Backend ──> CRE (Chainlink) ──> Vault (on-chain)
 ```
 
-1. **Verify** - User submits World ID proof to backend. Backend forwards to CRE. CRE verifies and writes a report to the vault, marking the user's nullifier as verified.
-2. **Fund** - User deposits tokens into the vault. The vault checks the nullifier is CRE-verified before accepting.
-3. **Order** - User submits a trade order (BUY/SELL) via backend to CRE. CRE stores it in a confidential order book.
-4. **Match** - CRE matches compatible buy/sell orders off-chain. No order details are visible on-chain.
-5. **Settle** - CRE generates one-time stealth addresses for both parties, then writes a settlement report to the vault. Tokens are transferred to the stealth addresses.
+### Phase 1: Identity Verification
 
-No user wallet is exposed during settlement. Only the CRE (via KeystoneForwarder) can write to the vault.
+```
+User                    Backend                 CRE                     Vault
+ │                        │                      │                       │
+ │── World ID proof ────> │                      │                       │
+ │                        │── HTTP {action:       │                       │
+ │                        │   "verify",           │                       │
+ │                        │   nullifierHash} ───> │                       │
+ │                        │   (signed with        │                       │
+ │                        │    authorized key)     │                       │
+ │                        │                       │── report(type=0) ──> │
+ │                        │                       │   encodeAbiParameters │
+ │                        │                       │   (uint8=0,          │
+ │                        │                       │    nullifierHash)     │
+ │                        │                       │                      │── isVerified[
+ │                        │                       │                      │   nullifierHash
+ │                        │                       │                      │   ] = true
+ │                        │                       │                      │── emit Verified
+ │                        │ <── {status:verified} │                       │
+ │ <── verified ────────  │                       │                       │
+```
+
+- Backend signs HTTP request with its EVM key (must be in CRE `authorizedKeys`)
+- CRE receives via `HTTPCapability`, verifies backend signature
+- CRE encodes `(uint8 reportType=0, uint256 nullifierHash)`
+- `runtime.report()` signs the payload -> `evmClient.writeReport()` sends to KeystoneForwarder
+- Forwarder calls `vault.onReport()` -> `_processReport()` -> `_processVerify()`
+- Vault marks `isVerified[nullifierHash] = true`
+
+### Phase 2: Funding
+
+```
+User                                            Vault
+ │                                                │
+ │── approve(vault, amount) ───────────────────> │
+ │── fund(token, amount, nullifierHash) ───────> │
+ │                                                │── require(isVerified[nullifierHash])
+ │                                                │── safeTransferFrom(user, vault, amount)
+ │                                                │── emit Funded(token, amount, nullifierHash)
+```
+
+- User calls vault directly with their wallet
+- Vault checks the nullifier was already verified by CRE (Phase 1)
+- Tokens are transferred into the vault
+- No World ID proof needed here — verification already happened via CRE report
+
+### Phase 3: Order Submission
+
+```
+User                    Backend                 CRE
+ │                        │                      │
+ │── order {              │                      │
+ │    asset, quoteToken,  │                      │
+ │    amount, price,      │                      │
+ │    side, nullifier,    │                      │
+ │    stealthPublicKey    │                      │
+ │   } ────────────────>  │                      │
+ │                        │── HTTP {action:       │
+ │                        │   "order", ...} ───> │
+ │                        │                      │── storeOrder(order)
+ │                        │                      │   buyOrders[] or
+ │                        │                      │   sellOrders[]
+ │                        │ <── {status:queued}   │
+ │ <── queued ──────────  │                       │
+```
+
+- User sends order details to backend (never on-chain)
+- Backend forwards to CRE as signed HTTP payload
+- CRE stores in in-memory order book (confidential, off-chain)
+- Order details (asset, price, amount, side) are never visible on-chain
+
+### Phase 4: Matching + Settlement
+
+```
+CRE (on match found)                            Vault
+ │                                                │
+ │── matchOrders()                                │
+ │   buy.price >= sell.price                      │
+ │   buy.asset == sell.asset                      │
+ │                                                │
+ │── tradeNonce = keccak256(                      │
+ │     buyNullifier + sellNullifier + timestamp)  │
+ │                                                │
+ │── ECDH stealth (per party):                    │
+ │     r = keccak256(tradeNonce + "_buyer")        │
+ │     R = r * G  (ephemeral public key)           │
+ │     shared = r * S  (ECDH with spending pubkey) │
+ │     stealthPub = S + keccak256(shared) * G      │
+ │     stealthAddr = address(stealthPub)           │
+ │                                                │
+ │── orderId = keccak256(                         │
+ │     tradeNonce + stealthBuyer + stealthSeller) │
+ │                                                │
+ │── report(type=1) ───────────────────────────> │
+ │   encodeAbiParameters(                         │
+ │     uint8=1, orderId,                          │
+ │     stealthBuyer, stealthSeller,               │── require(!settledOrders[orderId])
+ │     tokenA, tokenB,                            │── safeTransfer(tokenA -> stealthSeller)
+ │     amountA, amountB)                          │── safeTransfer(tokenB -> stealthBuyer)
+ │                                                │── settledOrders[orderId] = true
+ │                                                │── emit Settled(orderId, stealthBuyer,
+ │                                                │                stealthSeller)
+```
+
+- CRE matches buy order where `price >= sell.price` and same asset
+- Generates unique `tradeNonce` from both nullifiers + timestamp
+- Derives one-time **stealth addresses** via ECDH (EIP-5564 style) — user can derive the private key to claim funds
+- Computes `orderId` to prevent replay
+- Encodes settlement as `(uint8 reportType=1, bytes32 orderId, address stealthBuyer, address stealthSeller, address tokenA, address tokenB, uint256 amountA, uint256 amountB)`
+- Sends report via KeystoneForwarder -> `_processSettle()`
+- Vault transfers `tokenA` to stealth seller, `tokenB` to stealth buyer
+- Neither party's real wallet appears in the settlement transaction
+
+### What's On-Chain vs Off-Chain
+
+| Data | Location | Visible? |
+|---|---|---|
+| Nullifier verified status | On-chain (vault) | Yes |
+| Token deposits | On-chain (vault) | Yes |
+| Order book (prices, amounts, sides) | CRE (off-chain) | No |
+| Match logic | CRE (off-chain) | No |
+| Stealth address derivation | CRE (off-chain) | No |
+| Settlement transfers | On-chain (vault) | Stealth addresses only |
+| Link between user wallet and stealth address | Nowhere | No |
 
 ## Architecture
 
@@ -80,7 +198,7 @@ Environment variables:
 - **Solidity** (Foundry) - Smart contracts
 - **Chainlink CRE** - Off-chain confidential runtime
 - **World ID** - Sybil-resistant identity verification
-- **Stealth Addresses** - One-time addresses derived from `keccak256(stealthPubKey || tradeNonce)`
+- **Stealth Addresses** - ECDH-derived one-time addresses (EIP-5564 style, secp256k1). See [STEALTH.md](STEALTH.md)
 - **OpenZeppelin** - SafeERC20, ReentrancyGuard, Ownable
 
 ## License
