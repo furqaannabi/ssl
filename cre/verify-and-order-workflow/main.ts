@@ -12,7 +12,7 @@ import {
   TxStatus,
 } from "@chainlink/cre-sdk";
 import { keccak256, encodePacked, encodeAbiParameters, parseAbiParameters, toBytes, toHex } from "viem";
-import { secp256k1 } from "@noble/curves/secp256k1";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
 
 // ──────────────────────────────────────────────
 // Types
@@ -85,11 +85,11 @@ function generateStealthAddress(
   const sharedHash = keccak256(toHex(sharedPoint));
 
   // Stealth public key = S + hash(sharedSecret) * G
-  const S = secp256k1.ProjectivePoint.fromHex(spendingPubBytes);
+  const S = secp256k1.Point.fromBytes(spendingPubBytes);
   const hashScalar = BigInt(sharedHash);
-  const offsetPoint = secp256k1.ProjectivePoint.BASE.multiply(hashScalar);
+  const offsetPoint = secp256k1.Point.BASE.multiply(hashScalar);
   const stealthPoint = S.add(offsetPoint);
-  const stealthPubBytes = stealthPoint.toRawBytes(false); // uncompressed 65 bytes
+  const stealthPubBytes = stealthPoint.toBytes(false); // uncompressed 65 bytes
 
   // Address = last 20 bytes of keccak256(pubkey without 0x04 prefix)
   const pubKeyWithoutPrefix = stealthPubBytes.slice(1);

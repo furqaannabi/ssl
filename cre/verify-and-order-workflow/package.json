@@ -1,5 +1,5 @@
 {
-  "name": "ssl-stealth-settlement-layer",
+  "name": "typescript-simple-template",
   "version": "1.0.0",
   "main": "dist/main.js",
   "private": true,
@@ -8,7 +8,8 @@
   },
   "license": "UNLICENSED",
   "dependencies": {
-    "@chainlink/cre-sdk": "^1.0.9"
+    "@chainlink/cre-sdk": "^1.0.9",
+    "@noble/curves": "^2.0.1"
   },
   "devDependencies": {
     "@types/bun": "1.2.21"

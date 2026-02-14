@@ -1,2 +1,2 @@
 *.env
-ssl/node_modules/
+verify-and-order-workflow/node_modules/

@@ -17,7 +17,7 @@
 # ==========================================================================
 staging-settings:
   user-workflow:
-    workflow-name: "ssl-staging"
+    workflow-name: "verify-and-order-workflow-staging"
   workflow-artifacts:
     workflow-path: "./main.ts"
     config-path: "./config.staging.json"
@@ -27,7 +27,7 @@ staging-settings:
 # ==========================================================================
 production-settings:
   user-workflow:
-    workflow-name: "ssl-production"
+    workflow-name: "verify-and-order-workflow-production"
   workflow-artifacts:
     workflow-path: "./main.ts"
     config-path: "./config.production.json"
