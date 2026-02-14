@@ -39,7 +39,8 @@ import {
   Wallet,
   Sliders,
   Network,
-  Check
+  Check,
+  Plus
 } from 'lucide-react';
 
 // Icon Mapping
@@ -55,6 +56,7 @@ const iconMap: Record<string, React.ElementType> = {
   shield: Shield,
   fingerprint: Fingerprint,
   close: X,
+  add: Plus,
   
   // Actions & Status
   check: Check,
@@ -155,7 +157,7 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 
 export const Button: React.FC<ButtonProps> = ({ children, variant = 'primary', icon, fullWidth, className = '', ...props }) => {
   const variants = {
-    primary: 'bg-primary text-black hover:bg-primary-dark font-semibold shadow-glow',
+    primary: 'bg-primary  text-black hover:bg-primary-dark font-semibold shadow-glow',
     secondary: 'bg-slate-800 text-white hover:bg-slate-700 border border-slate-600',
     ghost: 'bg-transparent text-slate-400 hover:text-white hover:bg-white/5',
     danger: 'bg-red-900/20 text-red-500 border border-red-900/50 hover:bg-red-900/40',
@@ -164,7 +166,7 @@ export const Button: React.FC<ButtonProps> = ({ children, variant = 'primary', i
   return (
     <button 
       className={`
-        flex items-center justify-center px-4 py-2 rounded text-sm transition-all active:translate-y-[1px]
+        flex items-center justify-center px-4 py-2 rounded text-sm transition-all cursor-pointer active:translate-y-[1px]
         ${variants[variant]} 
         ${fullWidth ? 'w-full' : ''} 
         ${className}
