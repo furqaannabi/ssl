@@ -4,3 +4,5 @@ node_modules/
 dist/
 .env*
 ! .env.example
+cre/verify-and-order-workflow/tmp.js
+cre/verify-and-order-workflow/tmp.wasm

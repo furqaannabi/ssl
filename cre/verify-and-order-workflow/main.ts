@@ -306,7 +306,6 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
 
 const initWorkflow = (config: Config) => {
   const httpTrigger = new HTTPCapability();
-
   return [
     handler(
       httpTrigger.trigger({
