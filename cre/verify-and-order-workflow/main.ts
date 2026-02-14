@@ -10,6 +10,10 @@ import {
   hexToBase64,
   bytesToHex,
   TxStatus,
+  HTTPClient,
+  HTTPSendRequester,
+  consensusIdenticalAggregation,
+  ok,
 } from "@chainlink/cre-sdk";
 import { keccak256, encodePacked, encodeAbiParameters, parseAbiParameters, toBytes, toHex } from "viem";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
@@ -23,12 +27,22 @@ type Config = {
   chainSelectorName: string;
   authorizedEVMAddress: string;
   gasLimit: string;
+  verificationUrl: string;
 };
 
 interface VerifyPayload {
   action: "verify";
   nullifierHash: string;
+  proof: string;
+  merkle_root: string;
+  credential_type: string;
+  signal: string;
 }
+
+type VerificationResponse = {
+  statusCode: number;
+  body: any;
+};
 
 interface OrderPayload {
   action: "order";
@@ -177,7 +191,55 @@ function sendReport(runtime: Runtime<Config>, reportData: `0x${string}`) {
   }
 
   return bytesToHex(writeResult.txHash || new Uint8Array(32));
+
 }
+
+// ──────────────────────────────────────────────
+// Verification helper
+// ──────────────────────────────────────────────
+
+const verifyProof = (sendRequester: HTTPSendRequester, config: Config, data: VerifyPayload): VerificationResponse => {
+  const bodyData = {
+    nullifier_hash: data.nullifierHash,
+    merkle_root: data.merkle_root,
+    proof: data.proof,
+    credential_type: data.credential_type,
+    action: data.action, // Assuming 'verify' action maps to World ID action, or generic 'verify'. 
+    // If 'action' in payload is distinct from World ID 'action', we might need adjustment.
+    // For now assuming the payload contains the necessary World ID fields.
+    signal: data.signal,
+  };
+
+  const bodyBytes = new TextEncoder().encode(JSON.stringify(bodyData));
+  const body = Buffer.from(bodyBytes).toString("base64");
+
+  const req = {
+    url: config.verificationUrl,
+    method: "POST" as const,
+    body,
+    headers: {
+      "Content-Type": "application/json",
+    },
+    cacheSettings: {
+      store: true,
+      maxAge: "60s",
+    },
+  };
+
+  const resp = sendRequester.sendRequest(req).result();
+
+  let decodedBody = {};
+  if (resp.body) {
+    try {
+      const jsonString = new TextDecoder().decode(resp.body);
+      decodedBody = JSON.parse(jsonString);
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  return { statusCode: resp.statusCode, body: decodedBody };
+};
 
 // ──────────────────────────────────────────────
 // HTTP trigger handler
@@ -187,8 +249,29 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
   const data = decodeJson(payload.input) as Payload;
 
   // ── Action: verify ──
+
   if (data.action === "verify") {
     runtime.log("Verify request for nullifier: " + data.nullifierHash);
+
+    // Call Verification (Single Execution)
+    const httpClient = new HTTPClient();
+    const verificationResult = httpClient
+      .sendRequest(
+        runtime,
+        (sender, cfg: Config) => verifyProof(sender, cfg, data),
+        consensusIdenticalAggregation<VerificationResponse>()
+      )(runtime.config)
+      .result();
+
+    if (verificationResult.statusCode < 200 || verificationResult.statusCode >= 300) {
+      runtime.log("Verification failed: " + verificationResult.statusCode);
+      return JSON.stringify({
+        status: "failed",
+        error: "Verification failed with status " + verificationResult.statusCode
+      });
+    }
+
+    runtime.log("Proof Verified. Proceeding to on-chain report.");
 
     const reportData = encodeAbiParameters(
       parseAbiParameters("uint8 reportType, uint256 nullifierHash"),

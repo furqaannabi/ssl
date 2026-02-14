@@ -17,6 +17,8 @@ interface WorldIDProof {
     nullifier_hash: string;
     proof: string;
     verification_level: string;
+    credential_type: string;
+    signal?: string;
 }
 
 verify.post("/", async (c) => {
@@ -26,41 +28,19 @@ verify.post("/", async (c) => {
         return c.json({ error: "Missing World ID proof fields" }, 400);
     }
 
-    // ── Step 1: Verify proof with World ID cloud API ──
-    const verifyRes = await fetch(
-        `https://developer.worldcoin.org/api/v2/verify/${config.worldAppId}`,
-        {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                merkle_root: body.merkle_root,
-                nullifier_hash: body.nullifier_hash,
-                proof: body.proof,
-                action: config.worldAction,
-            }),
-        }
-    );
-
-    if (!verifyRes.ok) {
-        const err = await verifyRes.text().catch(() => "verification failed");
-        console.error("[verify] World ID verification failed:", err);
-        return c.json({ error: "World ID verification failed", detail: err }, 400);
-    }
-
-    const verifyResult = await verifyRes.json();
-    console.log("[verify] World ID verified:", body.nullifier_hash);
-
-    // ── Step 2: Forward to CRE ──
+    // ── Forward to CRE for Verification ──
     try {
         const creResponse = await sendToCRE({
             action: "verify",
             nullifierHash: body.nullifier_hash,
+            proof: body.proof,
+            merkle_root: body.merkle_root,
+            credential_type: body.credential_type,
+            signal: body.signal ?? "", // Signal might be optional in request but required by CRE
         });
 
         return c.json({
             success: true,
-            nullifierHash: body.nullifier_hash,
-            worldId: verifyResult,
             cre: creResponse,
         });
     } catch (err) {

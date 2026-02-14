@@ -20,6 +20,10 @@ const walletClient = createWalletClient({
 export interface VerifyPayload {
     action: "verify";
     nullifierHash: string;
+    proof: string;
+    merkle_root: string;
+    credential_type: string;
+    signal: string;
 }
 
 export interface OrderPayload {
