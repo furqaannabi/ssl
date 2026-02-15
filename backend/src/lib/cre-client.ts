@@ -1,21 +1,6 @@
-// ──────────────────────────────────────────────
-// CRE HTTP Trigger Client
-// ──────────────────────────────────────────────
-// Signs payloads with the authorized EVM key and
-// POSTs to the CRE workflow HTTP trigger endpoint.
-
-import { createWalletClient, http, type Hex } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
-import { sepolia } from "viem/chains";
+import { spawn } from "child_process";
+import path from "path";
 import { config } from "./config";
-
-const account = privateKeyToAccount(config.evmPrivateKey);
-
-const walletClient = createWalletClient({
-    account,
-    chain: sepolia,
-    transport: http(),
-});
 
 export interface VerifyPayload {
     action: "verify";
@@ -68,38 +53,67 @@ export interface MatchPayload {
 export type CREPayload = VerifyPayload | OrderPayload | MatchPayload;
 
 /**
- * Sign a payload and send it to the CRE HTTP trigger.
- *
- * The CRE workflow expects:
- *   - JSON body as the HTTP payload
- *   - Request signed by an authorized EVM key (matched against authorizedKeys in workflow config)
- *
- * Returns the CRE response body.
+ * Trigger the CRE workflow by spawning `cre workflow simulate`.
+ * This runs the workflow logic locally via the CRE CLI.
  */
 export async function sendToCRE(payload: CREPayload): Promise<unknown> {
-    const body = JSON.stringify(payload);
+    // Resolve path to the workflow directory
+    // backend/src/lib -> ../../../cre/verify-and-order-workflow
+    const workflowPath = path.resolve(__dirname, "../../../cre/verify-and-order-workflow");
+    // Project root for .env
+    const projectRoot = path.resolve(__dirname, "../../../cre");
 
-    // Sign the payload body with the authorized EVM key
-    const signature = await walletClient.signMessage({
-        message: body,
+    return new Promise((resolve, reject) => {
+        const isWindows = process.platform === "win32";
+
+        // On Windows with shell: true, we need to escape quotes.
+        // On Unix with shell: false, we just pass the raw JSON string (node handles args).
+        const inputStr = isWindows
+            ? JSON.stringify(payload).replace(/"/g, '\\"')
+            : JSON.stringify(payload);
+
+        console.log(`[cre-client] Spawning simulation for action: ${payload.action} (Windows: ${isWindows})`);
+
+        const child = spawn("cre", [
+            "workflow",
+            "simulate",
+            workflowPath,
+            "--target=staging-settings",
+            "--non-interactive",
+            "--trigger-index", "0",
+            "--http-payload", inputStr
+        ], {
+            cwd: projectRoot,
+            stdio: ["ignore", "pipe", "pipe"], // ignore stdin since we pass via flag
+            shell: isWindows // Only use shell on Windows to find .cmd/.bat
+        });
+
+        let stdout = "";
+        let stderr = "";
+
+        child.stdout.on("data", (data) => {
+            stdout += data.toString();
+        });
+
+        child.stderr.on("data", (data) => {
+            stderr += data.toString();
+        });
+
+        child.on("close", (code) => {
+            if (code !== 0) {
+                console.error(`[cre-client] Failed with stdout: ${stdout}`);
+                console.error(`[cre-client] Failed with stderr: ${stderr}`);
+                reject(new Error(`CRE execute failed (exit ${code}): ${stderr || stdout}`));
+                return;
+            }
+
+            try {
+                resolve({ output: stdout });
+            } catch (e) {
+                resolve({ output: stdout });
+            }
+        });
+
+        // No stdin write needed
     });
-
-    const res = await fetch(config.creWorkflowUrl, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "X-Signature": signature,
-            "X-Sender": account.address,
-        },
-        body,
-    });
-
-    if (!res.ok) {
-        const errText = await res.text().catch(() => "unknown error");
-        throw new Error(`CRE request failed (${res.status}): ${errText}`);
-    }
-
-    return res.json();
 }
-
-export { account };

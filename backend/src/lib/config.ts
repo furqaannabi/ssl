@@ -10,8 +10,7 @@ function required(name: string): string {
 
 export const config = {
     port: Number(process.env.PORT || 3001),
-    creWorkflowUrl: required("CRE_WORKFLOW_URL"),
+    creWorkflowId: required("CRE_WORKFLOW_ID"),
     evmPrivateKey: required("EVM_PRIVATE_KEY") as `0x${string}`,
-    worldAppId: required("WORLD_APP_ID"),
     worldAction: process.env.WORLD_ACTION || "verify-human",
 } as const;
