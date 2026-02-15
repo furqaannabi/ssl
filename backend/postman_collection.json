@@ -1,0 +1,91 @@
+{
+    "info": {
+        "_postman_id": "ssl-backend-collection",
+        "name": "SSL Backend",
+        "description": "Collection for the SSL Backend Application",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "Health Check",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{baseUrl}}/api/health",
+                    "host": [
+                        "{{baseUrl}}"
+                    ],
+                    "path": [
+                        "api",
+                        "health"
+                    ]
+                }
+            },
+            "response": []
+        },
+        {
+            "name": "Verify Proof",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json",
+                        "type": "text"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"merkle_root\": \"0x123\",\n    \"nullifier_hash\": \"0x456\",\n    \"proof\": \"0x789\",\n    \"verification_level\": \"orb\",\n    \"credential_type\": \"orb\",\n    \"signal\": \"\"\n}"
+                },
+                "url": {
+                    "raw": "{{baseUrl}}/api/verify",
+                    "host": [
+                        "{{baseUrl}}"
+                    ],
+                    "path": [
+                        "api",
+                        "verify"
+                    ]
+                }
+            },
+            "response": []
+        },
+        {
+            "name": "Create Order",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json",
+                        "type": "text"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"nullifierHash\": \"0x456\",\n    \"asset\": \"0xAssetAddress\",\n    \"quoteToken\": \"0xQuoteAddress\",\n    \"amount\": \"100\",\n    \"price\": \"10\",\n    \"side\": \"BUY\",\n    \"stealthPublicKey\": \"0xStealthKey\"\n}"
+                },
+                "url": {
+                    "raw": "{{baseUrl}}/api/order",
+                    "host": [
+                        "{{baseUrl}}"
+                    ],
+                    "path": [
+                        "api",
+                        "order"
+                    ]
+                }
+            },
+            "response": []
+        }
+    ],
+    "variable": [
+        {
+            "key": "baseUrl",
+            "value": "http://localhost:3001",
+            "type": "string"
+        }
+    ]
+}
