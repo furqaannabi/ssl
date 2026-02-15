@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { ResponsiveContainer, AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts';
 import { Asset } from '../types';
 import { Icon, Badge, Card, Button } from './UI';
-import { loadStealthKeys, SpendingKeypair } from '../lib/stealth';
 import { StealthKeyReveal } from './StealthKeyReveal';
 import { FundingModal } from './FundingModal';
 
@@ -25,29 +24,11 @@ const yieldData = [
 ];
 
 export const Portfolio: React.FC = () => {
-  const [stealthKeys, setStealthKeys] = useState<any[]>([]);
-  const [revealTarget, setRevealTarget] = useState<any | null>(null);
   const [isFundingOpen, setIsFundingOpen] = useState(false);
-
-  useEffect(() => {
-    const refreshKeys = () => setStealthKeys(loadStealthKeys());
-    refreshKeys();
-    
-    window.addEventListener('storage', refreshKeys);
-    return () => window.removeEventListener('storage', refreshKeys);
-  }, []);
 
   return (
     <div className="h-full flex flex-col gap-6 p-6 overflow-y-auto bg-background-light dark:bg-background-dark">
-      {revealTarget && (
-        <StealthKeyReveal
-          isOpen={!!revealTarget}
-          onClose={() => setRevealTarget(null)}
-          address={revealTarget.stealthAddress}
-          privateKey={revealTarget.stealthPrivateKey}
-          title={`Stealth Key: ${revealTarget.orderId.slice(0, 8)}...`}
-        />
-      )}
+
 
       <div className="flex justify-between items-center shrink-0">
         <div>
@@ -168,56 +149,28 @@ export const Portfolio: React.FC = () => {
             </div>
           </Card>
 
-          {/* Stealth Settlements Table */}
+          {/* Stealth Settlements Info */}
           <Card className="flex flex-col border-primary/20">
             <div className="p-5 border-b border-border-dark flex justify-between items-center bg-black/40">
               <h2 className="text-sm font-bold text-primary flex items-center gap-2 uppercase tracking-widest">
                 <Icon name="fingerprint" className="text-lg" /> 
-                Recent Stealth Settlements
+                Confidential Settlements
               </h2>
-              <Badge label={`${stealthKeys.length} RECORDED`} color="slate" />
+              <Badge label="STATELESS" color="slate" icon="visibility_off" />
             </div>
-            <div className="overflow-x-auto min-h-[200px]">
-              {stealthKeys.length > 0 ? (
-                <table className="w-full text-left border-collapse font-mono">
-                  <thead>
-                     <tr className="text-[10px] uppercase tracking-widest text-slate-500 border-b border-border-dark bg-black/20">
-                        <th className="px-6 py-4 font-semibold">Settlement Hash</th>
-                        <th className="px-6 py-4 font-semibold">Derived Stealth Address</th>
-                        <th className="px-6 py-4 font-semibold text-center">Action</th>
-                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border-dark text-xs">
-                    {stealthKeys.map((key, i) => (
-                      <tr key={i} className="hover:bg-primary/5 transition-colors group">
-                        <td className="px-6 py-4 text-slate-500 truncate max-w-[150px]">
-                          {key.orderId}
-                        </td>
-                        <td className="px-6 py-4">
-                           <div className="flex items-center gap-2 text-white">
-                              <span className="w-1.5 h-1.5 rounded-full bg-primary shadow-glow"></span>
-                              {key.stealthAddress}
-                           </div>
-                        </td>
-                        <td className="px-6 py-4 text-center">
-                          <Button 
-                            variant="secondary" 
-                            className="text-[10px] py-1 px-3 border-primary/30 hover:bg-primary/10 text-primary"
-                            onClick={() => setRevealTarget(key)}
-                          >
-                            Access Funds
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : (
-                <div className="flex flex-col items-center justify-center p-12 text-center">
-                   <Icon name="shield" className="text-4xl text-slate-800 mb-4" />
-                   <p className="text-xs text-slate-500 max-w-xs">No stealth settlements detected yet. Matched trades will appear here automatically.</p>
+            <div className="p-8 flex flex-col items-center justify-center text-center">
+                <div className="w-16 h-16 bg-primary/5 rounded-full flex items-center justify-center mb-4 border border-primary/10">
+                    <Icon name="shield" className="text-3xl text-primary/50" />
                 </div>
-              )}
+                <h3 className="text-white font-mono uppercase tracking-wide mb-2">Local History Disabled</h3>
+                <p className="text-xs text-slate-500 max-w-sm leading-relaxed mb-6">
+                    To ensure maximum privacy, your trade history and stealth keys are 
+                    <span className="text-slate-300 font-bold mx-1">never stored</span> 
+                    on this device. Please refer to your external wallet or the blockchain for settlement verification.
+                </p>
+                <div className="flex gap-3">
+                    <Button variant="secondary" icon="open_in_new">View Explorer</Button>
+                </div>
             </div>
           </Card>
         </div>

@@ -81,65 +81,13 @@ export function getMetaAddress(publicKey: `0x${string}`): string {
     return `0x${hash.slice(-40)}`;
 }
 
-// ──────────────────────────────────────────────
-// LocalStorage helpers
-// ──────────────────────────────────────────────
-
-const SPENDING_KEY_STORAGE = "ssl_spending_keypair";
-const STEALTH_KEYS_STORAGE = "ssl_stealth_keys";
-
-/** Save spending keypair to localStorage */
-export function saveSpendingKeypair(keypair: SpendingKeypair): void {
-  localStorage.setItem(SPENDING_KEY_STORAGE, JSON.stringify(keypair));
-}
-
-/** Load spending keypair from localStorage */
-export function loadSpendingKeypair(): SpendingKeypair | null {
-  const stored = localStorage.getItem(SPENDING_KEY_STORAGE);
-  if (!stored) return null;
-  return JSON.parse(stored) as SpendingKeypair;
-}
-
-/** Get or create spending keypair */
-export function getOrCreateSpendingKeypair(): SpendingKeypair {
-  const existing = loadSpendingKeypair();
-  if (existing) return existing;
-  const keypair = generateSpendingKeypair();
-  saveSpendingKeypair(keypair);
-  return keypair;
-}
-
-interface StealthKeyEntry {
-  orderId: string;
-  stealthAddress: string;
-  stealthPrivateKey: string;
-  ephemeralPublicKey: string;
-  timestamp: number;
-}
-
-/** Save a derived stealth key after settlement */
-export function saveStealthKey(
-  orderId: string,
-  stealthAddress: string,
-  stealthPrivateKey: `0x${string}`,
-  ephemeralPublicKey: string
-): void {
-  const stored = localStorage.getItem(STEALTH_KEYS_STORAGE);
-  const keys: StealthKeyEntry[] = stored ? JSON.parse(stored) : [];
-  keys.push({
-    orderId,
-    stealthAddress,
-    stealthPrivateKey,
-    ephemeralPublicKey,
-    timestamp: Date.now(),
-  });
-  localStorage.setItem(STEALTH_KEYS_STORAGE, JSON.stringify(keys));
-}
-
-/** Load all stealth keys */
-export function loadStealthKeys(): StealthKeyEntry[] {
-  const stored = localStorage.getItem(STEALTH_KEYS_STORAGE);
-  return stored ? JSON.parse(stored) : [];
+/**
+ * Get public key from private key hex.
+ */
+export function getPublicKeyFromPrivate(privateKeyHex: `0x${string}`): `0x${string}` {
+  const privateKeyBytes = hexToBytes(privateKeyHex);
+  const publicKeyBytes = secp256k1.getPublicKey(privateKeyBytes, false);
+  return toHex(publicKeyBytes);
 }
 
 // ──────────────────────────────────────────────
@@ -153,4 +101,20 @@ function hexToBytes(hex: string): Uint8Array {
     bytes[i] = parseInt(clean.substring(i * 2, i * 2 + 2), 16);
   }
   return bytes;
+}
+
+/** 
+ * Trigger a browser download of the spending keypair.
+ */
+export function downloadKeyfile(keypair: SpendingKeypair, filename = "ssl_stealth_backup.json"): void {
+  const data = JSON.stringify(keypair, null, 2);
+  const blob = new Blob([data], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }

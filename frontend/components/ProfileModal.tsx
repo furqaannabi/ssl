@@ -1,35 +1,129 @@
-import React, { useState, useEffect } from 'react';
-import { Modal, Button, Icon } from './UI';
-import { getOrCreateSpendingKeypair, SpendingKeypair, getMetaAddress } from '../lib/stealth';
-import WorldIdKit from './WorldIdKit';
+import React, { useState } from 'react';
+import { Modal, Button, Icon, useToast } from './UI';
+import { 
+    generateSpendingKeypair, 
+    downloadKeyfile, 
+    SpendingKeypair,
+} from '../lib/stealth';
 import { useConnection } from 'wagmi';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
+import WorldIdKit from './WorldIdKit';
+
+const StealthGenerator: React.FC = () => {
+    const [keys, setKeys] = useState<SpendingKeypair | null>(null);
+    const [isRevealed, setIsRevealed] = useState(false);
+    const { toast } = useToast();
+
+    const handleGenerate = () => {
+        const newKeys = generateSpendingKeypair();
+        setKeys(newKeys);
+    };
+
+    const handleClear = () => {
+        setKeys(null);
+        setIsRevealed(false);
+    };
+
+    if (!keys) {
+        return (
+            <div className="text-center py-6">
+                 <div className="w-16 h-16 mx-auto bg-primary/10 rounded-full flex items-center justify-center mb-4 border border-primary/20">
+                    <Icon name="key" className="text-2xl text-primary" />
+                 </div>
+                 <h4 className="text-sm font-bold text-white uppercase tracking-wider mb-2">Generate Stealth Identity</h4>
+                 <p className="text-[10px] text-slate-400 mb-6 font-mono max-w-[250px] mx-auto">
+                    Create a disposable cryptographic keypair for confidential settlements.
+                 </p>
+                 <Button fullWidth variant="primary" icon="bolt" onClick={handleGenerate}>
+                    Generate New Keys
+                 </Button>
+            </div>
+        );
+    }
+
+    return (
+        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="flex items-center gap-2 p-3 bg-red-900/10 border border-red-900/30 rounded text-red-400 text-[10px] font-mono">
+                <Icon name="warning" className="text-lg" />
+                <div className="flex-1">
+                    <strong className="block mb-0.5 text-red-500">DO NOT REFRESH</strong>
+                    These keys are ephemeral. Copy or download them now. We do not save them.
+                </div>
+            </div>
+
+            <div className="space-y-2">
+                <label className="text-[9px] text-slate-500 uppercase tracking-widest font-bold">Stealth Address (Public)</label>
+                <div className="p-2.5 bg-black border border-border-dark font-mono text-[10px] text-white break-all select-all flex justify-between items-center group rounded">
+                    <span>{keys.publicKey}</span>
+                    <Icon name="content_copy" className="text-slate-600 cursor-pointer hover:text-primary transition-colors" onClick={() => {
+                        navigator.clipboard.writeText(keys.publicKey);
+                        toast.success("Public Key Copied");
+                    }} />
+                </div>
+            </div>
+
+            <div className="space-y-2">
+                <label className="text-[9px] text-slate-500 uppercase tracking-widest font-bold flex justify-between">
+                    <span>Private Key (Secret)</span>
+                    <span className="text-[8px] text-primary cursor-pointer hover:underline" onClick={() => setIsRevealed(!isRevealed)}>
+                        {isRevealed ? "HIDE SECRET" : "REVEAL SECRET"}
+                    </span>
+                </label>
+                <div className={`p-2.5 bg-black border border-border-dark font-mono text-[10px] break-all relative rounded overflow-hidden ${isRevealed ? 'text-red-400' : 'text-slate-700'}`}>
+                     {isRevealed ? keys.privateKey : "****************************************************************"}
+                     <div className="absolute top-2 right-2">
+                          <Icon 
+                             name="content_copy" 
+                             className="text-slate-600 cursor-pointer hover:text-white transition-colors" 
+                             onClick={() => {
+                                 navigator.clipboard.writeText(keys.privateKey);
+                                 toast.success("Private Key Copied to Clipboard");
+                             }} 
+                         />
+                     </div>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 pt-2">
+                <Button variant="secondary" icon="download" onClick={() => downloadKeyfile(keys)} className="text-[10px] border-slate-700 h-10">
+                    Download Backup
+                </Button>
+                <Button variant="ghost" className="text-[10px] h-10 text-slate-500 hover:text-white" onClick={handleClear}>
+                    Clear & Close
+                </Button>
+            </div>
+            
+            <div className="mt-4 pt-4 border-t border-border-dark space-y-3">
+                <h5 className="text-[10px] font-bold text-primary uppercase tracking-widest flex items-center gap-2">
+                    <Icon name="verified_user" className="text-sm" /> Setup Instructions
+                </h5>
+                <div className="bg-surface-lighter p-3 rounded border border-border-dark space-y-2">
+                    <div className="flex gap-3 items-start">
+                        <span className="w-5 h-5 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center text-[10px] font-bold border border-slate-700 shrink-0">1</span>
+                        <p className="text-[10px] text-slate-400">
+                            <strong className="text-white">Copy Private Key</strong> from the section above (reveal it first).
+                        </p>
+                    </div>
+                    <div className="flex gap-3 items-start">
+                        <span className="w-5 h-5 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center text-[10px] font-bold border border-slate-700 shrink-0">2</span>
+                        <p className="text-[10px] text-slate-400">
+                            Open your Wallet (e.g., MetaMask) and select <strong className="text-white">"Add Account"</strong> or <strong className="text-white">"Import Account"</strong>.
+                        </p>
+                    </div>
+                    <div className="flex gap-3 items-start">
+                        <span className="w-5 h-5 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[10px] font-bold border border-primary/50 shrink-0 shadow-glow">3</span>
+                        <p className="text-[10px] text-slate-300">
+                            Paste the Private Key string. This new account acts as your <strong className="text-primary">Stealth Vault</strong> for settlements.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 export const ProfileModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen, onClose }) => {
-    const [spendingKeypair, setSpendingKeypair] = useState<SpendingKeypair | null>(null);
-    const [revealKey, setRevealKey] = useState(false);
-    const [stealthAddress, setStealthAddress] = useState<string>("");
-    
     const { address: eoaAddress, isConnected } = useConnection();
-
-    useEffect(() => {
-        if (isOpen) {
-            const stored = localStorage.getItem("ssl_spending_keypair");
-            if (stored) {
-                const keys = JSON.parse(stored);
-                setSpendingKeypair(keys);
-                const fullAddress = getMetaAddress(keys.publicKey);
-                setStealthAddress(fullAddress.slice(0, 6) + "..." + fullAddress.slice(-4));
-            }
-        }
-    }, [isOpen]);
-
-    const handleInitializeStealth = () => {
-        const keys = getOrCreateSpendingKeypair();
-        setSpendingKeypair(keys);
-        const fullAddress = getMetaAddress(keys.publicKey);
-        setStealthAddress(fullAddress.slice(0, 6) + "..." + fullAddress.slice(-4));
-    };
 
     return (
         <Modal isOpen={isOpen} onClose={onClose} title="Identity & Access">
@@ -65,99 +159,43 @@ export const ProfileModal: React.FC<{ isOpen: boolean; onClose: () => void }> = 
                 </div>
             </div>
 
-            <div className="h-px bg-border-dark w-full mb-8"></div>
-
-            {/* Stealth Identity Section (Privacy) */}
-            <div className="flex flex-col items-center mb-6 relative">
-                <div className="absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-primary/5 to-transparent -z-10 rounded-full blur-2xl opacity-50"></div>
-                
-                <div className="w-20 h-20 rounded-full border-2 border-primary/30 p-1 mb-3 relative group">
-                     <img 
-                        src={stealthAddress ? `https://api.dicebear.com/7.x/identicon/svg?seed=${stealthAddress}` : "https://api.dicebear.com/7.x/identicon/svg?seed=initial"} 
-                        alt="Stealth Avatar" 
-                        className="w-full h-full rounded-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500" 
-                     />
-                     <div className="absolute bottom-0 right-0 bg-background-dark border border-primary rounded-full p-1 text-primary shadow-glow">
-                        <Icon name="fingerprint" className="text-xs block" />
-                     </div>
+            {/* Human Verification Section */}
+            <div className="mb-8 p-4 bg-blue-900/5 border border-blue-900/20 rounded relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-3 opacity-10">
+                    <Icon name="fingerprint" className="text-3xl text-blue-400" />
                 </div>
-
-                <div className="text-center">
-                    <h5 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Stealth Identity</h5>
-                    <div className="flex items-center gap-2">
-                        {stealthAddress ? (
-                            <span className="text-sm font-mono text-white bg-surface-lighter px-3 py-1 rounded border border-border-dark flex items-center gap-2">
-                                <span className="w-1.5 h-1.5 rounded-full bg-primary shadow-glow"></span>
-                                {stealthAddress}
-                            </span>
+                <h4 className="text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                    <Icon name="face" className="text-xs" /> Human Verification
+                </h4>
+                <div className="flex flex-col items-center gap-4">
+                    <div className="text-center">
+                        {localStorage.getItem("ssl_nullifier_hash") ? (
+                            <div className="flex flex-col items-center text-blue-400">
+                                <Icon name="verified" className="text-2xl mb-1" />
+                                <span className="text-xs font-mono font-bold">VERIFIED HUMAN</span>
+                                <span className="text-[9px] text-slate-500">{localStorage.getItem("ssl_nullifier_hash")?.slice(0, 10)}...</span>
+                            </div>
                         ) : (
-                            <span className="text-[10px] font-mono text-slate-500 uppercase tracking-wider flex items-center gap-2 opacity-60">
-                                <span className="w-1.5 h-1.5 rounded-full bg-slate-700"></span>
-                                Inactive
-                            </span>
+                            <p className="text-[10px] text-slate-400 mb-2 max-w-[200px]">
+                                Verify your unique personhood to access compliant pools.
+                            </p>
                         )}
                     </div>
+                     {!localStorage.getItem("ssl_nullifier_hash") && (
+                        <div className="w-full max-w-[200px]">
+                            <WorldIdKit />
+                        </div>
+                     )}
                 </div>
             </div>
 
-            {/* Stealth Layer Management */}
-            <div className="mb-8 bg-black/40 p-4 rounded border border-border-dark relative">
-                {spendingKeypair ? (
-                    <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                            <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Confidential Keys</span>
-                            <span className="text-[10px] font-mono text-primary bg-primary/10 px-2 py-0.5 rounded border border-primary/20">READY</span>
-                        </div>
-                        <div className="p-2 bg-black/60 rounded border border-border-dark font-mono text-[9px] break-all text-slate-500 relative group">
-                            <span className="text-primary/70 mb-1 block uppercase text-[8px]">Stealth Root Public Key</span>
-                            {spendingKeypair.publicKey}
-                        </div>
-                        <div className="pt-2">
-                            {revealKey ? (
-                                <div className="space-y-2">
-                                    <div className="p-2 bg-red-900/20 rounded border border-red-900/50 font-mono text-[9px] break-all text-red-400">
-                                        <span className="text-red-500 mb-1 block uppercase text-[8px] font-bold font-sans">BACKUP THESE KEYS — LOSS IS PERMANENT</span>
-                                        {spendingKeypair.privateKey}
-                                    </div>
-                                    <Button variant="ghost" fullWidth onClick={() => setRevealKey(false)} className="text-[10px]">Hide Secret</Button>
-                                </div>
-                            ) : (
-                                <Button variant="secondary" fullWidth icon="vpn_key" onClick={() => setRevealKey(true)} className="text-[10px] border-slate-800">Review Stealth Backup</Button>
-                            )}
-                        </div>
-                    </div>
-                ) : (
-                    <div className="text-center py-2">
-                        <p className="text-[10px] text-slate-400 mb-4 font-mono">Initialize your confidential settlement layer.</p>
-                        <Button fullWidth variant="primary" icon="bolt" onClick={handleInitializeStealth}>Initialize Stealth Layer</Button>
-                    </div>
-                )}
+            <div className="h-px bg-border-dark w-full mb-8"></div>
+
+            {/* Stateless Generator Section */}
+            <div className="mb-4">
+                <StealthGenerator />
             </div>
 
-            {/* Compliance Section */}
-            <div className="space-y-4 mb-6 bg-black/20 p-4 rounded border border-border-dark">
-                <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-border-dark pb-2 mb-2 flex items-center gap-2">
-                    <Icon name="verified_user" className="text-xs" /> Compliance Verification
-                </h4>
-                
-                <div className="py-2">
-                    <WorldIdKit 
-                        onSuccess={() => console.log("World ID Verified!")} 
-                        signal={eoaAddress} 
-                    />
-                </div>
-
-                <div className="space-y-2 pt-2 border-t border-border-dark/50">
-                    <div className="flex items-center justify-between text-[10px] font-mono">
-                        <span className="text-slate-400">Identity Persistence</span>
-                        <span className="text-primary flex items-center gap-1">ACTIVE <Icon name="check_circle" className="text-[10px]" /></span>
-                    </div>
-                </div>
-            </div>
-
-            <p className="text-[8px] text-slate-600 font-mono uppercase tracking-[0.2em] text-center mt-8">
-                Confidential Asset Protocol <span className="text-slate-800">//</span> Secured by Chainlink + World ID
-            </p>
         </Modal>
     );
 };

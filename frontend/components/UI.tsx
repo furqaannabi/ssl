@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Shield, 
   CandlestickChart, 
@@ -97,20 +97,20 @@ const iconMap: Record<string, React.ElementType> = {
 };
 
 // Icon Component
-interface IconProps {
+interface IconProps extends React.ComponentProps<'svg'> {
   name: string;
   type?: 'outlined' | 'round' | 'filled' | 'sharp'; // Kept for prop compatibility but unused by Lucide
   className?: string;
   size?: number | string;
 }
 
-export const Icon: React.FC<IconProps> = ({ name, className = '', size }) => {
+export const Icon: React.FC<IconProps> = ({ name, className = '', size, ...props }) => {
   const LucideIcon = iconMap[name] || HelpCircle; // Default to HelpCircle if icon not found
   
   // Extract color classes to pass to the icon if needed, though usually className handles it.
   // Lucide icons inherit color from current text color (currentColor) by default.
   
-  return <LucideIcon className={className} size={typeof size === 'number' ? size : undefined} />;
+  return <LucideIcon className={className} size={typeof size === 'number' ? size : undefined} {...props} />;
 };
 
 // Badge Component
@@ -218,6 +218,77 @@ export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children }
         </Card>
       </div>
     </div>
+  );
+};
+
+// Toast System
+interface ToastMessage {
+  id: string;
+  type: 'success' | 'error' | 'info';
+  message: string;
+}
+
+const ToastContext = React.createContext<{
+  toast: {
+    success: (msg: string) => void;
+    error: (msg: string) => void;
+    info: (msg: string) => void;
+  };
+} | null>(null);
+
+export const useToast = () => {
+  const context = React.useContext(ToastContext);
+  if (!context) throw new Error("useToast must be used within a ToastProvider");
+  return context;
+};
+
+export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+
+  const addToast = (type: ToastMessage['type'], message: string) => {
+    const id = Math.random().toString(36).substr(2, 9);
+    setToasts((prev) => [...prev, { id, type, message }]);
+    setTimeout(() => removeToast(id), 3000);
+  };
+
+  const removeToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  const value = {
+    toast: {
+      success: (msg: string) => addToast('success', msg),
+      error: (msg: string) => addToast('error', msg),
+      info: (msg: string) => addToast('info', msg),
+    },
+  };
+
+  return (
+    <ToastContext.Provider value={value}>
+      {children}
+      <div className="fixed bottom-4 right-4 z-[60] flex flex-col gap-2">
+        {toasts.map((t) => (
+          <div 
+            key={t.id} 
+            className={`
+              flex items-center gap-3 px-4 py-3 rounded shadow-2xl border backdrop-blur-md animate-in slide-in-from-right-10 fade-in duration-300
+              ${t.type === 'success' ? 'bg-primary/10 border-primary/30 text-primary' : 
+                t.type === 'error' ? 'bg-red-900/10 border-red-500/30 text-red-500' : 
+                'bg-slate-800/80 border-slate-700 text-white'}
+            `}
+          >
+            <Icon 
+              name={t.type === 'success' ? 'check_circle' : t.type === 'error' ? 'warning' : 'info'} 
+              className="text-lg"
+            />
+            <span className="text-xs font-mono font-bold uppercase tracking-wide">{t.message}</span>
+            <button onClick={() => removeToast(t.id)} className="hover:opacity-70">
+              <Icon name="close" className="text-xs" />
+            </button>
+          </div>
+        ))}
+      </div>
+    </ToastContext.Provider>
   );
 };
 
