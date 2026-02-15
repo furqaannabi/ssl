@@ -37,6 +37,7 @@ interface VerifyPayload {
   merkle_root: string;
   credential_type: string;
   signal: string;
+  userAddress: string;
 }
 
 type VerificationResponse = {
@@ -246,7 +247,7 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
   // ── Action: verify ──
 
   if (data.action === "verify") {
-    runtime.log("Verify request for nullifier: " + data.nullifierHash);
+    runtime.log("Verify request for nullifier: " + data.nullifierHash + ", address: " + data.userAddress);
 
     // Call Verification (Single Execution)
     const httpClient = new HTTPClient();
@@ -266,11 +267,12 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
       });
     }
 
-    runtime.log("Proof Verified. Proceeding to on-chain report.");
+    runtime.log("Proof Verified. Proceeding to on-chain report for address: " + data.userAddress);
 
+    // Report (type=0, address, nullifierHash)
     const reportData = encodeAbiParameters(
-      parseAbiParameters("uint8 reportType, uint256 nullifierHash"),
-      [0, BigInt(data.nullifierHash)]
+      parseAbiParameters("uint8 reportType, address user, uint256 nullifierHash"),
+      [0, data.userAddress as `0x${string}`, BigInt(data.nullifierHash)]
     );
 
     const txHash = sendReport(runtime, reportData);
@@ -279,6 +281,7 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
     return JSON.stringify({
       status: "verified",
       nullifierHash: data.nullifierHash,
+      userAddress: data.userAddress,
       txHash,
     });
   }

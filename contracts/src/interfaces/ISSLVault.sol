@@ -13,23 +13,46 @@ pragma solidity ^0.8.24;
  *        - Only KeystoneForwarder can write reports
  */
 interface ISSLVault {
-    event Funded(address indexed token, uint256 amount, uint256 nullifierHash);
-    event Verified(uint256 indexed nullifierHash);
-    event Settled(bytes32 indexed orderId, address stealthBuyer, address stealthSeller);
+    struct WithdrawalRequest {
+        address token;
+        uint256 amount;
+        bool claimed;
+    }
+
+    event Funded(address indexed token, uint256 amount, address indexed user);
+    event Verified(address indexed user);
+    event WithdrawalRequested(
+        address indexed user,
+        uint256 amount,
+        uint256 withdrawalId,
+        uint256 timestamp
+    );
+    event WithdrawalClaimed(
+        address indexed user,
+        uint256 withdrawalId,
+        uint256 timestamp
+    );
+    event Settled(
+        bytes32 indexed orderId,
+        address stealthBuyer,
+        address stealthSeller
+    );
 
     /// @notice Deposit tokens. Requires CRE-verified nullifier.
     ///         First fund binds nullifier to msg.sender permanently.
-    function fund(address token, uint256 amount, uint256 nullifierHash) external;
+    function fund(address token, uint256 amount) external;
 
     /// @notice Check if a nullifier has been verified by CRE
-    function isVerified(uint256 nullifierHash) external view returns (bool);
-
-    /// @notice Wallet bound to a nullifier (set on first fund)
-    function nullifierOwner(uint256 nullifierHash) external view returns (address);
-
-    /// @notice Balance per nullifier per token
-    function balances(uint256 nullifierHash, address token) external view returns (uint256);
+    function isVerified(address user) external view returns (bool);
 
     /// @notice Check if an order has already been settled
     function settledOrders(bytes32 orderId) external view returns (bool);
+
+    /// @notice Request withdrawal of tokens
+    function requestWithdrawal(address token, uint256 amount) external;
+
+    /// @notice Get withdrawal requests for a user
+    function getWithdrawalRequests(
+        address user
+    ) external view returns (uint256[] memory);
 }

@@ -68,11 +68,19 @@ contract SSLVaultTest is Test {
         uint256 amountA,
         uint256 amountB
     ) internal pure returns (bytes memory) {
-        return abi.encode(
-            uint8(1), orderId, _stealthBuyer, _stealthSeller,
-            _buyerNullifier, _sellerNullifier,
-            tokenA, tokenB, amountA, amountB
-        );
+        return
+            abi.encode(
+                uint8(1),
+                orderId,
+                _stealthBuyer,
+                _stealthSeller,
+                _buyerNullifier,
+                _sellerNullifier,
+                tokenA,
+                tokenB,
+                amountA,
+                amountB
+            );
     }
 
     function _settleViaReport(
@@ -81,10 +89,15 @@ contract SSLVaultTest is Test {
         uint256 amountB
     ) internal {
         bytes memory report = _encodeSettleReport(
-            orderId, stealthBuyer, stealthSeller,
-            NULLIFIER_BUYER, NULLIFIER_SELLER,
-            address(bondToken), address(usdc),
-            amountA, amountB
+            orderId,
+            stealthBuyer,
+            stealthSeller,
+            NULLIFIER_BUYER,
+            NULLIFIER_SELLER,
+            address(bondToken),
+            address(usdc),
+            amountA,
+            amountB
         );
         vm.prank(forwarder);
         vault.onReport("", report);
@@ -92,7 +105,12 @@ contract SSLVaultTest is Test {
 
     function _setupFundedVault() internal {
         // Seller deposits bondToken, buyer deposits USDC
-        _fundAfterVerify(seller, address(bondToken), BOND_AMOUNT, NULLIFIER_SELLER);
+        _fundAfterVerify(
+            seller,
+            address(bondToken),
+            BOND_AMOUNT,
+            NULLIFIER_SELLER
+        );
         _fundAfterVerify(buyer, address(usdc), USDC_AMOUNT, NULLIFIER_BUYER);
     }
 
@@ -121,10 +139,18 @@ contract SSLVaultTest is Test {
     // ── Fund + Nullifier Binding ──
 
     function test_FundBindsNullifierToWallet() public {
-        _fundAfterVerify(seller, address(bondToken), BOND_AMOUNT, NULLIFIER_SELLER);
+        _fundAfterVerify(
+            seller,
+            address(bondToken),
+            BOND_AMOUNT,
+            NULLIFIER_SELLER
+        );
 
         assertEq(vault.nullifierOwner(NULLIFIER_SELLER), seller);
-        assertEq(vault.balances(NULLIFIER_SELLER, address(bondToken)), BOND_AMOUNT);
+        assertEq(
+            vault.balances(NULLIFIER_SELLER, address(bondToken)),
+            BOND_AMOUNT
+        );
         assertEq(bondToken.balanceOf(address(vault)), BOND_AMOUNT);
     }
 
@@ -145,7 +171,10 @@ contract SSLVaultTest is Test {
         vm.prank(seller);
         vault.fund(address(bondToken), BOND_AMOUNT, NULLIFIER_SELLER);
 
-        assertEq(vault.balances(NULLIFIER_SELLER, address(bondToken)), BOND_AMOUNT * 2);
+        assertEq(
+            vault.balances(NULLIFIER_SELLER, address(bondToken)),
+            BOND_AMOUNT * 2
+        );
     }
 
     function test_FundEmitsEvent() public {
@@ -155,7 +184,11 @@ contract SSLVaultTest is Test {
         bondToken.approve(address(vault), BOND_AMOUNT);
 
         vm.expectEmit(true, false, false, true);
-        emit ISSLVault.Funded(address(bondToken), BOND_AMOUNT, NULLIFIER_SELLER);
+        emit ISSLVault.Funded(
+            address(bondToken),
+            BOND_AMOUNT,
+            NULLIFIER_SELLER
+        );
 
         vm.prank(seller);
         vault.fund(address(bondToken), BOND_AMOUNT, NULLIFIER_SELLER);
@@ -176,7 +209,12 @@ contract SSLVaultTest is Test {
 
     function test_RevertFundWrongWallet() public {
         // Seller funds first, binding nullifier
-        _fundAfterVerify(seller, address(bondToken), BOND_AMOUNT, NULLIFIER_SELLER);
+        _fundAfterVerify(
+            seller,
+            address(bondToken),
+            BOND_AMOUNT,
+            NULLIFIER_SELLER
+        );
 
         // Attacker tries to use same nullifier
         address attacker = makeAddr("attacker");
@@ -231,15 +269,24 @@ contract SSLVaultTest is Test {
     function test_RevertSettleNotForwarder() public {
         address attacker = makeAddr("attacker");
         bytes memory report = _encodeSettleReport(
-            keccak256("x"), stealthBuyer, stealthSeller,
-            NULLIFIER_BUYER, NULLIFIER_SELLER,
-            address(bondToken), address(usdc),
-            BOND_AMOUNT, USDC_AMOUNT
+            keccak256("x"),
+            stealthBuyer,
+            stealthSeller,
+            NULLIFIER_BUYER,
+            NULLIFIER_SELLER,
+            address(bondToken),
+            address(usdc),
+            BOND_AMOUNT,
+            USDC_AMOUNT
         );
 
         vm.prank(attacker);
         vm.expectRevert(
-            abi.encodeWithSelector(ReceiverTemplate.InvalidSender.selector, attacker, forwarder)
+            abi.encodeWithSelector(
+                ReceiverTemplate.InvalidSender.selector,
+                attacker,
+                forwarder
+            )
         );
         vault.onReport("", report);
     }
@@ -252,12 +299,20 @@ contract SSLVaultTest is Test {
 
         vm.prank(forwarder);
         vm.expectRevert("settled");
-        vault.onReport("", _encodeSettleReport(
-            orderId, stealthBuyer, stealthSeller,
-            NULLIFIER_BUYER, NULLIFIER_SELLER,
-            address(bondToken), address(usdc),
-            BOND_AMOUNT / 2, USDC_AMOUNT / 2
-        ));
+        vault.onReport(
+            "",
+            _encodeSettleReport(
+                orderId,
+                stealthBuyer,
+                stealthSeller,
+                NULLIFIER_BUYER,
+                NULLIFIER_SELLER,
+                address(bondToken),
+                address(usdc),
+                BOND_AMOUNT / 2,
+                USDC_AMOUNT / 2
+            )
+        );
     }
 
     function test_RevertSettleSellerInsufficientBalance() public {
@@ -265,12 +320,20 @@ contract SSLVaultTest is Test {
 
         vm.prank(forwarder);
         vm.expectRevert("SSL: seller insufficient balance");
-        vault.onReport("", _encodeSettleReport(
-            keccak256("over"), stealthBuyer, stealthSeller,
-            NULLIFIER_BUYER, NULLIFIER_SELLER,
-            address(bondToken), address(usdc),
-            BOND_AMOUNT + 1, USDC_AMOUNT
-        ));
+        vault.onReport(
+            "",
+            _encodeSettleReport(
+                keccak256("over"),
+                stealthBuyer,
+                stealthSeller,
+                NULLIFIER_BUYER,
+                NULLIFIER_SELLER,
+                address(bondToken),
+                address(usdc),
+                BOND_AMOUNT + 1,
+                USDC_AMOUNT
+            )
+        );
     }
 
     function test_RevertSettleBuyerInsufficientBalance() public {
@@ -278,12 +341,20 @@ contract SSLVaultTest is Test {
 
         vm.prank(forwarder);
         vm.expectRevert("SSL: buyer insufficient balance");
-        vault.onReport("", _encodeSettleReport(
-            keccak256("over_b"), stealthBuyer, stealthSeller,
-            NULLIFIER_BUYER, NULLIFIER_SELLER,
-            address(bondToken), address(usdc),
-            BOND_AMOUNT, USDC_AMOUNT + 1
-        ));
+        vault.onReport(
+            "",
+            _encodeSettleReport(
+                keccak256("over_b"),
+                stealthBuyer,
+                stealthSeller,
+                NULLIFIER_BUYER,
+                NULLIFIER_SELLER,
+                address(bondToken),
+                address(usdc),
+                BOND_AMOUNT,
+                USDC_AMOUNT + 1
+            )
+        );
     }
 
     function test_PartialSettlement() public {
@@ -295,11 +366,21 @@ contract SSLVaultTest is Test {
         // First partial settle
         _settleViaReport(keccak256("partial_1"), halfBond, halfUsdc);
 
-        assertEq(vault.balances(NULLIFIER_SELLER, address(bondToken)), BOND_AMOUNT - halfBond);
-        assertEq(vault.balances(NULLIFIER_BUYER, address(usdc)), USDC_AMOUNT - halfUsdc);
+        assertEq(
+            vault.balances(NULLIFIER_SELLER, address(bondToken)),
+            BOND_AMOUNT - halfBond
+        );
+        assertEq(
+            vault.balances(NULLIFIER_BUYER, address(usdc)),
+            USDC_AMOUNT - halfUsdc
+        );
 
         // Second partial settle with remaining
-        _settleViaReport(keccak256("partial_2"), BOND_AMOUNT - halfBond, USDC_AMOUNT - halfUsdc);
+        _settleViaReport(
+            keccak256("partial_2"),
+            BOND_AMOUNT - halfBond,
+            USDC_AMOUNT - halfUsdc
+        );
 
         assertEq(vault.balances(NULLIFIER_SELLER, address(bondToken)), 0);
         assertEq(vault.balances(NULLIFIER_BUYER, address(usdc)), 0);
@@ -335,7 +416,10 @@ contract SSLVaultTest is Test {
 
         assertEq(vault.nullifierOwner(NULLIFIER_SELLER), seller);
         assertEq(vault.nullifierOwner(NULLIFIER_BUYER), buyer);
-        assertEq(vault.balances(NULLIFIER_SELLER, address(bondToken)), 5_000e18);
+        assertEq(
+            vault.balances(NULLIFIER_SELLER, address(bondToken)),
+            5_000e18
+        );
         assertEq(vault.balances(NULLIFIER_BUYER, address(usdc)), 502_500e6);
 
         // 3. CRE settles (includes nullifiers for balance checks)
@@ -344,10 +428,14 @@ contract SSLVaultTest is Test {
 
         bytes memory report = _encodeSettleReport(
             keccak256("trade_1"),
-            s1Buyer, s1Seller,
-            NULLIFIER_BUYER, NULLIFIER_SELLER,
-            address(bondToken), address(usdc),
-            5_000e18, 502_500e6
+            s1Buyer,
+            s1Seller,
+            NULLIFIER_BUYER,
+            NULLIFIER_SELLER,
+            address(bondToken),
+            address(usdc),
+            5_000e18,
+            502_500e6
         );
         vm.prank(forwarder);
         vault.onReport("", report);

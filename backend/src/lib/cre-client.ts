@@ -9,6 +9,7 @@ export interface VerifyPayload {
     merkle_root: string;
     credential_type: string;
     signal: string;
+    userAddress: string;
 }
 
 export interface OrderPayload {

@@ -11,6 +11,7 @@ datasource db {
 }
 
 enum OrderStatus {
+    PENDING
     OPEN
     MATCHED
     SETTLED
@@ -24,7 +25,6 @@ enum OrderSide {
 
 model Order {
     id               String      @id @default(uuid())
-    nullifierHash    String
     asset            String
     quoteToken       String
     amount           String
@@ -33,4 +33,32 @@ model Order {
     stealthPublicKey String
     status           OrderStatus
     createdAt        DateTime    @default(now())
+    userAddress      String?
+    user             User?       @relation(fields: [userAddress], references: [address])
+}
+
+model User {
+    address String  @id
+    name    String
+    orders  Order[]
+}
+
+model VerificationRequest {
+    id                String             @id @default(uuid())
+    nullifierHash     String             @unique
+    merkleRoot        String
+    proof             String
+    credentialType    String
+    verificationLevel String
+    signal            String?
+    userAddress       String
+    status            VerificationStatus @default(PENDING)
+    createdAt         DateTime           @default(now())
+    updatedAt         DateTime           @updatedAt
+}
+
+enum VerificationStatus {
+    PENDING
+    VERIFIED
+    FAILED
 }
