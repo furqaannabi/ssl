@@ -44,18 +44,35 @@ type VerificationResponse = {
   body: any;
 };
 
-interface OrderPayload {
-  action: "order";
-  nullifierHash: string;
-  asset: string;
-  quoteToken: string;
-  amount: string;
-  price: string;
-  side: "BUY" | "SELL";
-  stealthPublicKey: string; // uncompressed secp256k1 public key "0x04..."
+interface MatchPayload {
+  action: "settle_match";
+  buyer: {
+    nullifierHash: string;
+    orderId: string;
+    order: {
+      asset: string;
+      quoteToken: string;
+      amount: string;
+      price: string;
+      side: "BUY" | "SELL";
+    };
+    stealthPublicKey: string;
+  };
+  seller: {
+    nullifierHash: string;
+    orderId: string;
+    order: {
+      asset: string;
+      quoteToken: string;
+      amount: string;
+      price: string;
+      side: "BUY" | "SELL";
+    };
+    stealthPublicKey: string;
+  };
 }
 
-type Payload = VerifyPayload | OrderPayload;
+type Payload = VerifyPayload | MatchPayload;
 
 interface Order {
   nullifierHash: string;
@@ -78,8 +95,7 @@ interface StealthResult {
 // State
 // ──────────────────────────────────────────────
 
-const buyOrders: Order[] = [];
-const sellOrders: Order[] = [];
+
 
 // ──────────────────────────────────────────────
 // ECDH Stealth Address (EIP-5564 style)
@@ -129,28 +145,7 @@ function hexToUint8Array(hex: string): Uint8Array {
 // Matching engine
 // ──────────────────────────────────────────────
 
-function storeOrder(order: Order) {
-  if (order.order.side === "BUY") buyOrders.push(order);
-  else sellOrders.push(order);
-}
 
-function matchOrders(): { buyer: Order; seller: Order } | null {
-  for (let i = 0; i < buyOrders.length; i++) {
-    for (let j = 0; j < sellOrders.length; j++) {
-      const buy = buyOrders[i];
-      const sell = sellOrders[j];
-      if (
-        buy.order.asset === sell.order.asset &&
-        BigInt(buy.order.price) >= BigInt(sell.order.price)
-      ) {
-        buyOrders.splice(i, 1);
-        sellOrders.splice(j, 1);
-        return { buyer: buy, seller: sell };
-      }
-    }
-  }
-  return null;
-}
 
 // ──────────────────────────────────────────────
 // Report helpers
@@ -288,99 +283,76 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
     });
   }
 
-  // ── Action: order ──
-  runtime.log("Order received: " + data.side + " " + data.amount + " @ " + data.price);
+  // ── Action: settle_match ──
+  if (data.action === "settle_match") {
+    runtime.log("Settlement request for " + data.buyer.orderId + " <-> " + data.seller.orderId);
 
-  const order: Order = {
-    nullifierHash: data.nullifierHash,
-    order: {
-      asset: data.asset,
-      quoteToken: data.quoteToken,
-      amount: data.amount,
-      price: data.price,
-      side: data.side,
-    },
-    stealthPublicKey: data.stealthPublicKey,
-  };
+    // Compute trade amount
+    const amountBuy = BigInt(data.buyer.order.amount);
+    const amountSell = BigInt(data.seller.order.amount);
+    const tradeAmount = amountBuy < amountSell ? amountBuy : amountSell;
 
-  storeOrder(order);
-  runtime.log("Order stored. Buy pool: " + buyOrders.length + " Sell pool: " + sellOrders.length);
+    // Deterministic trade nonce from order IDs
+    const tradeNonce = keccak256(
+      encodePacked(
+        ["string", "string"],
+        [data.buyer.orderId, data.seller.orderId]
+      )
+    );
 
-  // Try match
-  const match = matchOrders();
-  if (!match) {
-    runtime.log("No match — queued");
-    return JSON.stringify({ status: "queued", side: data.side });
+    // Generate ECDH stealth addresses
+    // data.buyer.stealthPublicKey is usually hex string
+    const buyerStealth = generateStealthAddress(
+      data.buyer.stealthPublicKey,
+      tradeNonce + "_buyer"
+    );
+    const sellerStealth = generateStealthAddress(
+      data.seller.stealthPublicKey,
+      tradeNonce + "_seller"
+    );
+
+    runtime.log("Stealth buyer: " + buyerStealth.stealthAddress);
+    runtime.log("Stealth seller: " + sellerStealth.stealthAddress);
+
+    const orderId = keccak256(
+      encodePacked(
+        ["string", "string", "string"],
+        [tradeNonce, buyerStealth.stealthAddress, sellerStealth.stealthAddress]
+      )
+    );
+
+    // Encode settle report
+    const reportData = encodeAbiParameters(
+      parseAbiParameters(
+        "uint8 reportType, bytes32 orderId, address stealthBuyer, address stealthSeller, uint256 buyerNullifier, uint256 sellerNullifier, address tokenA, address tokenB, uint256 amountA, uint256 amountB"
+      ),
+      [
+        1,
+        orderId as `0x${string}`,
+        buyerStealth.stealthAddress as `0x${string}`,
+        sellerStealth.stealthAddress as `0x${string}`,
+        BigInt(data.buyer.nullifierHash),
+        BigInt(data.seller.nullifierHash),
+        data.seller.order.asset as `0x${string}`,
+        data.seller.order.quoteToken as `0x${string}`,
+        tradeAmount,
+        tradeAmount,
+      ]
+    );
+
+    const txHash = sendReport(runtime, reportData);
+    runtime.log("Settlement tx: " + txHash);
+
+    return JSON.stringify({
+      status: "settled",
+      orderId,
+      stealthBuyer: buyerStealth.stealthAddress,
+      stealthSeller: sellerStealth.stealthAddress,
+      txHash,
+    });
   }
 
-  runtime.log("Match found!");
-
-  // Compute trade amount
-  const amountBuy = BigInt(match.buyer.order.amount);
-  const amountSell = BigInt(match.seller.order.amount);
-  const tradeAmount = amountBuy < amountSell ? amountBuy : amountSell;
-
-  // Trade nonce (unique per match)
-  const tradeNonce = keccak256(
-    encodePacked(
-      ["string", "string", "string"],
-      [match.buyer.nullifierHash, match.seller.nullifierHash, Date.now().toString()]
-    )
-  );
-
-  // Generate ECDH stealth addresses
-  // Each party gets a unique ephemeral seed so their stealth keys are independent
-  const buyerStealth = generateStealthAddress(
-    match.buyer.stealthPublicKey,
-    tradeNonce + "_buyer"
-  );
-  const sellerStealth = generateStealthAddress(
-    match.seller.stealthPublicKey,
-    tradeNonce + "_seller"
-  );
-
-  runtime.log("Stealth buyer: " + buyerStealth.stealthAddress);
-  runtime.log("Stealth seller: " + sellerStealth.stealthAddress);
-
-  const orderId = keccak256(
-    encodePacked(
-      ["string", "string", "string"],
-      [tradeNonce, buyerStealth.stealthAddress, sellerStealth.stealthAddress]
-    )
-  );
-
-  // Encode settle report (includes nullifiers for vault balance checks)
-  const reportData = encodeAbiParameters(
-    parseAbiParameters(
-      "uint8 reportType, bytes32 orderId, address stealthBuyer, address stealthSeller, uint256 buyerNullifier, uint256 sellerNullifier, address tokenA, address tokenB, uint256 amountA, uint256 amountB"
-    ),
-    [
-      1,
-      orderId as `0x${string}`,
-      buyerStealth.stealthAddress as `0x${string}`,
-      sellerStealth.stealthAddress as `0x${string}`,
-      BigInt(match.buyer.nullifierHash),
-      BigInt(match.seller.nullifierHash),
-      match.seller.order.asset as `0x${string}`,
-      match.seller.order.quoteToken as `0x${string}`,
-      tradeAmount,
-      tradeAmount,
-    ]
-  );
-
-  const txHash = sendReport(runtime, reportData);
-  runtime.log("Settlement tx: " + txHash);
-
-  return JSON.stringify({
-    status: "settled",
-    orderId,
-    stealthBuyer: buyerStealth.stealthAddress,
-    stealthSeller: sellerStealth.stealthAddress,
-    ephemeralPublicKeyBuyer: buyerStealth.ephemeralPublicKey,
-    ephemeralPublicKeySeller: sellerStealth.ephemeralPublicKey,
-    tradeAmount: tradeAmount.toString(),
-    txHash,
-  });
+  return JSON.stringify({ error: "Unknown action" });
 };
 
 // ──────────────────────────────────────────────

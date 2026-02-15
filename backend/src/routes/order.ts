@@ -5,7 +5,9 @@
 // it to the CRE workflow as a signed HTTP payload.
 
 import { Hono } from "hono";
-import { sendToCRE } from "../lib/cre-client";
+import prisma from "../clients/prisma";
+import { matchOrders } from "../lib/matching-engine";
+import { OrderSide, OrderStatus } from "../../generated/prisma/client";
 
 const order = new Hono();
 
@@ -47,21 +49,31 @@ order.post("/", async (c) => {
         `[order] ${body.side} ${body.amount} @ ${body.price} | nullifier: ${body.nullifierHash.slice(0, 10)}...`
     );
 
+
     try {
-        const creResponse = await sendToCRE({
-            action: "order",
-            nullifierHash: body.nullifierHash,
-            asset: body.asset,
-            quoteToken: body.quoteToken,
-            amount: body.amount,
-            price: body.price,
-            side: body.side,
-            stealthPublicKey: body.stealthPublicKey,
+        const newOrder = await prisma.order.create({
+            data: {
+                nullifierHash: body.nullifierHash,
+                asset: body.asset,
+                quoteToken: body.quoteToken,
+                amount: body.amount,
+                price: body.price,
+                side: body.side as OrderSide,
+                stealthPublicKey: body.stealthPublicKey,
+                status: OrderStatus.OPEN,
+            },
+        });
+
+        console.log(`[order] Created order ${newOrder.id}`);
+
+        matchOrders(newOrder.id).catch((err) => {
+            console.error("[order] Matching failed:", err);
         });
 
         return c.json({
             success: true,
-            cre: creResponse,
+            orderId: newOrder.id,
+            status: "OPEN",
         });
     } catch (err) {
         console.error("[order] CRE forward failed:", err);

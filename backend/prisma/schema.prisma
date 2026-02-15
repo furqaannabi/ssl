@@ -1,0 +1,36 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+    output   = "../generated/prisma"
+    provider = "prisma-client-js"
+}
+
+datasource db {
+    provider = "postgresql"
+}
+
+enum OrderStatus {
+    OPEN
+    MATCHED
+    SETTLED
+    CANCELLED
+}
+
+enum OrderSide {
+    BUY
+    SELL
+}
+
+model Order {
+    id               String      @id @default(uuid())
+    nullifierHash    String
+    asset            String
+    quoteToken       String
+    amount           String
+    price            String
+    side             OrderSide
+    stealthPublicKey String
+    status           OrderStatus
+    createdAt        DateTime    @default(now())
+}

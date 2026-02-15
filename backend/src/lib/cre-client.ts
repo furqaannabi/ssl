@@ -37,7 +37,35 @@ export interface OrderPayload {
     stealthPublicKey: string;
 }
 
-export type CREPayload = VerifyPayload | OrderPayload;
+export interface MatchPayload {
+    action: "settle_match";
+    buyer: {
+        nullifierHash: string;
+        orderId: string;
+        order: {
+            asset: string;
+            quoteToken: string;
+            amount: string;
+            price: string;
+            side: "BUY" | "SELL";
+        };
+        stealthPublicKey: string;
+    };
+    seller: {
+        nullifierHash: string;
+        orderId: string;
+        order: {
+            asset: string;
+            quoteToken: string;
+            amount: string;
+            price: string;
+            side: "BUY" | "SELL";
+        };
+        stealthPublicKey: string;
+    };
+}
+
+export type CREPayload = VerifyPayload | OrderPayload | MatchPayload;
 
 /**
  * Sign a payload and send it to the CRE HTTP trigger.
