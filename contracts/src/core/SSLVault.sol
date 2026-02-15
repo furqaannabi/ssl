@@ -91,12 +91,12 @@ contract StealthSettlementVault is
         );
     }
 
-    function _claimWithdrawal(bytes calldata report) internal nonReentrant {
+    function _claimWithdrawal(bytes calldata report) internal {
         (, address _user, uint256 _withdrawalId) = abi.decode(
             report,
             (uint8, address, uint256)
         );
-        require(_withdrawalId < withdrawalId, "SSL: invalid withdrawal ID");
+        require(_withdrawalId <= withdrawalId, "SSL: invalid withdrawal ID");
         WithdrawalRequest storage request = withdrawalRequests[_withdrawalId];
 
         require(!request.claimed, "SSL: already claimed");
@@ -124,7 +124,7 @@ contract StealthSettlementVault is
     function _processReport(
         bytes calldata report
     ) internal override nonReentrant {
-        uint8 reportType = uint8(report[0]);
+        (uint8 reportType) = abi.decode(report, (uint8));
 
         if (reportType == 0) {
             _processVerify(report);
