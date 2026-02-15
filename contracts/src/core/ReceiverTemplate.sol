@@ -13,7 +13,10 @@ abstract contract ReceiverTemplate is IReceiver, Ownable {
     error InvalidForwarderAddress();
     error InvalidSender(address sender, address expected);
 
-    event ForwarderAddressUpdated(address indexed previousForwarder, address indexed newForwarder);
+    event ForwarderAddressUpdated(
+        address indexed previousForwarder,
+        address indexed newForwarder
+    );
 
     constructor(address _forwarderAddress) Ownable(msg.sender) {
         if (_forwarderAddress == address(0)) {
@@ -28,8 +31,13 @@ abstract contract ReceiverTemplate is IReceiver, Ownable {
     }
 
     /// @inheritdoc IReceiver
-    function onReport(bytes calldata metadata, bytes calldata report) external override {
-        if (s_forwarderAddress != address(0) && msg.sender != s_forwarderAddress) {
+    function onReport(
+        bytes calldata /* metadata */,
+        bytes calldata report
+    ) external override {
+        if (
+            s_forwarderAddress != address(0) && msg.sender != s_forwarderAddress
+        ) {
             revert InvalidSender(msg.sender, s_forwarderAddress);
         }
         _processReport(report);
@@ -45,7 +53,9 @@ abstract contract ReceiverTemplate is IReceiver, Ownable {
     function _processReport(bytes calldata report) internal virtual;
 
     /// @inheritdoc IERC165
-    function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
+    function supportsInterface(
+        bytes4 interfaceId
+    ) public view virtual override returns (bool) {
         return
             interfaceId == type(IReceiver).interfaceId ||
             interfaceId == type(IERC165).interfaceId;
