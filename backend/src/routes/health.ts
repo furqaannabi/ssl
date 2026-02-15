@@ -3,7 +3,7 @@
 // ──────────────────────────────────────────────
 
 import { Hono } from "hono";
-import { account } from "../lib/cre-client";
+// import { account } from "../lib/cre-client";
 import { config } from "../lib/config";
 
 const health = new Hono();
@@ -12,8 +12,8 @@ health.get("/", (c) => {
     return c.json({
         status: "ok",
         timestamp: new Date().toISOString(),
-        signer: account.address,
-        creEndpoint: config.creWorkflowUrl,
+        // signer: account.address, // Removed as cre-client no longer exports account
+        // creEndpoint: config.creWorkflowUrl, // Removed - unused
     });
 });
 
