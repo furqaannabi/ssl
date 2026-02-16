@@ -122,16 +122,27 @@ const StealthGenerator: React.FC = () => {
     );
 };
 
+import { auth } from '../lib/auth';
+
 export const ProfileModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen, onClose }) => {
     const { address: eoaAddress, isConnected } = useConnection();
-    const [isHumanVerified, setIsHumanVerified] = useState(!!localStorage.getItem("ssl_nullifier_hash"));
+    const [isHumanVerified, setIsHumanVerified] = useState(false);
 
     useEffect(() => {
+        const checkStatus = async () => {
+            const user = await auth.getMe();
+            if (user) {
+                setIsHumanVerified(user.isVerified);
+            }
+        };
+
+        if (isOpen) checkStatus();
+
         const handleVerificationUpdate = () => {
-            setIsHumanVerified(!!localStorage.getItem("ssl_nullifier_hash"));
+             checkStatus();
         };
         // Also update immediately on mount in case it changed elsewhere
-        handleVerificationUpdate();
+        
 
         window.addEventListener("world-id-updated", handleVerificationUpdate);
         return () => window.removeEventListener("world-id-updated", handleVerificationUpdate);
@@ -185,7 +196,7 @@ export const ProfileModal: React.FC<{ isOpen: boolean; onClose: () => void }> = 
                             <div className="flex flex-col items-center text-blue-400">
                                 <Icon name="verified" className="text-2xl mb-1" />
                                 <span className="text-xs font-mono font-bold">VERIFIED HUMAN</span>
-                                <span className="text-[9px] text-slate-500">{localStorage.getItem("ssl_nullifier_hash")?.slice(0, 10)}...</span>
+                                <span className="text-[9px] text-slate-500">Credential via World ID</span>
                             </div>
                         ) : (
                             <p className="text-[10px] text-slate-400 mb-2 max-w-[200px]">
