@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, NavLink, useLocation } from 'react-router-dom';
-import { Icon } from './components/UI';
-import { loadSpendingKeypair, getMetaAddress } from './lib/stealth';
+import { Icon, ToastProvider } from './components/UI';
+
 import { Portfolio } from './components/Portfolio';
 import { Terminal } from './components/Terminal';
 import { Compliance } from './components/Compliance';
@@ -42,26 +42,7 @@ const navItems = [
 function AppContent() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
-  const [stealthAddress, setStealthAddress] = useState<string>("");
-  const location = useLocation();
-  
   const { address: eoaAddress, isConnected } = useConnection();
-
-  useEffect(() => {
-    const updateStealthIdentity = () => {
-        const keys = loadSpendingKeypair();
-        if (keys) {
-            const meta = getMetaAddress(keys.publicKey);
-            setStealthAddress(meta.slice(0, 6) + "..." + meta.slice(-4));
-        } else {
-            setStealthAddress("");
-        }
-    };
-    
-    updateStealthIdentity();
-    window.addEventListener('storage', updateStealthIdentity);
-    return () => window.removeEventListener('storage', updateStealthIdentity);
-  }, []);
 
   const formattedEOA = eoaAddress ? eoaAddress.slice(0, 6) + "..." + eoaAddress.slice(-4) : "Connect Wallet";
 
@@ -131,6 +112,18 @@ function AppContent() {
                <h1 className="text-lg font-bold text-white tracking-widest font-display flex items-center gap-2">
                  SSL <span className="text-primary font-mono text-sm px-2 py-0.5 border border-primary/20 bg-primary/5 rounded">TERMINAL v1.0</span>
                </h1>
+               {/* Human Status */}
+               <div 
+                  className="hidden md:flex items-center gap-2 ml-8 px-3 py-1 bg-white/5 rounded border border-white/10 cursor-pointer hover:bg-white/10 transition-colors"
+                  onClick={() => setIsProfileOpen(true)}
+               >
+                    <Icon name="fingerprint" className={`text-xs ${localStorage.getItem("ssl_nullifier_hash") ? "text-blue-400" : "text-slate-500"}`} />
+                    <span className="text-[10px] font-mono uppercase tracking-wide text-slate-400">
+                        Human: <span className={localStorage.getItem("ssl_nullifier_hash") ? "text-blue-400 font-bold" : "text-slate-500"}>
+                            {localStorage.getItem("ssl_nullifier_hash") ? "VERIFIED" : "UNVERIFIED"}
+                        </span>
+                    </span>
+               </div>
             </div>
 
             {/* Top Identity - EOA (Authority) and Stealth (Privacy) */}
@@ -141,9 +134,9 @@ function AppContent() {
                     <span className="text-xs font-mono text-slate-300 uppercase">{formattedEOA}</span>
                  </div>
                  <div className="flex items-center gap-1 mt-0.5">
-                    <Icon name={stealthAddress ? "fingerprint" : "lock_open"} className={`text-[10px] ${stealthAddress ? 'text-primary' : 'text-slate-500'}`} />
-                    <span className={`text-[10px] font-mono uppercase tracking-wide ${stealthAddress ? 'text-primary' : 'text-slate-500'}`}>
-                        {stealthAddress ? `Stealth: ${stealthAddress}` : "Privacy Offline"}
+                    <Icon name="lock" className="text-[10px] text-slate-500" />
+                    <span className="text-[10px] font-mono uppercase tracking-wide text-slate-500 group-hover:text-primary transition-colors">
+                        Stealth Identity: Manage Keys
                     </span>
                  </div>
               </div>
@@ -181,7 +174,9 @@ function App() {
           fontStack: 'system',
           overlayBlur: 'small',
         })}>
-          <AppContent />
+          <ToastProvider>
+            <AppContent />
+          </ToastProvider>
         </RainbowKitProvider>
       </QueryClientProvider>
     </WagmiProvider>

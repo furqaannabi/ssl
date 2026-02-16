@@ -39,7 +39,8 @@ const WorldIdKit: React.FC<WorldIdKitProps> = ({
     setError(null);
     
     try {
-      const res = await fetch("/api/verify", {
+      const API_URL = import.meta.env.VITE_API_URL || "https://arc.furqaannabi.com";
+      const res = await fetch(`${API_URL}/api/verify`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
