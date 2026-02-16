@@ -34,12 +34,7 @@ Verifies the signature and sets a secure `token` cookie.
 **Response:**
 ```json
 {
-  "success": true,
-  "sessionId": "session_123",
-  "user": {
-    "address": "0x123...",
-    "name": "User 0x123"
-  }
+  "success": true
 }
 ```
 *Note: A `token` cookie is set in the response headers (HttpOnly, Secure).*

@@ -109,12 +109,7 @@ auth.post("/login", async (c) => {
         });
 
         return c.json({
-            success: true,
-            sessionId: session.id,
-            user: {
-                address: user.address,
-                name: user.name
-            }
+            success: true
         });
 
     } catch (err) {
