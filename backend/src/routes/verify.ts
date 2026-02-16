@@ -11,6 +11,7 @@ import { config } from "../lib/config";
 import { sendToCRE } from "../lib/cre-client";
 import prisma from "../clients/prisma";
 import { recoverMessageAddress } from "viem";
+import { streamText } from 'hono/streaming'
 
 const verify = new Hono();
 
@@ -32,8 +33,19 @@ interface VerifyConfirmPayload {
 verify.post("/", async (c) => {
     const body = await c.req.json<VerifyInitPayload>();
 
-    if (!body.nullifier_hash || !body.proof || !body.merkle_root || !body.user_address) {
-        return c.json({ error: "Missing required fields (proof or user_address)" }, 400);
+    const required = [
+        "nullifier_hash",
+        "proof",
+        "merkle_root",
+        "user_address",
+        "credential_type",
+        "verification_level"
+    ] as const;
+
+    for (const field of required) {
+        if (!body[field]) {
+            return c.json({ error: `Missing required field: ${field}` }, 400);
+        }
     }
 
     // Store in DB as PENDING
@@ -99,31 +111,48 @@ verify.post("/:id/confirm", async (c) => {
             return c.json({ error: "Invalid signature. Signer does not match userAddress." }, 401);
         }
 
-        // ── Forward to CRE for Verification ──
-        const creResponse = await sendToCRE({
-            action: "verify",
-            nullifierHash: request.nullifierHash,
-            proof: request.proof,
-            merkle_root: request.merkleRoot,
-            credential_type: request.credentialType,
-            signal: request.signal ?? "",
-            userAddress: request.userAddress,
-        });
+        // ── Forward to CRE for Verification with SSE ──
+        return streamText(c, async (stream) => {
+            await stream.writeln(JSON.stringify({ type: 'log', message: 'Starting CRE verification...' }));
 
-        // Update DB status
-        await prisma.verificationRequest.update({
-            where: { id },
-            data: { status: "VERIFIED" },
-        });
+            try {
+                const creResponse = await sendToCRE({
+                    action: "verify",
+                    nullifierHash: request.nullifierHash,
+                    proof: request.proof,
+                    merkle_root: request.merkleRoot,
+                    credential_type: request.credentialType,
+                    verification_level: request.verificationLevel,
+                    signal: request.signal ?? "",
+                    userAddress: request.userAddress,
+                }, async (log) => {
+                    await stream.writeln(JSON.stringify({ type: 'log', message: log }));
+                });
 
-        return c.json({
-            success: true,
-            status: "VERIFIED",
-            cre: creResponse,
+                // Update DB status
+                await prisma.verificationRequest.update({
+                    where: { id },
+                    data: { status: "VERIFIED" },
+                });
+
+                await stream.writeln(JSON.stringify({
+                    type: 'result',
+                    success: true,
+                    status: "VERIFIED",
+                    cre: creResponse,
+                }));
+            } catch (err) {
+                console.error("[verify] CRE failed:", err);
+                await stream.writeln(JSON.stringify({
+                    type: 'error',
+                    error: "Verification failed",
+                    detail: err instanceof Error ? err.message : String(err),
+                }));
+            }
         });
 
     } catch (err) {
-        console.error("[verify] Confirmation failed:", err);
+        console.error("[verify] Confirmation setup failed:", err);
         return c.json(
             {
                 error: "Verification confirmation failed",

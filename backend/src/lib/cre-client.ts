@@ -8,6 +8,7 @@ export interface VerifyPayload {
     proof: string;
     merkle_root: string;
     credential_type: string;
+    verification_level: string; // Required for World ID v2
     signal: string;
     userAddress: string;
 }
@@ -65,7 +66,7 @@ export type CREPayload = VerifyPayload | OrderPayload | MatchPayload | WithdrawP
  * Trigger the CRE workflow by spawning `cre workflow simulate`.
  * This runs the workflow logic locally via the CRE CLI.
  */
-export async function sendToCRE(payload: CREPayload): Promise<unknown> {
+export async function sendToCRE(payload: CREPayload, onLog?: (log: string) => void): Promise<unknown> {
     // Resolve path to the workflow directory
     // backend/src/lib -> ../../../cre/verify-and-order-workflow
     const workflowPath = path.resolve(__dirname, "../../../cre/verify-and-order-workflow");
@@ -89,6 +90,7 @@ export async function sendToCRE(payload: CREPayload): Promise<unknown> {
             workflowPath,
             "--target=staging-settings",
             "--non-interactive",
+            "--broadcast",
             "--trigger-index", "0",
             "--http-payload", inputStr
         ], {
@@ -101,11 +103,17 @@ export async function sendToCRE(payload: CREPayload): Promise<unknown> {
         let stderr = "";
 
         child.stdout.on("data", (data) => {
-            stdout += data.toString();
+            const str = data.toString();
+            console.log(`[cre-client:stdout] ${str.trim()}`);
+            if (onLog) onLog(str);
+            stdout += str;
         });
 
         child.stderr.on("data", (data) => {
-            stderr += data.toString();
+            const str = data.toString();
+            console.error(`[cre-client:stderr] ${str.trim()}`);
+            if (onLog) onLog(str);
+            stderr += str;
         });
 
         child.on("close", (code) => {

@@ -37,6 +37,7 @@ interface VerifyPayload {
   proof: string;
   merkle_root: string;
   credential_type: string;
+  verification_level: string;
   signal: string;
   userAddress: string;
 }
@@ -209,6 +210,7 @@ const verifyProof = (sendRequester: HTTPSendRequester, config: Config, data: Ver
     merkle_root: data.merkle_root,
     proof: data.proof,
     credential_type: data.credential_type,
+    verification_level: data.verification_level,
     action: config.worldIdAction, // Assuming 'verify' action maps to World ID action, or generic 'verify'. 
     // If 'action' in payload is distinct from World ID 'action', we might need adjustment.
     // For now assuming the payload contains the necessary World ID fields.

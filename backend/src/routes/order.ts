@@ -9,6 +9,7 @@ import prisma from "../clients/prisma";
 import { matchOrders } from "../lib/matching-engine";
 import { OrderSide, OrderStatus } from "../../generated/prisma/client";
 import { recoverMessageAddress } from "viem";
+import { streamText } from 'hono/streaming'
 
 const order = new Hono();
 
@@ -125,16 +126,33 @@ order.post("/:id/confirm", async (c) => {
 
         console.log(`[order] Order ${id} verified and OPENED.`);
 
-        // Trigger Matching Engine
-        // Non-blocking catch
-        matchOrders(updatedOrder.id).catch((err) => {
-            console.error("[order] Matching failed:", err);
-        });
+        // Trigger Matching Engine with SSE
+        return streamText(c, async (stream) => {
+            await stream.writeln(JSON.stringify({ type: 'log', message: 'Order verified and OPENED. Starting matching engine...' }));
 
-        return c.json({
-            success: true,
-            orderId: updatedOrder.id,
-            status: "OPEN",
+            try {
+                await matchOrders(updatedOrder.id, async (log) => {
+                    await stream.writeln(JSON.stringify({ type: 'log', message: log }));
+                });
+
+                // Fetch latest status
+                const finalOrder = await prisma.order.findUnique({ where: { id: updatedOrder.id } });
+
+                await stream.writeln(JSON.stringify({
+                    type: 'result',
+                    success: true,
+                    orderId: updatedOrder.id,
+                    status: finalOrder?.status || "OPEN",
+                }));
+                // Note: we might want to fetch the fresh status to return here
+            } catch (err) {
+                console.error("[order] Matching failed:", err);
+                await stream.writeln(JSON.stringify({
+                    type: 'error',
+                    error: "Matching engine failed",
+                    detail: err instanceof Error ? err.message : String(err),
+                }));
+            }
         });
 
     } catch (err) {

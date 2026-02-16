@@ -3,7 +3,7 @@ import prisma from "../clients/prisma";
 import { OrderSide, OrderStatus } from "../../generated/prisma/client";
 import { sendToCRE } from "./cre-client";
 
-export async function matchOrders(newOrderId: string) {
+export async function matchOrders(newOrderId: string, onLog?: (log: string) => void) {
     const newOrder = await prisma.order.findUnique({
         where: { id: newOrderId },
     });
@@ -110,7 +110,7 @@ export async function matchOrders(newOrderId: string) {
                     },
                     stealthPublicKey: seller.stealthPublicKey
                 }
-            });
+            }, onLog);
 
             // Update status to SETTLED
             await prisma.$transaction([

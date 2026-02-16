@@ -4,6 +4,6 @@
   "chainSelectorName": "ethereum-testnet-sepolia-base-1",
   "authorizedEVMAddress": "0x35134987bB541607Cd45e62Dd1feA4F587607817",
   "gasLimit": "300000",
-  "worldIdVerifyUrl": "https://developer.worldcoin.org/api/v1/verify/app_staging_72f7715e459d7b53ec15c8bf7398fd0f",
+  "worldIdVerifyUrl": "https://developer.worldcoin.org/api/v2/verify/app_staging_72f7715e459d7b53ec15c8bf7398fd0f",
   "worldIdAction": "atlasverification"
 }
