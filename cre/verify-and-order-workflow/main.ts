@@ -27,7 +27,8 @@ type Config = {
   chainSelectorName: string;
   authorizedEVMAddress: string;
   gasLimit: string;
-  verificationUrl: string;
+  worldIdVerifyUrl: string;
+  worldIdAction: string;
 };
 
 interface VerifyPayload {
@@ -208,7 +209,7 @@ const verifyProof = (sendRequester: HTTPSendRequester, config: Config, data: Ver
     merkle_root: data.merkle_root,
     proof: data.proof,
     credential_type: data.credential_type,
-    action: data.action, // Assuming 'verify' action maps to World ID action, or generic 'verify'. 
+    action: config.worldIdAction, // Assuming 'verify' action maps to World ID action, or generic 'verify'. 
     // If 'action' in payload is distinct from World ID 'action', we might need adjustment.
     // For now assuming the payload contains the necessary World ID fields.
     signal: data.signal,
@@ -218,7 +219,7 @@ const verifyProof = (sendRequester: HTTPSendRequester, config: Config, data: Ver
   const body = Buffer.from(bodyBytes).toString("base64");
 
   const req = {
-    url: config.verificationUrl,
+    url: config.worldIdVerifyUrl,
     method: "POST" as const,
     body,
     headers: {

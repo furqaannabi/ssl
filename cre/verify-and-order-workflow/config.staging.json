@@ -1,8 +1,9 @@
 {
   "schedule": "*/30 * * * * *",
   "vaultAddress": "0xfd115cc084298a18cc4d4e9a4adfbe8fc66ee531",
-  "chainSelectorName": "ethereum-testnet-sepolia",
+  "chainSelectorName": "ethereum-testnet-sepolia-base-1",
   "authorizedEVMAddress": "0x35134987bB541607Cd45e62Dd1feA4F587607817",
   "gasLimit": "300000",
-  "verificationUrl": "https://developer.worldcoin.org/api/v1/verify/YOUR_APP_ID"
+  "worldIdVerifyUrl": "https://developer.worldcoin.org/api/v1/verify/app_staging_72f7715e459d7b53ec15c8bf7398fd0f",
+  "worldIdAction": "atlasverification"
 }

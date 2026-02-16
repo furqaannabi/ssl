@@ -30,8 +30,7 @@ export async function startVaultListener() {
         return;
     }
 
-    const RPC_URL = process.env.RPC_URL || "http://127.0.0.1:8545";
-    console.log(`[Listener] Starting SSLVault listener on ${VAULT_ADDRESS} via ${RPC_URL}...`);
+    const RPC_URL = `https://base-sepolia.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`;
 
     try {
         const provider = new ethers.JsonRpcProvider(RPC_URL);
