@@ -38,9 +38,21 @@ model Order {
 }
 
 model User {
-    address String  @id
-    name    String
-    orders  Order[]
+    address  String         @id
+    name     String
+    orders   Order[]
+    balances TokenBalance[]
+}
+
+model TokenBalance {
+    id          String   @id @default(uuid())
+    token       String
+    balance     String
+    updatedAt   DateTime @updatedAt
+    userAddress String
+    user        User     @relation(fields: [userAddress], references: [address])
+
+    @@unique([userAddress, token])
 }
 
 model VerificationRequest {

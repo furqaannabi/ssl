@@ -17,16 +17,16 @@
 # ==========================================================================
 local-simulation:
   rpcs:
-    - chain-name: ethereum-testnet-sepolia
-      url: https://1rpc.io/sepolia
+    - chain-name: ethereum-testnet-sepolia-base-1
+      url: https://base-sepolia-rpc.publicnode.com
 
 # ==========================================================================
 staging-settings:
   cre-cli:
     don-family: "zone-a"
   rpcs:
-    - chain-name: ethereum-testnet-sepolia
-      url: https://1rpc.io/sepolia
+    - chain-name: ethereum-testnet-sepolia-base-1
+      url: https://base-sepolia-rpc.publicnode.com
 
 
 production-settings:

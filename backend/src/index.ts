@@ -9,6 +9,7 @@ import { config } from "./lib/config";
 import { health } from "./routes/health";
 import { verify } from "./routes/verify";
 import { order } from "./routes/order";
+import { startVaultListener } from "./listeners/ssl-vault-listener";
 
 const app = new Hono();
 
@@ -42,8 +43,13 @@ console.log(`
 ╔══════════════════════════════════════╗
 ║   SSL Backend — Stealth Settlement  ║
 ║   Port: ${String(config.port).padEnd(28)}║
-╚══════════════════════════════════════╝
-`);
+╚══════════════════════════════════════╝`
+);
+
+// Start Vault Listener
+startVaultListener().catch((err) => {
+    console.error("Failed to start vault listener:", err);
+});
 
 export default {
     port: config.port,

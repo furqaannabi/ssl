@@ -73,7 +73,15 @@ interface MatchPayload {
   };
 }
 
-type Payload = VerifyPayload | MatchPayload;
+interface WithdrawPayload {
+  action: "withdraw";
+  withdrawalId: string;
+  userAddress: string;
+  amount: string;
+  token: string;
+}
+
+type Payload = VerifyPayload | MatchPayload | WithdrawPayload;
 
 interface Order {
   nullifierHash: string;
@@ -327,15 +335,13 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
     // Encode settle report
     const reportData = encodeAbiParameters(
       parseAbiParameters(
-        "uint8 reportType, bytes32 orderId, address stealthBuyer, address stealthSeller, uint256 buyerNullifier, uint256 sellerNullifier, address tokenA, address tokenB, uint256 amountA, uint256 amountB"
+        "uint8 reportType, bytes32 orderId, address stealthBuyer, address stealthSeller, address tokenA, address tokenB, uint256 amountA, uint256 amountB"
       ),
       [
         1,
         orderId as `0x${string}`,
         buyerStealth.stealthAddress as `0x${string}`,
         sellerStealth.stealthAddress as `0x${string}`,
-        BigInt(data.buyer.nullifierHash),
-        BigInt(data.seller.nullifierHash),
         data.seller.order.asset as `0x${string}`,
         data.seller.order.quoteToken as `0x${string}`,
         tradeAmount,
@@ -351,6 +357,29 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
       orderId,
       stealthBuyer: buyerStealth.stealthAddress,
       stealthSeller: sellerStealth.stealthAddress,
+      txHash,
+    });
+  }
+
+
+
+  // ── Action: withdraw ──
+  if (data.action === "withdraw") {
+    runtime.log("Withdrawal request " + data.withdrawalId + " for " + data.userAddress);
+
+    // Report (type=2, user, withdrawalId)
+    const reportData = encodeAbiParameters(
+      parseAbiParameters("uint8 reportType, address user, uint256 withdrawalId"),
+      [2, data.userAddress as `0x${string}`, BigInt(data.withdrawalId)]
+    );
+
+    const txHash = sendReport(runtime, reportData);
+    runtime.log("Withdrawal tx: " + txHash);
+
+    return JSON.stringify({
+      status: "withdrawn",
+      withdrawalId: data.withdrawalId,
+      userAddress: data.userAddress,
       txHash,
     });
   }

@@ -51,7 +51,15 @@ export interface MatchPayload {
     };
 }
 
-export type CREPayload = VerifyPayload | OrderPayload | MatchPayload;
+export interface WithdrawPayload {
+    action: "withdraw";
+    withdrawalId: string;
+    userAddress: string;
+    amount: string;
+    token: string;
+}
+
+export type CREPayload = VerifyPayload | OrderPayload | MatchPayload | WithdrawPayload;
 
 /**
  * Trigger the CRE workflow by spawning `cre workflow simulate`.
