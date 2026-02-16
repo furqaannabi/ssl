@@ -48,7 +48,7 @@ const WorldIdKit: React.FC<WorldIdKitProps> = ({
     }
     
     try {
-      const API_URL = import.meta.env.VITE_API_URL || "https://arc.furqaannabi.com";
+      const API_URL = ""; // Use proxy
       
       // Step 1: Submit Proof & Get Challenge
       const initRes = await fetch(`${API_URL}/api/verify`, {
@@ -61,6 +61,7 @@ const WorldIdKit: React.FC<WorldIdKitProps> = ({
           signal: signal || "", 
           user_address: address, // Required by backend
         }),
+         credentials: 'include'
       });
       
       if (!initRes.ok) {

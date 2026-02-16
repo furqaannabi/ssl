@@ -16,8 +16,9 @@ import {
   RainbowKitProvider,
   darkTheme,
 } from '@rainbow-me/rainbowkit';
-import { WagmiProvider, useConnection } from 'wagmi';
+import { WagmiProvider, useConnection, useSignMessage } from 'wagmi';
 import { baseSepolia } from 'wagmi/chains';
+import { auth } from './lib/auth';
 import {
   QueryClientProvider,
   QueryClient,
@@ -42,15 +43,57 @@ const navItems = [
 function AppContent() {
    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
    const [isProfileOpen, setIsProfileOpen] = useState(false);
-   const [isHumanVerified, setIsHumanVerified] = useState(!!localStorage.getItem("ssl_nullifier_hash"));
+   const [isHumanVerified, setIsHumanVerified] = useState(false);
    const { address: eoaAddress, isConnected } = useConnection();
+   const { signMessageAsync } = useSignMessage();
  
    const formattedEOA = eoaAddress ? eoaAddress.slice(0, 6) + "..." + eoaAddress.slice(-4) : "Connect Wallet";
 
-   // Listen for verification updates to update UI without reload
+   // Auth & Verification Sync
+   useEffect(() => {
+        if (!isConnected || !eoaAddress) {
+            setIsHumanVerified(false);
+            return;
+        }
+        
+        const initAuth = async () => {
+             // 1. Try to get current user session
+             let user = await auth.getMe();
+             
+             // 2. If not logged in, try to login
+             if (!user) {
+                 try {
+                     const success = await auth.login(eoaAddress, async ({ message }) => {
+                        return await signMessageAsync({ 
+                            message, 
+                            account: eoaAddress 
+                        });
+                     });
+                     if (success) {
+                         user = await auth.getMe();
+                     }
+                 } catch (e) {
+                     console.error("Auth failed", e);
+                 }
+             }
+
+             // 3. Update State
+             if (user) {
+                 setIsHumanVerified(user.isVerified);
+                 window.dispatchEvent(new Event("world-id-updated"));
+             }
+        };
+        
+        initAuth();
+   }, [eoaAddress, isConnected]);
+
+   // Listen for verification updates handling (Legacy/Local updates)
    useEffect(() => {
         const handleVerificationUpdate = () => {
-            setIsHumanVerified(!!localStorage.getItem("ssl_nullifier_hash"));
+            // Re-fetch me to get latest status if local event triggers
+            auth.getMe().then(user => {
+                if(user) setIsHumanVerified(user.isVerified);
+            });
         };
         window.addEventListener("world-id-updated", handleVerificationUpdate);
         return () => window.removeEventListener("world-id-updated", handleVerificationUpdate);
