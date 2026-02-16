@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   IDKitWidget,
   VerificationLevel,
@@ -110,9 +111,10 @@ const WorldIdKit: React.FC<WorldIdKitProps> = ({
                       const data = JSON.parse(trimmed);
 
                       if (data.type === "log") {
-                          // Optional: Show loading messages
-                          // toast.loading(data.message, { id: "verify-log" });
-                          console.log("[STREAM LOG]:", data.message);
+                          // Clean ANSI codes for display
+                          const cleanMsg = data.message.replace(/\u001b\[\d+m/g, '').replace(/\u001b\[\d+;\d+m/g, '');
+                          setLogs(prev => [...prev, cleanMsg]);
+                          console.log("[STREAM LOG]:", cleanMsg);
                       }
                       
                       // SUCCESS CASE: 
@@ -190,6 +192,16 @@ const WorldIdKit: React.FC<WorldIdKitProps> = ({
     }, 1500);
   };
 
+  // Scroll to bottom of logs
+  const logsEndRef = React.useRef<HTMLDivElement>(null);
+  const [logs, setLogs] = useState<string[]>([]);
+  
+  React.useEffect(() => {
+      if (logsEndRef.current) {
+          logsEndRef.current.scrollIntoView({ behavior: "smooth" });
+      }
+  }, [logs]);
+
   return (
     <div className="space-y-4">
       <IDKitWidget
@@ -201,11 +213,12 @@ const WorldIdKit: React.FC<WorldIdKitProps> = ({
       >
         {({ open }) => (
           <Button 
-            onClick={open} 
+            onClick={() => { setLogs([]); open(); }} 
             variant="primary" 
             icon={isVerifying ? undefined : "verified_user"}
             disabled={isVerifying}
             className="w-full"
+            id="world-id-verify-btn"
           >
             {isVerifying ? (
               <span className="flex items-center gap-2">
@@ -217,6 +230,43 @@ const WorldIdKit: React.FC<WorldIdKitProps> = ({
         )}
       </IDKitWidget>
       
+      {/* Visual Log Terminal (HUD Mode) - Portalled to Body to escape Modal Stacking Context */}
+      {(isVerifying || logs.length > 0) && createPortal(
+          <div className="fixed bottom-10 left-1/2 -translate-x-1/2 w-[90%] max-w-[400px] z-[2147483647] pointer-events-none font-sans">
+              <div className="bg-black/90 backdrop-blur-md rounded-lg border border-green-500/50 p-4 shadow-[0_0_50px_rgba(16,185,129,0.4)]">
+                  {/* Header/Status */}
+                  <div className="flex justify-between items-center mb-2 border-b border-green-500/30 pb-1">
+                      <span className="text-[10px] text-green-400 font-bold tracking-[0.2em] animate-pulse">
+                          {isVerifying ? "ESTABLISHING_SECURE_LINK..." : "TRANSMISSION_COMPLETE"}
+                      </span>
+                      <span className="text-[8px] text-green-700">NET.SEC.V1</span>
+                  </div>
+
+                  {/* Log Stream */}
+                  <div 
+                      className="font-mono text-[10px] space-y-1 relative max-h-[120px] overflow-hidden"
+                      style={{ 
+                          maskImage: 'linear-gradient(to bottom, transparent, black 10%)',
+                          WebkitMaskImage: 'linear-gradient(to bottom, transparent, black 10%)' 
+                      }}
+                  >
+                      {logs.slice(-4).map((log, i) => (
+                          <div key={i} className="text-green-500 break-words leading-tight animate-in slide-in-from-bottom-2 fade-in duration-300">
+                              <span className="opacity-40 mr-2">➜</span>
+                              <span className="text-green-400 shadow-green-glow" dangerouslySetInnerHTML={{ __html: log.replace(/\n/g, '<br/>') }} />
+                          </div>
+                      ))}
+                      {isVerifying && (
+                          <div className="text-green-500 animate-pulse font-bold mt-1">
+                              _ <span className="sr-only">cursor</span>
+                          </div>
+                      )}
+                  </div>
+              </div>
+          </div>,
+          document.body
+      )}
+
       {error && (
         <p className="text-xs text-red-500 bg-red-500/10 p-2 rounded border border-red-500/20 text-center">
           {error}
