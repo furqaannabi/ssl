@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Modal, Button, Icon, useToast } from './UI';
 import { 
     generateSpendingKeypair, 
@@ -124,6 +124,18 @@ const StealthGenerator: React.FC = () => {
 
 export const ProfileModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen, onClose }) => {
     const { address: eoaAddress, isConnected } = useConnection();
+    const [isHumanVerified, setIsHumanVerified] = useState(!!localStorage.getItem("ssl_nullifier_hash"));
+
+    useEffect(() => {
+        const handleVerificationUpdate = () => {
+            setIsHumanVerified(!!localStorage.getItem("ssl_nullifier_hash"));
+        };
+        // Also update immediately on mount in case it changed elsewhere
+        handleVerificationUpdate();
+
+        window.addEventListener("world-id-updated", handleVerificationUpdate);
+        return () => window.removeEventListener("world-id-updated", handleVerificationUpdate);
+    }, [isOpen]); // Also re-check when modal opens
 
     return (
         <Modal isOpen={isOpen} onClose={onClose} title="Identity & Access">
@@ -169,7 +181,7 @@ export const ProfileModal: React.FC<{ isOpen: boolean; onClose: () => void }> = 
                 </h4>
                 <div className="flex flex-col items-center gap-4">
                     <div className="text-center">
-                        {localStorage.getItem("ssl_nullifier_hash") ? (
+                        {isHumanVerified ? (
                             <div className="flex flex-col items-center text-blue-400">
                                 <Icon name="verified" className="text-2xl mb-1" />
                                 <span className="text-xs font-mono font-bold">VERIFIED HUMAN</span>
@@ -181,7 +193,7 @@ export const ProfileModal: React.FC<{ isOpen: boolean; onClose: () => void }> = 
                             </p>
                         )}
                     </div>
-                     {!localStorage.getItem("ssl_nullifier_hash") && (
+                     {!isHumanVerified && (
                         <div className="w-full max-w-[200px]">
                             <WorldIdKit />
                         </div>
