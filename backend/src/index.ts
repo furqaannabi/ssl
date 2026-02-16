@@ -9,6 +9,8 @@ import { config } from "./lib/config";
 import { health } from "./routes/health";
 import { verify } from "./routes/verify";
 import { order } from "./routes/order";
+import { auth } from "./routes/auth";
+import { user } from "./routes/user";
 import { startVaultListener } from "./listeners/ssl-vault-listener";
 
 const app = new Hono();
@@ -28,6 +30,8 @@ app.use(
 app.route("/api/health", health);
 app.route("/api/verify", verify);
 app.route("/api/order", order);
+app.route("/api/auth", auth);
+app.route("/api/user", user);
 
 // ── 404 ──
 app.notFound((c) => c.json({ error: "Not found" }, 404));

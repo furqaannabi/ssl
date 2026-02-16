@@ -10,8 +10,15 @@ import { matchOrders } from "../lib/matching-engine";
 import { OrderSide, OrderStatus } from "../../generated/prisma/client";
 import { recoverMessageAddress } from "viem";
 import { streamText } from 'hono/streaming'
+import { authMiddleware } from "../middleware/auth";
 
-const order = new Hono();
+
+type Variables = {
+    user: string;
+    sessionId: string;
+}
+
+const order = new Hono<{ Variables: Variables }>();
 
 interface OrderInitPayload {
     nullifierHash: string;
@@ -83,13 +90,14 @@ order.post("/", async (c) => {
 });
 
 // ── Step 2: Confirm Order (OPEN) ──
-order.post("/:id/confirm", async (c) => {
+order.post("/:id/confirm", authMiddleware, async (c) => {
     const id = c.req.param("id");
-    const body = await c.req.json<OrderConfirmPayload>();
+    // const body = await c.req.json<OrderConfirmPayload>();
+    const userAddress = c.get("user") as string;
 
-    if (!body.signature) {
+    /* if (!body.signature) {
         return c.json({ error: "Missing signature" }, 400);
-    }
+    } */
 
     try {
         const existingOrder = await prisma.order.findUnique({
@@ -108,14 +116,9 @@ order.post("/:id/confirm", async (c) => {
             return c.json({ error: "Order has no user address to verify against" }, 400);
         }
 
-        // Verify Signature
-        const recoveredAddress = await recoverMessageAddress({
-            message: existingOrder.id,
-            signature: body.signature as `0x${string}`,
-        });
-
-        if (recoveredAddress.toLowerCase() !== existingOrder.userAddress.toLowerCase()) {
-            return c.json({ error: "Invalid signature. Signer does not match order userAddress." }, 401);
+        // Ensure ownership
+        if (existingOrder.userAddress.toLowerCase() !== userAddress.toLowerCase()) {
+            return c.json({ error: "Unauthorized: You do not own this order" }, 403);
         }
 
         // Activate Order
@@ -160,4 +163,66 @@ order.post("/:id/confirm", async (c) => {
         return c.json({ error: "Order confirmation failed", detail: String(err) }, 500);
     }
 });
+
+// ── GET /book (Orderbook) ──
+order.get("/book", async (c) => {
+    try {
+        const orders = await prisma.order.findMany({
+            where: { status: "OPEN" },
+            orderBy: { createdAt: "desc" },
+            // Optionally, we could select only necessary fields
+            // select: { id: true, asset: true, ... }
+        });
+
+        return c.json({
+            success: true,
+            orders,
+        });
+    } catch (err) {
+        console.error("[order] Get book failed:", err);
+        return c.json({ error: "Failed to fetch orderbook" }, 500);
+    }
+});
+
+
+// ── POST /:id/cancel ──
+order.post("/:id/cancel", authMiddleware, async (c) => {
+    const id = c.req.param("id");
+    const userAddress = c.get("user") as string;
+
+    try {
+        const existingOrder = await prisma.order.findUnique({
+            where: { id },
+        });
+
+        if (!existingOrder) {
+            return c.json({ error: "Order not found" }, 404);
+        }
+
+        // Ensure ownership
+        if (existingOrder.userAddress?.toLowerCase() !== userAddress.toLowerCase()) {
+            return c.json({ error: "Unauthorized: You do not own this order" }, 403);
+        }
+
+        if (existingOrder.status !== "OPEN" && existingOrder.status !== "PENDING") {
+            return c.json({ error: "Order cannot be cancelled (already matched or settled)" }, 400);
+        }
+
+        const cancelledOrder = await prisma.order.update({
+            where: { id },
+            data: { status: "CANCELLED" },
+        });
+
+        return c.json({
+            success: true,
+            orderId: cancelledOrder.id,
+            status: "CANCELLED",
+        });
+
+    } catch (err) {
+        console.error("[order] Cancel failed:", err);
+        return c.json({ error: "Failed to cancel order" }, 500);
+    }
+});
+
 export { order };

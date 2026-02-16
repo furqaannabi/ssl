@@ -42,6 +42,8 @@ model User {
     name     String
     orders   Order[]
     balances TokenBalance[]
+    sessions Session[]
+    nonce    String?
 }
 
 model TokenBalance {
@@ -55,22 +57,10 @@ model TokenBalance {
     @@unique([userAddress, token])
 }
 
-model VerificationRequest {
-    id                String             @id @default(uuid())
-    nullifierHash     String             @unique
-    merkleRoot        String
-    proof             String
-    credentialType    String
-    verificationLevel String
-    signal            String?
-    userAddress       String
-    status            VerificationStatus @default(PENDING)
-    createdAt         DateTime           @default(now())
-    updatedAt         DateTime           @updatedAt
-}
-
-enum VerificationStatus {
-    PENDING
-    VERIFIED
-    FAILED
+model Session {
+    id          String   @id @default(uuid())
+    userAddress String
+    user        User     @relation(fields: [userAddress], references: [address])
+    expiresAt   DateTime
+    createdAt   DateTime @default(now())
 }
