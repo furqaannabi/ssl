@@ -60,4 +60,26 @@ cat > "../backend/src/contracts.json" <<EOF
 }
 EOF
 
+# Update CRE config (using node for safe JSON manipulation)
+CRE_CONFIG="../cre/verify-and-order-workflow/config.staging.json"
+if [ -f "$CRE_CONFIG" ]; then
+    echo "📝 Updating CRE config at $CRE_CONFIG..."
+    # Create a temporary updating script
+    node -e "
+    const fs = require('fs');
+    const path = '$CRE_CONFIG';
+    try {
+        const config = JSON.parse(fs.readFileSync(path, 'utf8'));
+        config.vaultAddress = '$VAULT_ADDR';
+        fs.writeFileSync(path, JSON.stringify(config, null, 2));
+        console.log('✅ Updated vaultAddress in CRE config');
+    } catch (e) {
+        console.error('❌ Failed to update CRE config:', e);
+        process.exit(1);
+    }
+    "
+else
+    echo "⚠️  CRE config not found at $CRE_CONFIG"
+fi
+
 echo "✅ Deployment complete! New Vault: $VAULT_ADDR"
