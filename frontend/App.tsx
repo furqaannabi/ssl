@@ -40,106 +40,116 @@ const navItems = [
 ];
 
 function AppContent() {
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isProfileOpen, setIsProfileOpen] = useState(false);
-  const { address: eoaAddress, isConnected } = useConnection();
+   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+   const [isProfileOpen, setIsProfileOpen] = useState(false);
+   const [isHumanVerified, setIsHumanVerified] = useState(!!localStorage.getItem("ssl_nullifier_hash"));
+   const { address: eoaAddress, isConnected } = useConnection();
+ 
+   const formattedEOA = eoaAddress ? eoaAddress.slice(0, 6) + "..." + eoaAddress.slice(-4) : "Connect Wallet";
 
-  const formattedEOA = eoaAddress ? eoaAddress.slice(0, 6) + "..." + eoaAddress.slice(-4) : "Connect Wallet";
+   // Listen for verification updates to update UI without reload
+   useEffect(() => {
+        const handleVerificationUpdate = () => {
+            setIsHumanVerified(!!localStorage.getItem("ssl_nullifier_hash"));
+        };
+        window.addEventListener("world-id-updated", handleVerificationUpdate);
+        return () => window.removeEventListener("world-id-updated", handleVerificationUpdate);
+   }, []);
 
 
-
-  return (
-    <div className="flex h-screen w-full bg-background-dark text-slate-300 font-display">
-      
-      {/* Modals */}
-      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
-      <ProfileModal isOpen={isProfileOpen} onClose={() => setIsProfileOpen(false)} />
-
-      {/* Sidebar */}
-      <aside className="w-16 lg:w-20 border-r border-border-dark bg-surface-dark flex flex-col items-center py-6 z-30 shadow-2xl">
-        <div className="mb-8">
-           <div className="w-10 h-10 bg-primary/10 border border-primary flex items-center justify-center shadow-glow rounded-sm">
-             <Icon name="security" className="text-primary text-xl" />
-           </div>
-        </div>
-
-        <nav className="flex flex-col gap-4">
-          {navItems.map((item) => {
-            const isActive = location.pathname === item.path || (item.path === '/' && location.pathname === '/');
-            return (
-              <NavLink
-                key={item.path}
-                to={item.path}
-                className={`group relative w-10 h-10 flex items-center justify-center transition-all duration-300 ${isActive ? 'text-primary' : 'text-slate-500 hover:text-slate-200'}`}
-              >
-                <Icon name={item.icon} className={`text-2xl transition-all ${isActive ? 'scale-110 drop-shadow-[0_0_5px_rgba(13,242,89,0.5)]' : ''}`} />
-                {isActive && <div className="absolute -left-5 top-1/2 -translate-y-1/2 w-1 h-6 bg-primary rounded-r shadow-glow"></div>}
-                
-                {/* Tooltip */}
-                <span className="absolute left-14 bg-surface-lighter border border-border-dark px-2 py-1 text-xs text-primary opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 font-mono shadow-xl pointer-events-none">
-                  {item.label}
-                </span>
-              </NavLink>
-            );
-          })}
-        </nav>
-        
-        <div className="mt-auto flex flex-col items-center gap-6">
-          <button 
-            onClick={() => setIsProfileOpen(true)}
-            className="w-8 h-8 rounded-full overflow-hidden border border-border-dark hover:border-primary transition-all grayscale hover:grayscale-0 shadow-lg hover:shadow-glow"
-          >
-            <img 
-               src={eoaAddress ? `https://api.dicebear.com/7.x/identicon/svg?seed=${eoaAddress}` : "https://api.dicebear.com/7.x/identicon/svg?seed=fallback"} 
-               alt="User" 
-               className="w-full h-full object-cover" 
-            />
-          </button>
-          <button 
-            onClick={() => setIsSettingsOpen(true)}
-            className="text-slate-500 hover:text-primary transition-colors hover:rotate-90 duration-500"
-          >
-            <Icon name="settings" className="text-xl" />
-          </button>
-        </div>
-      </aside>
-
-      {/* Main Area */}
-      <div className="flex-1 flex flex-col min-w-0">
-         {/* Header */}
-         <header className="h-16 border-b border-border-dark bg-surface-dark/50 backdrop-blur-md flex items-center justify-between px-8 shrink-0 z-20">
-            <div className="flex items-center gap-4">
-               <h1 className="text-lg font-bold text-white tracking-widest font-display flex items-center gap-2">
-                 SSL <span className="text-primary font-mono text-sm px-2 py-0.5 border border-primary/20 bg-primary/5 rounded">TERMINAL v1.0</span>
-               </h1>
-               {/* Human Status */}
-               <div 
-                  className="hidden md:flex items-center gap-2 ml-8 px-3 py-1 bg-white/5 rounded border border-white/10 cursor-pointer hover:bg-white/10 transition-colors"
-                  onClick={() => setIsProfileOpen(true)}
-               >
-                    <Icon name="fingerprint" className={`text-xs ${localStorage.getItem("ssl_nullifier_hash") ? "text-blue-400" : "text-slate-500"}`} />
-                    <span className="text-[10px] font-mono uppercase tracking-wide text-slate-400">
-                        Human: <span className={localStorage.getItem("ssl_nullifier_hash") ? "text-blue-400 font-bold" : "text-slate-500"}>
-                            {localStorage.getItem("ssl_nullifier_hash") ? "VERIFIED" : "UNVERIFIED"}
-                        </span>
-                    </span>
-               </div>
+ 
+   return (
+     <div className="flex h-screen w-full bg-background-dark text-slate-300 font-display">
+       
+       {/* Modals */}
+       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+       <ProfileModal isOpen={isProfileOpen} onClose={() => setIsProfileOpen(false)} />
+ 
+       {/* Sidebar */}
+       <aside className="w-16 lg:w-20 border-r border-border-dark bg-surface-dark flex flex-col items-center py-6 z-30 shadow-2xl">
+         <div className="mb-8">
+            <div className="w-10 h-10 bg-primary/10 border border-primary flex items-center justify-center shadow-glow rounded-sm">
+              <Icon name="security" className="text-primary text-xl" />
             </div>
-
-            {/* Top Identity - EOA (Authority) and Stealth (Privacy) */}
-            <div className="flex items-center justify-end gap-6 w-1/3">
-              <div className="flex flex-col items-end cursor-pointer hover:bg-white/5 p-2 rounded transition-colors" onClick={() => setIsProfileOpen(true)}>
-                 <div className="flex items-center gap-2">
-                    <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-primary shadow-glow' : 'bg-slate-700'}`}></span>
-                    <span className="text-xs font-mono text-slate-300 uppercase">{formattedEOA}</span>
-                 </div>
-                 <div className="flex items-center gap-1 mt-0.5">
-                    <Icon name="lock" className="text-[10px] text-slate-500" />
-                    <span className="text-[10px] font-mono uppercase tracking-wide text-slate-500 group-hover:text-primary transition-colors">
-                        Stealth Identity: Manage Keys
-                    </span>
-                 </div>
-              </div>
+         </div>
+ 
+         <nav className="flex flex-col gap-4">
+           {navItems.map((item) => {
+             const isActive = location.pathname === item.path || (item.path === '/' && location.pathname === '/');
+             return (
+               <NavLink
+                 key={item.path}
+                 to={item.path}
+                 className={`group relative w-10 h-10 flex items-center justify-center transition-all duration-300 ${isActive ? 'text-primary' : 'text-slate-500 hover:text-slate-200'}`}
+               >
+                 <Icon name={item.icon} className={`text-2xl transition-all ${isActive ? 'scale-110 drop-shadow-[0_0_5px_rgba(13,242,89,0.5)]' : ''}`} />
+                 {isActive && <div className="absolute -left-5 top-1/2 -translate-y-1/2 w-1 h-6 bg-primary rounded-r shadow-glow"></div>}
+                 
+                 {/* Tooltip */}
+                 <span className="absolute left-14 bg-surface-lighter border border-border-dark px-2 py-1 text-xs text-primary opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 font-mono shadow-xl pointer-events-none">
+                   {item.label}
+                 </span>
+               </NavLink>
+             );
+           })}
+         </nav>
+         
+         <div className="mt-auto flex flex-col items-center gap-6">
+           <button 
+             onClick={() => setIsProfileOpen(true)}
+             className="w-8 h-8 rounded-full overflow-hidden border border-border-dark hover:border-primary transition-all grayscale hover:grayscale-0 shadow-lg hover:shadow-glow"
+           >
+             <img 
+                src={eoaAddress ? `https://api.dicebear.com/7.x/identicon/svg?seed=${eoaAddress}` : "https://api.dicebear.com/7.x/identicon/svg?seed=fallback"} 
+                alt="User" 
+                className="w-full h-full object-cover" 
+             />
+           </button>
+           <button 
+             onClick={() => setIsSettingsOpen(true)}
+             className="text-slate-500 hover:text-primary transition-colors hover:rotate-90 duration-500"
+           >
+             <Icon name="settings" className="text-xl" />
+           </button>
+         </div>
+       </aside>
+ 
+       {/* Main Area */}
+       <div className="flex-1 flex flex-col min-w-0">
+          {/* Header */}
+          <header className="h-16 border-b border-border-dark bg-surface-dark/50 backdrop-blur-md flex items-center justify-between px-8 shrink-0 z-20">
+             <div className="flex items-center gap-4">
+                <h1 className="text-lg font-bold text-white tracking-widest font-display flex items-center gap-2">
+                  SSL <span className="text-primary font-mono text-sm px-2 py-0.5 border border-primary/20 bg-primary/5 rounded">TERMINAL v1.0</span>
+                </h1>
+                {/* Human Status */}
+                <div 
+                   className="hidden md:flex items-center gap-2 ml-8 px-3 py-1 bg-white/5 rounded border border-white/10 cursor-pointer hover:bg-white/10 transition-colors"
+                   onClick={() => setIsProfileOpen(true)}
+                >
+                     <Icon name="fingerprint" className={`text-xs ${isHumanVerified ? "text-blue-400" : "text-slate-500"}`} />
+                     <span className="text-[10px] font-mono uppercase tracking-wide text-slate-400">
+                         Human: <span className={isHumanVerified ? "text-blue-400 font-bold" : "text-slate-500"}>
+                             {isHumanVerified ? "VERIFIED" : "UNVERIFIED"}
+                         </span>
+                     </span>
+                </div>
+             </div>
+ 
+             {/* Top Identity - EOA (Authority) and Stealth (Privacy) */}
+             <div className="flex items-center justify-end gap-6 w-1/3">
+               <div className="flex flex-col items-end cursor-pointer hover:bg-white/5 p-2 rounded transition-colors" onClick={() => setIsProfileOpen(true)}>
+                  <div className="flex items-center gap-2">
+                     <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-primary shadow-glow' : 'bg-slate-700'}`}></span>
+                     <span className="text-xs font-mono text-slate-300 uppercase">{formattedEOA}</span>
+                  </div>
+                  <div className="flex items-center gap-1 mt-0.5">
+                     <Icon name="lock" className="text-[10px] text-slate-500" />
+                     <span className="text-[10px] font-mono uppercase tracking-wide text-slate-500 group-hover:text-primary transition-colors">
+                         Stealth Identity: Manage Keys
+                     </span>
+                  </div>
+               </div>
               <div className="h-8 w-px bg-border-dark hidden lg:block"></div>
               <div className="text-right hidden lg:block">
                  <div className="text-[10px] text-slate-500 font-mono uppercase tracking-wider">Net Liquidity</div>

@@ -5,8 +5,8 @@ import {
   VerificationLevel,
   ISuccessResult,
 } from "@worldcoin/idkit";
-import { Button } from "./UI";
-import { useConnection } from "wagmi";
+import { Button, useToast } from "./UI";
+import { useConnection, useSignMessage } from "wagmi";
 
 interface WorldIdKitProps {
   onSuccess?: (result: ISuccessResult) => void;
@@ -23,6 +23,7 @@ const WorldIdKit: React.FC<WorldIdKitProps> = ({
 }) => {
   const [isVerifying, setIsVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { toast } = useToast();
   const { address } = useConnection();
 
   // Validate configuration
@@ -34,30 +35,60 @@ const WorldIdKit: React.FC<WorldIdKitProps> = ({
     );
   }
 
+  const { mutateAsync: signMessageAsync } = useSignMessage();
+
   const handleVerify = async (proof: ISuccessResult) => {
     setIsVerifying(true);
     setError(null);
     
+    if (!address) {
+       setError("Please connect your wallet first.");
+       setIsVerifying(false);
+       return;
+    }
+    
     try {
       const API_URL = import.meta.env.VITE_API_URL || "https://arc.furqaannabi.com";
-      const res = await fetch(`${API_URL}/api/verify`, {
+      
+      // Step 1: Submit Proof & Get Challenge
+      const initRes = await fetch(`${API_URL}/api/verify`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...proof,
+          credential_type: proof.verification_level, // Backend requires this field
           action,
-          signal: signal || "", // Signal can be empty if not used, but usually required by backends
+          signal: signal || "", 
+          user_address: address, // Required by backend
         }),
       });
       
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.message || "Verification failed on backend.");
+      if (!initRes.ok) {
+        const errorData = await initRes.json().catch(() => ({}));
+        throw new Error(errorData.error || "Verification init failed on backend.");
+      }
+      
+      const { requestId, messageToSign } = await initRes.json();
+      
+      // Step 2: Sign the Challenge
+      const signature = await signMessageAsync({
+          message: messageToSign,
+          account: address,
+      });
+
+      // Step 3: Confirm with Signature
+      const confirmRes = await fetch(`${API_URL}/api/verify/${requestId}/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ signature }),
+      });
+
+      if (!confirmRes.ok) {
+        const errorData = await confirmRes.json().catch(() => ({}));
+        throw new Error(errorData.error || "Verification confirmation failed.");
       }
 
-      // Store nullifier hash for future funding/actions
+      // Store nullifier hash for valid session
       if (proof.nullifier_hash) {
           localStorage.setItem("ssl_nullifier_hash", proof.nullifier_hash);
       }
@@ -74,8 +105,9 @@ const WorldIdKit: React.FC<WorldIdKitProps> = ({
     if (externalOnSuccess) {
       externalOnSuccess(result);
     } else {
-      // Default behavior if no callback provided
-      window.location.href = "/success";
+      // Default behavior: Show success and dispatch event to update UI state
+      toast.success("Human Verified successfully");
+      window.dispatchEvent(new Event("world-id-updated"));
     }
   };
 
