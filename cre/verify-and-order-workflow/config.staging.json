@@ -1,6 +1,6 @@
 {
   "schedule": "*/30 * * * * *",
-  "vaultAddress": "0x0Df97817C1Fc14818e9044A0c9F56E2EAe674237",
+  "vaultAddress": "0x987190756d7d9914be98c46fcabb863230ed3267",
   "chainSelectorName": "ethereum-testnet-sepolia-base-1",
   "authorizedEVMAddress": "0x35134987bB541607Cd45e62Dd1feA4F587607817",
   "gasLimit": "300000",

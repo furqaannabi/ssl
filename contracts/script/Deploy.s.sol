@@ -19,7 +19,7 @@ import "../src/mocks/MockUSDC.sol";
  */
 contract DeployScript is Script {
     address constant MOCK_FORWARDER =
-        0x15fC6ae953E024d975e77382eEeC56A9101f9F88;
+        0x82300bd7c3958625581cc2F77bC6464dcEcDF3e5;
 
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
