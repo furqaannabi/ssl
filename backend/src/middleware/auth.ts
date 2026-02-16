@@ -1,18 +1,22 @@
 
 import { Context, Next } from "hono";
+import { getCookie } from "hono/cookie";
 import { jwtVerify } from "jose";
 import prisma from "../clients/prisma";
 
 const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET || "super-secret-key");
 
 export async function authMiddleware(c: Context, next: Next) {
+    let token = getCookie(c, "token");
     const authHeader = c.req.header("Authorization");
 
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-        return c.json({ error: "Unauthorized: Missing or invalid token" }, 401);
+    if (!token && authHeader && authHeader.startsWith("Bearer ")) {
+        token = authHeader.split(" ")[1];
     }
 
-    const token = authHeader.split(" ")[1];
+    if (!token) {
+        return c.json({ error: "Unauthorized: Missing or invalid token" }, 401);
+    }
 
     try {
         const { payload } = await jwtVerify(token, JWT_SECRET);

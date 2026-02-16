@@ -1,5 +1,6 @@
 
 import { Hono } from "hono";
+import { setCookie } from "hono/cookie";
 import prisma from "../clients/prisma";
 import { verifyMessage } from "viem";
 import { SignJWT } from "jose";
@@ -98,9 +99,17 @@ auth.post("/login", async (c) => {
             data: { nonce: null },
         });
 
+        // Set HttpOnly Cookie
+        setCookie(c, "token", token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production", // Secure in prod only
+            sameSite: "Lax",
+            path: "/",
+            maxAge: 60 * 60 * 24, // 24 hours
+        });
+
         return c.json({
             success: true,
-            token,
             sessionId: session.id,
             user: {
                 address: user.address,
