@@ -38,12 +38,13 @@ model Order {
 }
 
 model User {
-    address  String         @id
-    name     String
-    orders   Order[]
-    balances TokenBalance[]
-    sessions Session[]
-    nonce    String?
+    address    String         @id
+    name       String
+    orders     Order[]
+    balances   TokenBalance[]
+    sessions   Session[]
+    nonce      String?
+    isVerified Boolean        @default(false)
 }
 
 model TokenBalance {

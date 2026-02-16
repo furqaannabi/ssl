@@ -56,12 +56,14 @@ Returns user details and token balances.
   "user": {
     "id": "uuid",
     "address": "0x123...",
+    "isVerified": true,
     "balances": [
         { "token": "0xTokenA", "balance": "1000000000000000000" }
     ]
   }
 }
 ```
+*Note: If `isVerified` is false locally, the server checks the `SSLVault` smart contract. If verified on-chain, it updates the database and returns `true`.*
 
 ### Get User Orders
 **GET** `/api/user/orders?status=OPEN`

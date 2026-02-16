@@ -2,6 +2,7 @@
 import { Hono } from "hono";
 import prisma from "../clients/prisma";
 import { authMiddleware } from "../middleware/auth";
+import { contractService } from "../services/contract.service";
 
 type Variables = {
     user: string;
@@ -27,7 +28,21 @@ user.get("/me", authMiddleware, async (c) => {
         }
 
         // Return user data without sensitive fields if any (nonce is already public/random string but maybe omit it)
+        // Return user data without sensitive fields
         const { nonce, ...safeUser } = userData;
+
+        // Sync verification status if false in DB
+        if (!safeUser.isVerified) {
+            const isVerifiedOnChain = await contractService.getIsVerified(userAddress);
+            if (isVerifiedOnChain) {
+                // Update DB
+                await prisma.user.update({
+                    where: { address: userAddress },
+                    data: { isVerified: true },
+                });
+                safeUser.isVerified = true;
+            }
+        }
 
         return c.json({
             success: true,

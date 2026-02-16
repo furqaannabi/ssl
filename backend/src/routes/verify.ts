@@ -11,6 +11,7 @@ import { config } from "../lib/config";
 import { sendToCRE } from "../lib/cre-client";
 import { streamText } from 'hono/streaming'
 import { authMiddleware } from "../middleware/auth";
+import prisma from "../clients/prisma";
 
 
 type Variables = {
@@ -76,6 +77,12 @@ verify.post("/", authMiddleware, async (c) => {
                     userAddress: body.user_address,
                 }, async (log) => {
                     await stream.writeln(JSON.stringify({ type: 'log', message: log }));
+                });
+
+                // Update User status
+                await prisma.user.update({
+                    where: { address: userAddress },
+                    data: { isVerified: true },
                 });
 
                 await stream.writeln(JSON.stringify({
