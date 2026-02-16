@@ -67,27 +67,15 @@ export async function matchOrders(newOrderId: string, onLog?: (log: string) => v
             const buyer = newOrder.side === OrderSide.BUY ? newOrder : match;
             const seller = newOrder.side === OrderSide.SELL ? newOrder : match;
 
-            // Lookup Nullifiers for Buyer and Seller
-            // (Assumes userAddress is set and verified)
+            // Ensure user addresses are present
             if (!buyer.userAddress || !seller.userAddress) {
                 throw new Error("Missing userAddress on matched orders");
             }
 
-            const buyerVerify = await prisma.verificationRequest.findFirst({
-                where: { userAddress: buyer.userAddress, status: "VERIFIED" },
-            });
-            const sellerVerify = await prisma.verificationRequest.findFirst({
-                where: { userAddress: seller.userAddress, status: "VERIFIED" },
-            });
-
-            if (!buyerVerify || !sellerVerify) {
-                throw new Error("One or both users are not verified");
-            }
-
+            // Send to CRE for settlement
             await sendToCRE({
                 action: "settle_match",
                 buyer: {
-                    nullifierHash: buyerVerify.nullifierHash,
                     orderId: buyer.id,
                     order: {
                         asset: buyer.asset,
@@ -99,7 +87,6 @@ export async function matchOrders(newOrderId: string, onLog?: (log: string) => v
                     stealthPublicKey: buyer.stealthPublicKey
                 },
                 seller: {
-                    nullifierHash: sellerVerify.nullifierHash,
                     orderId: seller.id,
                     order: {
                         asset: seller.asset,

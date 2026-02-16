@@ -50,7 +50,7 @@ type VerificationResponse = {
 interface MatchPayload {
   action: "settle_match";
   buyer: {
-    nullifierHash: string;
+    // nullifierHash removed
     orderId: string;
     order: {
       asset: string;
@@ -62,7 +62,7 @@ interface MatchPayload {
     stealthPublicKey: string;
   };
   seller: {
-    nullifierHash: string;
+    // nullifierHash removed
     orderId: string;
     order: {
       asset: string;
@@ -86,7 +86,7 @@ interface WithdrawPayload {
 type Payload = VerifyPayload | MatchPayload | WithdrawPayload;
 
 interface Order {
-  nullifierHash: string;
+  // nullifierHash removed
   order: {
     asset: string;
     quoteToken: string;
@@ -280,10 +280,10 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
 
     runtime.log("Proof Verified. Proceeding to on-chain report for address: " + data.userAddress);
 
-    // Report (type=0, address, nullifierHash)
+    // Report (type=0, address)
     const reportData = encodeAbiParameters(
-      parseAbiParameters("uint8 reportType, address user, uint256 nullifierHash"),
-      [0, data.userAddress as `0x${string}`, BigInt(data.nullifierHash)]
+      parseAbiParameters("uint8 reportType, address user"),
+      [0, data.userAddress as `0x${string}`]
     );
 
     const txHash = sendReport(runtime, reportData);

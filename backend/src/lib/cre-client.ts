@@ -4,7 +4,7 @@ import { config } from "./config";
 
 export interface VerifyPayload {
     action: "verify";
-    nullifierHash: string;
+    nullifierHash: string; // Required for World ID API check
     proof: string;
     merkle_root: string;
     credential_type: string;
@@ -15,7 +15,7 @@ export interface VerifyPayload {
 
 export interface OrderPayload {
     action: "order";
-    nullifierHash: string;
+    // nullifierHash removed
     asset: string;
     quoteToken: string;
     amount: string;
@@ -27,7 +27,7 @@ export interface OrderPayload {
 export interface MatchPayload {
     action: "settle_match";
     buyer: {
-        nullifierHash: string;
+        // nullifierHash removed
         orderId: string;
         order: {
             asset: string;
@@ -39,7 +39,7 @@ export interface MatchPayload {
         stealthPublicKey: string;
     };
     seller: {
-        nullifierHash: string;
+        // nullifierHash removed
         orderId: string;
         order: {
             asset: string;

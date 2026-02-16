@@ -21,7 +21,6 @@ type Variables = {
 const order = new Hono<{ Variables: Variables }>();
 
 interface OrderInitPayload {
-    nullifierHash: string;
     asset: string;
     quoteToken: string;
     amount: string;
