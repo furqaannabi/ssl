@@ -36,6 +36,8 @@ app.route("/api/order", order);
 app.route("/api/auth", auth);
 app.route("/api/user", user);
 app.route("/api/oracle", oracle);
+import history from "./routes/history";
+app.route("/api/history", history);
 app.route("/api/pairs", pairs);
 
 // ── 404 ──
