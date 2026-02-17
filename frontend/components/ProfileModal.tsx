@@ -52,7 +52,7 @@ const StealthGenerator: React.FC = () => {
             </div>
 
             <div className="space-y-2">
-                <label className="text-[9px] text-slate-500 uppercase tracking-widest font-bold">Stealth Address (Public)</label>
+                <label className="text-[9px] text-slate-500 uppercase tracking-widest font-bold">Stealth Public Key (paste into orders)</label>
                 <div className="p-2.5 bg-black border border-border-dark font-mono text-[10px] text-white break-all select-all flex justify-between items-center group rounded">
                     <span>{keys.publicKey}</span>
                     <Icon name="content_copy" className="text-slate-600 cursor-pointer hover:text-primary transition-colors" onClick={() => {
