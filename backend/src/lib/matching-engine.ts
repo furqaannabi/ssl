@@ -3,82 +3,102 @@ import prisma from "../clients/prisma";
 import { OrderSide, OrderStatus } from "../../generated/prisma/client";
 import { sendToCRE } from "./cre-client";
 
+function remaining(order: { amount: string; filledAmount: string }): bigint {
+    return BigInt(order.amount) - BigInt(order.filledAmount);
+}
+
 export async function matchOrders(newOrderId: string, onLog?: (log: string) => void) {
-    const newOrder = await prisma.order.findUnique({
+    const log = (msg: string) => {
+        console.log(`[MatchingEngine] ${msg}`);
+        if (onLog) onLog(msg);
+    };
+
+    // Load order with pair (needed for token addresses)
+    let order = await prisma.order.findUnique({
         where: { id: newOrderId },
         include: { pair: true },
     });
 
-    if (!newOrder || newOrder.status !== OrderStatus.OPEN) {
+    if (!order || order.status !== OrderStatus.OPEN) {
         return;
     }
 
-    const oppositeSide = newOrder.side === OrderSide.BUY ? OrderSide.SELL : OrderSide.BUY;
+    const { baseTokenAddress, quoteTokenAddress } = order.pair;
 
-    // Simple matching (price/time priority logic simplified for MVP)
-    // Buy: match with lowest sell price <= buy price
-    // Sell: match with highest buy price >= sell price
-
-    let match;
-    if (newOrder.side === OrderSide.BUY) {
-        match = await prisma.order.findFirst({
-            where: {
-                side: oppositeSide,
-                status: OrderStatus.OPEN,
-                pairId: newOrder.pairId,
-                price: { lte: newOrder.price }, // Sell price <= Buy price
-            },
-            orderBy: {
-                price: 'asc', // Lowest sell price first
-            }
+    // Loop: keep matching until fully filled or no more counterparties
+    while (true) {
+        // Refresh order state (filledAmount may have changed)
+        order = await prisma.order.findUnique({
+            where: { id: newOrderId },
+            include: { pair: true },
         });
-    } else {
-        match = await prisma.order.findFirst({
-            where: {
-                side: oppositeSide,
-                status: OrderStatus.OPEN,
-                pairId: newOrder.pairId,
-                price: { gte: newOrder.price }, // Buy price >= Sell price
-            },
-            orderBy: {
-                price: 'desc', // Highest buy price first
-            }
-        });
-    }
 
-    if (match) {
-        console.log(`[MatchingEngine] Match found: ${newOrder.id} matches with ${match.id}`);
+        if (!order || order.status !== OrderStatus.OPEN) break;
 
-        // Update status to MATCHED
-        await prisma.$transaction([
-            prisma.order.update({
-                where: { id: newOrder.id },
-                data: { status: OrderStatus.MATCHED },
-            }),
-            prisma.order.update({
-                where: { id: match.id },
-                data: { status: OrderStatus.MATCHED },
-            }),
-        ]);
+        const orderRemaining = remaining(order);
+        if (orderRemaining <= 0n) break;
 
-        // Trigger Settlement via CRE
+        const oppositeSide = order.side === OrderSide.BUY ? OrderSide.SELL : OrderSide.BUY;
+
+        // Find best counterparty with remaining amount > 0
+        // Buy: lowest sell price <= buy price
+        // Sell: highest buy price >= sell price
+        const match = order.side === OrderSide.BUY
+            ? await prisma.order.findFirst({
+                where: {
+                    side: oppositeSide,
+                    status: OrderStatus.OPEN,
+                    pairId: order.pairId,
+                    price: { lte: order.price },
+                },
+                orderBy: [{ price: 'asc' }, { createdAt: 'asc' }],
+            })
+            : await prisma.order.findFirst({
+                where: {
+                    side: oppositeSide,
+                    status: OrderStatus.OPEN,
+                    pairId: order.pairId,
+                    price: { gte: order.price },
+                },
+                orderBy: [{ price: 'desc' }, { createdAt: 'asc' }],
+            });
+
+        if (!match) {
+            log(`No more matches for order ${order.id} (remaining: ${orderRemaining})`);
+            break;
+        }
+
+        const matchRemaining = remaining(match);
+        if (matchRemaining <= 0n) continue; // skip stale, find next
+
+        // Trade amount = min of both remaining quantities
+        const tradeAmount = orderRemaining < matchRemaining ? orderRemaining : matchRemaining;
+
+        log(`Match found: ${order.id} <-> ${match.id} (trade: ${tradeAmount})`);
+
+        // Compute new filled amounts
+        const orderNewFilled = BigInt(order.filledAmount) + tradeAmount;
+        const matchNewFilled = BigInt(match.filledAmount) + tradeAmount;
+
+        const orderFullyFilled = orderNewFilled >= BigInt(order.amount);
+        const matchFullyFilled = matchNewFilled >= BigInt(match.amount);
+
+        // Identify buyer and seller
+        const buyer = order.side === OrderSide.BUY ? order : match;
+        const seller = order.side === OrderSide.SELL ? order : match;
+
+        if (!buyer.userAddress || !seller.userAddress) {
+            log(`Skipping match: missing userAddress`);
+            break;
+        }
+
+        // Send to CRE for settlement (before updating DB, so failure is safe)
         try {
-            const buyer = newOrder.side === OrderSide.BUY ? newOrder : match;
-            const seller = newOrder.side === OrderSide.SELL ? newOrder : match;
-
-            // Ensure user addresses are present
-            if (!buyer.userAddress || !seller.userAddress) {
-                throw new Error("Missing userAddress on matched orders");
-            }
-
-            // Resolve token addresses from the pair
-            const { baseTokenAddress, quoteTokenAddress } = newOrder.pair;
-
-            // Send to CRE for settlement
             await sendToCRE({
                 action: "settle_match",
                 baseTokenAddress,
                 quoteTokenAddress,
+                tradeAmount: tradeAmount.toString(),
                 buyer: {
                     orderId: buyer.id,
                     order: {
@@ -100,27 +120,33 @@ export async function matchOrders(newOrderId: string, onLog?: (log: string) => v
                     stealthPublicKey: seller.stealthPublicKey
                 }
             }, onLog);
-
-            // Update status to SETTLED
-            await prisma.$transaction([
-                prisma.order.update({
-                    where: { id: newOrder.id },
-                    data: { status: OrderStatus.SETTLED },
-                }),
-                prisma.order.update({
-                    where: { id: match.id },
-                    data: { status: OrderStatus.SETTLED },
-                }),
-            ]);
-            console.log(`[MatchingEngine] Settlement triggered successfully`);
-
-
         } catch (error) {
-            console.error("[MatchingEngine] Settlement trigger failed:", error);
-            // Revert status to OPEN? Or handle manual intervention.
-            // For now, keep as MATCHED but log error.
+            console.error("[MatchingEngine] Settlement failed:", error);
+            log(`Settlement failed for ${order.id} <-> ${match.id}: ${error}`);
+            break;
         }
-    } else {
-        console.log(`[MatchingEngine] No match found for ${newOrder.id}`);
+
+        // CRE succeeded -- update filled amounts and statuses
+        await prisma.$transaction([
+            prisma.order.update({
+                where: { id: order.id },
+                data: {
+                    filledAmount: orderNewFilled.toString(),
+                    status: orderFullyFilled ? OrderStatus.SETTLED : OrderStatus.OPEN,
+                },
+            }),
+            prisma.order.update({
+                where: { id: match.id },
+                data: {
+                    filledAmount: matchNewFilled.toString(),
+                    status: matchFullyFilled ? OrderStatus.SETTLED : OrderStatus.OPEN,
+                },
+            }),
+        ]);
+
+        log(`Fill settled: ${tradeAmount} units. Order ${order.id}: ${orderNewFilled}/${order.amount}${orderFullyFilled ? ' (SETTLED)' : ''}. Order ${match.id}: ${matchNewFilled}/${match.amount}${matchFullyFilled ? ' (SETTLED)' : ''}`);
+
+        // If our order is fully filled, stop
+        if (orderFullyFilled) break;
     }
 }

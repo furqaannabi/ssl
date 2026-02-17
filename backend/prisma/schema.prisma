@@ -28,6 +28,7 @@ model Order {
   pairId           String
   pair             Pair        @relation(fields: [pairId], references: [id])
   amount           String
+  filledAmount     String      @default("0")
   price            String
   side             OrderSide
   stealthPublicKey String

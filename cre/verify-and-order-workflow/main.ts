@@ -51,6 +51,7 @@ interface MatchPayload {
   action: "settle_match";
   baseTokenAddress: string;
   quoteTokenAddress: string;
+  tradeAmount: string;
   buyer: {
     orderId: string;
     order: {
@@ -297,10 +298,9 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
   if (data.action === "settle_match") {
     runtime.log("Settlement request for " + data.buyer.orderId + " <-> " + data.seller.orderId);
 
-    // Compute trade amount
-    const amountBuy = BigInt(data.buyer.order.amount);
-    const amountSell = BigInt(data.seller.order.amount);
-    const tradeAmount = amountBuy < amountSell ? amountBuy : amountSell;
+    // Trade amount provided by backend matching engine (supports partial fills)
+    const tradeAmount = BigInt(data.tradeAmount);
+    runtime.log("Trade amount: " + tradeAmount.toString());
 
     // Deterministic trade nonce from order IDs
     const tradeNonce = keccak256(

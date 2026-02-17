@@ -28,6 +28,7 @@ export interface MatchPayload {
     action: "settle_match";
     baseTokenAddress: string;
     quoteTokenAddress: string;
+    tradeAmount: string;
     buyer: {
         orderId: string;
         order: {

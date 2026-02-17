@@ -30,10 +30,10 @@ export interface Order {
   pairId: string;
   pairLabel: string;
   side: 'BUY' | 'SELL';
-  filled: number;
-  total: number;
+  amount: string;
+  filledAmount: string;
   price: string;
-  status: 'SETTLED' | 'CANCELED' | 'PENDING';
+  status: 'SETTLED' | 'CANCELED' | 'PENDING' | 'OPEN';
   hash: string;
 }
 

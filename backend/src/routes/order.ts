@@ -56,6 +56,22 @@ order.post("/", async (c) => {
         return c.json({ error: "side must be BUY or SELL" }, 400);
     }
 
+    const parsedAmount = parseFloat(body.amount);
+    const parsedPrice = parseFloat(body.price);
+
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+        return c.json({ error: "amount must be a positive number" }, 400);
+    }
+    if (isNaN(parsedPrice) || parsedPrice <= 0) {
+        return c.json({ error: "price must be a positive number" }, 400);
+    }
+
+    const MIN_ORDER_USDC = 5;
+    const orderValue = parsedAmount * parsedPrice;
+    if (orderValue < MIN_ORDER_USDC) {
+        return c.json({ error: `Minimum order value is ${MIN_ORDER_USDC} USDC (current: ${orderValue.toFixed(2)})` }, 400);
+    }
+
     try {
         // Validate pair exists
         const pair = await prisma.pair.findUnique({ where: { id: body.pairId } });
