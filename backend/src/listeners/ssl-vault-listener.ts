@@ -35,7 +35,7 @@ const ERC20_ABI = [
  * Ensure Token and Pair records exist for a deposited token.
  * Creates a TOKEN/USDC pair if the token isn't USDC itself.
  */
-async function ensurePairExists(tokenAddress: string, provider: ethers.JsonRpcProvider) {
+async function ensurePairExists(tokenAddress: string, provider: ethers.WebSocketProvider) {
     const address = tokenAddress.toLowerCase();
     const usdcAddress = config.usdcAddress.toLowerCase();
 
@@ -103,10 +103,10 @@ export async function startVaultListener() {
         return;
     }
 
-    const RPC_URL = `https://base-sepolia.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`;
+    const WS_URL = `wss://base-sepolia.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`;
 
     try {
-        const provider = new ethers.JsonRpcProvider(RPC_URL);
+        const provider = new ethers.WebSocketProvider(WS_URL);
         // Quick check if provider is connected
         await provider.getNetwork();
 
