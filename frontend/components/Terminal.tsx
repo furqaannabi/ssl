@@ -9,8 +9,8 @@ export const Terminal: React.FC = () => {
   const [stealthPublicKey, setStealthPublicKey] = useState<string>(''); // Stateless: Manual Input
   const [status, setStatus] = useState<'IDLE' | 'SIGNING' | 'SENDING' | 'ENCRYPTING' | 'MATCHING' | 'SETTLED'>('IDLE');
   const [selectedPairId, setSelectedPairId] = useState<string>('');
-  const [amount, setAmount] = useState('50000');
-  const [price, setPrice] = useState('98.40');
+  const [amount, setAmount] = useState('10');
+  const [price, setPrice] = useState('100.00');
   
   const { address: eoaAddress, isConnected } = useConnection();
   const { mutateAsync: signMessageAsync } = useSignMessage();
@@ -109,6 +109,13 @@ export const Terminal: React.FC = () => {
     const pair = pairs.find(p => p.id === selectedPairId);
     if (!pair) {
         toast.error(`Trading pair not found`);
+        return;
+    }
+
+    // Check Minimum Order Value (5 USDC)
+    const totalValue = Number(amount) * Number(price);
+    if (totalValue < 5) {
+        toast.error(`Order value must be at least 5 USDC (Current: ${totalValue.toFixed(2)} USDC)`);
         return;
     }
 
@@ -344,7 +351,10 @@ export const Terminal: React.FC = () => {
                             className="w-full bg-black border border-border-dark text-white font-mono text-sm px-3 py-2.5 focus:ring-1 focus:ring-primary focus:border-primary text-right rounded-none" 
                             placeholder="0.00" 
                             value={amount}
-                            onChange={(e) => setAmount(e.target.value)}
+                            onChange={(e) => {
+                                const val = e.target.value;
+                                if (/^\d*\.?\d*$/.test(val)) setAmount(val);
+                            }}
                             type="text" 
                         />
                         <span className="absolute left-3 top-2.5 text-slate-600 font-mono text-xs">UNITS</span>
@@ -360,7 +370,10 @@ export const Terminal: React.FC = () => {
                             className="w-full bg-black border border-border-dark text-white font-mono text-sm px-3 py-2.5 focus:ring-1 focus:ring-primary focus:border-primary text-right rounded-none" 
                             placeholder="0.00" 
                             value={price}
-                            onChange={(e) => setPrice(e.target.value)}
+                            onChange={(e) => {
+                                const val = e.target.value;
+                                if (/^\d*\.?\d*$/.test(val)) setPrice(val);
+                            }}
                             type="text" 
                         />
                         <span className="absolute left-3 top-2.5 text-slate-600 font-mono text-xs">USDC</span>
@@ -368,20 +381,21 @@ export const Terminal: React.FC = () => {
                   </div>
                </div>
 
-               <Button 
-                fullWidth 
-                icon={status === 'IDLE' ? (stealthPublicKey ? "lock" : "lock_open") : "pending"} 
-                className="py-4 mt-6 uppercase tracking-wider"
-                onClick={handlePlaceOrder}
-                disabled={status !== 'IDLE'}
-               >
-                {status === 'SIGNING' ? "Requesting Signature..." :
-                 status === 'SENDING' ? "Sending to Enclave..." :
-                 status === 'ENCRYPTING' ? "Encrypting Order..." :
-                 status === 'MATCHING' ? "Matching Engine..." :
-                 status === 'SETTLED' ? "Order Settled!" :
-                 stealthPublicKey ? "Encrypt & Place Order" : "Enter Stealth Key"}
-               </Button>
+                <Button 
+                 fullWidth 
+                 icon={status === 'IDLE' ? (stealthPublicKey ? ((Number(amount) * Number(price)) >= 5 ? "lock" : "warning") : "lock_open") : "pending"} 
+                 className={`py-4 mt-6 uppercase tracking-wider ${(Number(amount) * Number(price)) < 5 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                 onClick={handlePlaceOrder}
+                 disabled={status !== 'IDLE' || (Number(amount) * Number(price)) < 5}
+                >
+                 {status === 'SIGNING' ? "Requesting Signature..." :
+                  status === 'SENDING' ? "Sending to Enclave..." :
+                  status === 'ENCRYPTING' ? "Encrypting Order..." :
+                  status === 'MATCHING' ? "Matching Engine..." :
+                  status === 'SETTLED' ? "Order Settled!" :
+                  (Number(amount) * Number(price)) < 5 ? "Min Order Value: 5 USDC" :
+                  stealthPublicKey ? "Encrypt & Place Order" : "Enter Stealth Key"}
+                </Button>
                <div className="text-[9px] text-slate-600 text-center font-mono uppercase tracking-wide mt-2">
                   TEE Verification: <span className="text-slate-400">{stealthPublicKey ? "READY" : "WAITING FOR KEY"}</span>
                </div>
