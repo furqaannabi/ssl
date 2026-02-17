@@ -61,9 +61,9 @@ User                                            Vault
 User                    Backend                 CRE
  │                        │                      │
  │── order {              │                      │
- │    asset, quoteToken,  │                      │
+ │    pairId,             │                      │
  │    amount, price,      │                      │
- │    side, nullifier,    │                      │
+ │    side,               │                      │
  │    stealthPublicKey    │                      │
  │   } ────────────────>  │                      │
  │                        │── HTTP {action:       │
@@ -75,10 +75,11 @@ User                    Backend                 CRE
  │ <── queued ──────────  │                       │
 ```
 
-- User sends order details to backend (never on-chain)
-- Backend forwards to CRE as signed HTTP payload
+- Trading pairs (e.g. TBILL/USDC) are auto-created when a new token is deposited into the vault
+- User selects a pair and sends order details to backend (never on-chain)
+- Backend validates the pair exists, then forwards to CRE as signed HTTP payload
 - CRE stores in in-memory order book (confidential, off-chain)
-- Order details (asset, price, amount, side) are never visible on-chain
+- Order details (pair, price, amount, side) are never visible on-chain
 
 ### Phase 4: Matching + Settlement
 
@@ -87,7 +88,7 @@ CRE (on match found)                            Vault
  │                                                │
  │── matchOrders()                                │
  │   buy.price >= sell.price                      │
- │   buy.asset == sell.asset                      │
+ │   buy.pairId == sell.pairId                    │
  │                                                │
  │── tradeNonce = keccak256(                      │
  │     buyNullifier + sellNullifier + timestamp)  │
@@ -113,7 +114,7 @@ CRE (on match found)                            Vault
  │                                                │                stealthSeller)
 ```
 
-- CRE matches buy order where `price >= sell.price` and same asset
+- CRE matches buy order where `price >= sell.price` and same pair
 - Generates unique `tradeNonce` from both nullifiers + timestamp
 - Derives one-time **stealth addresses** via ECDH (EIP-5564 style) — user can derive the private key to claim funds
 - Computes `orderId` to prevent replay
@@ -165,8 +166,10 @@ Single HTTP trigger with two actions:
 Bun + Hono HTTP server bridging the frontend to CRE:
 
 - `POST /api/verify` — Verifies World ID proof via cloud API, then forwards `{action: "verify", nullifierHash}` to CRE (signed with EVM key)
-- `POST /api/order` — Validates order fields, signs and forwards `{action: "order", ...}` to CRE
+- `POST /api/order` — Validates order fields (including pairId), signs and forwards `{action: "order", ...}` to CRE
+- `GET /api/pairs` — Lists all available trading pairs with token metadata
 - `GET /api/health` — Returns server status and signer address
+- **Vault Listener** — Watches on-chain `Funded` events. Auto-creates `Token` records (fetching ERC20 metadata) and `TOKEN/USDC` pairs on first deposit of a new token
 
 ### Frontend (`frontend/`)
 

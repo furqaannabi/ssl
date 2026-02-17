@@ -118,6 +118,31 @@ Submits a World ID proof. The server validates it and streams the verification p
 
 ---
 
+## Trading Pairs
+
+### List Pairs
+**GET** `/api/pairs`
+
+Returns all available trading pairs with token metadata. Pairs are auto-created when a new token is deposited into the vault.
+
+**Response:**
+```json
+{
+  "success": true,
+  "pairs": [
+    {
+      "id": "pair-uuid",
+      "baseTokenAddress": "0xTokenA",
+      "quoteTokenAddress": "0xUSDC",
+      "baseToken": { "symbol": "TBILL", "name": "T-Bill Token", "address": "0xTokenA", "decimals": 18 },
+      "quoteToken": { "symbol": "USDC", "name": "USD Coin", "address": "0xUSDC", "decimals": 6 }
+    }
+  ]
+}
+```
+
+---
+
 ## Order Management
 
 ### Get Orderbook
