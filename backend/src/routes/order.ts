@@ -183,12 +183,18 @@ order.post("/:id/confirm", authMiddleware, async (c) => {
 
 // ── GET /book (Orderbook) ──
 order.get("/book", async (c) => {
+    const pairId = c.req.query("pairId");
+
     try {
+        const whereClause: any = { status: "OPEN" };
+        if (pairId) {
+            whereClause.pairId = pairId;
+        }
+
         const orders = await prisma.order.findMany({
-            where: { status: "OPEN" },
+            where: whereClause,
             orderBy: { createdAt: "desc" },
-            // Optionally, we could select only necessary fields
-            // select: { id: true, asset: true, ... }
+            include: { pair: { include: { baseToken: true, quoteToken: true } } }
         });
 
         return c.json({
