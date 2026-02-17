@@ -1,12 +1,17 @@
 import { parseUnits, encodeFunctionData, type Address, type Hex } from 'viem';
+import { VAULT_ABI } from './abi/valut_abi';
 
 // Constants (Placeholders - to be filled with actual deployment addresses)
-export const VAULT_ADDRESS: Address = "0x8920C3A0C83526E69D8A9E32BD4F4f218A720C3A";
+// Constants (Placeholders - to be filled with actual deployment addresses)
 export const TOKENS = {
-    USDC: "0x036CbD53842c5426634e7929541eC2318f3dCF7e" as Address,
-    PAXG: "0x45804880De22913dAFE09f4980848ECE6Eec956D" as Address,
-    TBILL: "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" as Address
-};
+   
+    "usdc": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+}
+
+export const CONTRACTS = {
+    "vault": "0x987190756d7d9914be98c46fcabb863230ed3267",
+    "bond": "0xa328fe09fd9f42c4cf95785b00876ba0bc82847a",
+}
 
 export const TOKEN_DECIMALS: Record<string, number> = {
     USDC: 6,
@@ -15,43 +20,6 @@ export const TOKEN_DECIMALS: Record<string, number> = {
 };
 
 // ABI fragments
-export const VAULT_ABI = [
-    {
-        name: 'fund',
-        type: 'function',
-        stateMutability: 'external',
-        inputs: [
-            { name: 'token', type: 'address' },
-            { name: 'amount', type: 'uint256' },
-            { name: 'nullifierHash', type: 'uint256' }
-        ],
-        outputs: []
-    },
-    {
-        name: 'isVerified',
-        type: 'function',
-        stateMutability: 'view',
-        inputs: [{ name: 'nullifierHash', type: 'uint256' }],
-        outputs: [{ type: 'bool' }]
-    },
-    {
-        name: 'nullifierOwner',
-        type: 'function',
-        stateMutability: 'view',
-        inputs: [{ name: 'nullifierHash', type: 'uint256' }],
-        outputs: [{ type: 'address' }]
-    },
-    {
-        name: 'balances',
-        type: 'function',
-        stateMutability: 'view',
-        inputs: [
-            { name: 'nullifierHash', type: 'uint256' },
-            { name: 'token', type: 'address' }
-        ],
-        outputs: [{ type: 'uint256' }]
-    }
-] as const;
 
 export const ERC20_ABI = [
     {

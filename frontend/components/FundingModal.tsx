@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
 import { Modal, Button, Icon } from './UI';
-import { VAULT_ADDRESS, TOKENS, TOKEN_DECIMALS, ERC20_ABI, VAULT_ABI } from '../lib/contracts';
+import { CONTRACTS, TOKENS, TOKEN_DECIMALS, ERC20_ABI } from '../lib/contracts';
+import { VAULT_ABI } from '../lib/abi/valut_abi';
 import { useConnection, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { simulateContract, writeContract } from '@wagmi/core'
 import { baseSepolia } from 'wagmi/chains';
 import { parseUnits } from 'viem';
+import { config } from '../lib/wagmi';
 
 interface FundingModalProps {
     isOpen: boolean;
@@ -15,13 +18,22 @@ export const FundingModal: React.FC<FundingModalProps> = ({
     onClose
 }) => {
     const [step, setStep] = useState<'DETAILS' | 'APPROVING' | 'FUNDING' | 'SUCCESS'>('DETAILS');
-    const [amount, setAmount] = useState("1000");
-    const [token, setToken] = useState<keyof typeof TOKENS>("USDC");
+    const [amount, setAmount] = useState("10");
+    const [token, setToken] = useState<keyof typeof TOKENS>("usdc");
     const [error, setError] = useState<string | null>(null);
     const [txHash, setTxHash] = useState<`0x${string}` | undefined>();
     
-    const { isConnected, address: eoaAddress , chain} = useConnection();
-    const { writeContract } = useWriteContract();
+    const { isConnected, address: eoaAddress, chain } = useConnection();
+
+    // Reset state when modal opens/closes
+    React.useEffect(() => {
+        if (isOpen) {
+            setStep('DETAILS');
+            setTxHash(undefined);
+            setError(null);
+            // Optionally reset amount too, if desired
+        }
+    }, [isOpen]);
 
     // Hook to wait for receipts
     const { isLoading: isWaitingForReceipt, isSuccess: isTxSuccess } = useWaitForTransactionReceipt({
@@ -43,23 +55,37 @@ export const FundingModal: React.FC<FundingModalProps> = ({
         setError(null);
         
         try {
-            const decimals = TOKEN_DECIMALS[token] || 18;
+            const tokenAddress = TOKENS[token];
+            const vaultAddress = CONTRACTS.vault;
+            const decimals = TOKEN_DECIMALS[token.toUpperCase()] || 18; // Handle case mismatch if needed
             const amountUnits = parseUnits(amount, decimals);
             
             // 1. APPROVAL PHASE
             setStep('APPROVING');
-            console.log(`Requesting approval for ${amount} ${token}...`);
+            console.log(`Requesting approval for ${amount} ${token} to ${vaultAddress}...`);
             
-            const approveHash = await writeContract({
-                address: TOKENS[token] as `0x${string}`,
+            
+
+            const { request } = await simulateContract(config, {
                 abi: ERC20_ABI,
+                address: tokenAddress as `0x${string}`,
                 functionName: 'approve',
-                args: [VAULT_ADDRESS as `0x${string}`, amountUnits],
+                args: [
+                    vaultAddress as `0x${string}`,
+                    amountUnits,
+                ],
                 account: eoaAddress as `0x${string}`,
-                chain,
-            });
+                chainId: baseSepolia.id,
+            })
+
+            
+            const approveHash = await writeContract(config, request)
             
             setTxHash(approveHash);
+
+
+
+
         } catch (err: any) {
             console.error("Funding failed:", err);
             setError(err.message || "Transaction failed");
@@ -73,25 +99,47 @@ export const FundingModal: React.FC<FundingModalProps> = ({
             if (step === 'APPROVING') {
                 // Approval confirmed, now start funding
                 const startFunding = async () => {
+                    // Reset hash to clear previous success state
+                    setTxHash(undefined);
                     setStep('FUNDING');
-                    try {
-                        const nullifierHash = localStorage.getItem("ssl_nullifier_hash");
-                        const decimals = TOKEN_DECIMALS[token] || 18;
-                        const amountUnits = parseUnits(amount, decimals);
-                        
-                        console.log(`Funding vault with ${amount} ${token}...`);
-                        const fundHash = await writeContract({
-                            address: VAULT_ADDRESS as `0x${string}`,
-                            abi: VAULT_ABI,
-                            functionName: 'fund',
-                            args: [TOKENS[token] as `0x${string}`, amountUnits, BigInt(nullifierHash!)],
-                            account: eoaAddress as `0x${string}`,
-                            chain,
-                        });
-                        setTxHash(fundHash);
-                    } catch (err: any) {
-                        setError(err.message || "Funding failed");
-                        setStep('DETAILS');
+                    
+                    const maxRetries = 5;
+                    let retryCount = 0;
+
+                    while (retryCount < maxRetries) {
+                        try {
+                            const tokenAddress = TOKENS[token];
+                            const vaultAddress = CONTRACTS.vault;
+                            const decimals = TOKEN_DECIMALS[token.toUpperCase()] || 18;
+                            const amountUnits = parseUnits(amount, decimals);
+                            
+                            console.log(`Funding vault with ${amount} ${token}... (Attempt ${retryCount + 1})`);
+                            
+                            // Add a small delay on first attempt too, to allow indexer to catch up
+                            if (retryCount === 0) await new Promise(r => setTimeout(r, 2000));
+
+                            const { request } = await simulateContract(config, {
+                                address: vaultAddress as `0x${string}`,
+                                abi: VAULT_ABI,
+                                functionName: 'fund',
+                                args: [tokenAddress as `0x${string}`, amountUnits],
+                                account: eoaAddress as `0x${string}`,
+                                chainId: baseSepolia.id,
+                            });
+                            const fundHash = await writeContract(config, request)
+                            setTxHash(fundHash);
+                            return; // Success, exit loop
+                        } catch (err: any) {
+                            console.warn(`Funding simulation failed (Attempt ${retryCount + 1}):`, err);
+                            retryCount++;
+                            if (retryCount >= maxRetries) {
+                                setError(err.message || "Funding failed after approval. Please try again.");
+                                setStep('DETAILS'); // Move back to details but keep approval done? ideally we stay in funding or logic to retry? 
+                                // Actually better to go to DETAILS so they can click "Review & Deposit" again (which might re-trigger approval check, but approval is already done so it should skip? No, logic currently forces approval every time. That's fine for now.)
+                            } else {
+                                await new Promise(r => setTimeout(r, 2000)); // Wait 2s before retry
+                            }
+                        }
                     }
                 };
                 startFunding();

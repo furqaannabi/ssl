@@ -4,12 +4,14 @@ import { Asset } from '../types';
 import { Icon, Badge, Card, Button } from './UI';
 import { StealthKeyReveal } from './StealthKeyReveal';
 import { FundingModal } from './FundingModal';
+import { auth } from '../lib/auth';
+import { TOKENS, TOKEN_DECIMALS, CONTRACTS } from '../lib/contracts';
+import { formatUnits } from 'viem';
 
-const assets: Asset[] = [
-  { symbol: 'US-Gov-042', name: 'Tokenized T-Bills', type: 'Fixed Income', allocation: 45, value: '$5,602,590.00', status: 'Active', icon: 'account_balance', colorClass: 'text-blue-400' },
-  { symbol: 'BlackRock-MM', name: 'Private Credit Structure A', type: 'Yield Farming', allocation: 30, value: '$3,735,060.00', status: 'Active', icon: 'apartment', colorClass: 'text-purple-400' },
-  { symbol: 'PAXG-ETH', name: 'PAX Gold', type: 'Commodity', allocation: 15, value: '$1,867,530.00', status: 'Encrypted', icon: 'token', colorClass: 'text-yellow-400' },
-  { symbol: 'Circle-Reserve', name: 'USDC Liquidity', type: 'Stablecoin', allocation: 10, value: '$1,245,020.00', status: 'Active', icon: 'account_balance_wallet', colorClass: 'text-slate-400' },
+// Initial Static Data (to be merged with dynamic balances)
+const initialAssets: Asset[] = [
+  { symbol: 'TBILL', name: 'Tokenized T-Bills', type: 'Fixed Income', allocation: 0, value: '$0.00', status: 'Active', icon: 'account_balance', colorClass: 'text-blue-400', address: CONTRACTS.bond || "0x..." }, 
+  { symbol: 'USDC', name: 'USDC Liquidity', type: 'Stablecoin', allocation: 0, value: '$0.00', status: 'Active', icon: 'account_balance_wallet', colorClass: 'text-slate-400', address: TOKENS.usdc },
 ];
 
 const yieldData = [
@@ -25,6 +27,59 @@ const yieldData = [
 
 export const Portfolio: React.FC = () => {
   const [isFundingOpen, setIsFundingOpen] = useState(false);
+  const [assets, setAssets] = useState<Asset[]>(initialAssets);
+  const [totalValue, setTotalValue] = useState<number>(0);
+
+  const fetchBalances = async () => {
+    try {
+        const user = await auth.getMe();
+        if (user && user.balances) {
+            console.log("Fetched balances:", user.balances);
+
+            const updatedAssets = initialAssets.map(asset => {
+                const balanceRecord = user.balances.find((b: any) => b.token.toLowerCase() === asset.address?.toLowerCase());
+                let balance = 0;
+                let value = 0;
+
+                if (balanceRecord) {
+                     const decimals = TOKEN_DECIMALS[asset.symbol] || 18;
+                     const rawBalance = BigInt(balanceRecord.balance);
+                     const formatted = formatUnits(rawBalance, decimals);
+                     balance = parseFloat(formatted);
+                     // Mock Price: USDC = $1, TBILL = $100 (just for demo)
+                     const price = asset.symbol === 'USDC' ? 1 : 100; 
+                     value = balance * price;
+                }
+
+                return {
+                    ...asset,
+                    value: `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                    rawValue: value
+                };
+            });
+
+            const total = updatedAssets.reduce((acc, curr) => acc + (curr.rawValue || 0), 0);
+            setTotalValue(total);
+
+            // Update allocations
+            const finalAssets = updatedAssets.map(asset => ({
+                ...asset,
+                allocation: total > 0 ? Math.round(((asset.rawValue || 0) / total) * 100) : 0
+            }));
+
+            setAssets(finalAssets);
+        }
+    } catch (e) {
+        console.error("Failed to fetch balances", e);
+    }
+  };
+
+  useEffect(() => {
+    fetchBalances();
+    // Poll for updates every 10s
+    const interval = setInterval(fetchBalances, 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <div className="h-full flex flex-col gap-6 p-6 overflow-y-auto bg-background-light dark:bg-background-dark">
@@ -52,10 +107,12 @@ export const Portfolio: React.FC = () => {
           </div>
           <h3 className="text-slate-500 text-xs uppercase font-semibold tracking-widest mb-2">Total Value Locked</h3>
           <div className="flex items-end space-x-3">
-            <span className="text-2xl lg:text-3xl font-mono font-medium text-white tracking-tight">$12,450,200.00</span>
+            <span className="text-2xl lg:text-3xl font-mono font-medium text-white tracking-tight">
+                ${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </span>
           </div>
           <div className="mt-2 text-xs text-slate-500">
-            <span className="text-primary font-mono">+12.5%</span> vs last month
+            <span className="text-primary font-mono">+0.0%</span> vs last month
           </div>
         </Card>
 
@@ -66,8 +123,8 @@ export const Portfolio: React.FC = () => {
           </div>
           <h3 className="text-slate-500 text-xs uppercase font-semibold tracking-widest mb-2">24h PnL</h3>
           <div className="flex items-end space-x-3">
-            <span className="text-2xl lg:text-3xl font-mono font-medium text-primary tracking-tight">+$45,200</span>
-            <span className="text-sm font-mono text-primary bg-primary/10 px-1.5 py-0.5 rounded mb-1">3.2%</span>
+            <span className="text-2xl lg:text-3xl font-mono font-medium text-primary tracking-tight">+$0.00</span>
+            <span className="text-sm font-mono text-primary bg-primary/10 px-1.5 py-0.5 rounded mb-1">0.0%</span>
           </div>
           <div className="mt-2 text-xs text-slate-500">Realized & Unrealized</div>
         </Card>
@@ -214,7 +271,10 @@ export const Portfolio: React.FC = () => {
 
       <FundingModal 
         isOpen={isFundingOpen} 
-        onClose={() => setIsFundingOpen(false)} 
+        onClose={() => {
+            setIsFundingOpen(false);
+            fetchBalances(); // Refresh balances on close
+        }} 
       />
     </div>
   );

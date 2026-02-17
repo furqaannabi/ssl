@@ -9,27 +9,20 @@ import { History } from './components/History';
 import { SettingsModal } from './components/SettingsModal';
 import { ProfileModal } from './components/ProfileModal';
 
+import { config } from './lib/wagmi';
+
 // RainbowKit & Wagmi
 import '@rainbow-me/rainbowkit/styles.css';
 import {
-  getDefaultConfig,
   RainbowKitProvider,
   darkTheme,
 } from '@rainbow-me/rainbowkit';
 import { WagmiProvider, useConnection, useSignMessage } from 'wagmi';
-import { baseSepolia } from 'wagmi/chains';
 import { auth } from './lib/auth';
 import {
   QueryClientProvider,
   QueryClient,
 } from "@tanstack/react-query";
-
-const config = getDefaultConfig({
-  appName: 'SSL Terminal',
-  projectId: import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || '',
-  chains: [baseSepolia],
-  ssr: false,
-});
 
 const queryClient = new QueryClient();
 

@@ -22,6 +22,8 @@ export interface Asset {
   status: 'Active' | 'Encrypted' | 'Pending';
   icon: string;
   colorClass: string;
+  address?: string;
+  rawValue?: number;
 }
 
 export interface Order {
