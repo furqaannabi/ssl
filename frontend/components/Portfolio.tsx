@@ -25,6 +25,9 @@ const yieldData = [
   { name: 'Aug', value: 13000 },
 ];
 
+// ...
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+
 export const Portfolio: React.FC = () => {
   const [isFundingOpen, setIsFundingOpen] = useState(false);
   const [assets, setAssets] = useState<Asset[]>(initialAssets);
@@ -33,6 +36,17 @@ export const Portfolio: React.FC = () => {
   const fetchBalances = async () => {
     try {
         const user = await auth.getMe();
+        
+        // Fetch Oracle Prices
+        let prices: Record<string, any> = {};
+        try {
+            const oracleRes = await fetch(`${API_URL}/api/oracle/prices`);
+            if (oracleRes.ok) {
+                const data = await oracleRes.json();
+                prices = data.prices;
+            }
+        } catch (e) { console.error("Oracle fetch failed", e); }
+
         if (user && user.balances) {
             console.log("Fetched balances:", user.balances);
 
@@ -40,21 +54,28 @@ export const Portfolio: React.FC = () => {
                 const balanceRecord = user.balances.find((b: any) => b.token.toLowerCase() === asset.address?.toLowerCase());
                 let balance = 0;
                 let value = 0;
+                let change24h = "0.00%";
 
                 if (balanceRecord) {
                      const decimals = TOKEN_DECIMALS[asset.symbol] || 18;
                      const rawBalance = BigInt(balanceRecord.balance);
                      const formatted = formatUnits(rawBalance, decimals);
                      balance = parseFloat(formatted);
-                     // Mock Price: USDC = $1, TBILL = $100 (just for demo)
-                     const price = asset.symbol === 'USDC' ? 1 : 100; 
-                     value = balance * price;
                 }
+
+                // Get Price from Oracle or fallback
+                const oracleData = prices[asset.symbol];
+                const price = oracleData ? parseFloat(oracleData.price) : (asset.symbol === 'USDC' ? 1 : 100);
+                if (oracleData) change24h = oracleData.change24h;
+
+                value = balance * price;
 
                 return {
                     ...asset,
                     value: `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-                    rawValue: value
+                    rawValue: value,
+                    price: price, // Store for reference if needed
+                    change24h: change24h
                 };
             });
 
@@ -83,7 +104,6 @@ export const Portfolio: React.FC = () => {
 
   return (
     <div className="h-full flex flex-col gap-6 p-6 overflow-y-auto bg-background-light dark:bg-background-dark">
-
 
       <div className="flex justify-between items-center shrink-0">
         <div>
@@ -183,7 +203,14 @@ export const Portfolio: React.FC = () => {
                           </div>
                           <div>
                             <div className="font-medium text-white font-display uppercase">{asset.name}</div>
-                            <div className="text-xs text-slate-500">{asset.symbol}</div>
+                            <div className="text-xs text-slate-500 flex gap-2">
+                                <span>{asset.symbol}</span>
+                                {(asset as any).change24h && (
+                                    <span className={`${(asset as any).change24h.startsWith('-') ? 'text-red-500' : 'text-primary'}`}>
+                                        {(asset as any).change24h}
+                                    </span>
+                                )}
+                            </div>
                           </div>
                         </div>
                       </td>
@@ -198,6 +225,7 @@ export const Portfolio: React.FC = () => {
                       </td>
                       <td className="px-6 py-4 text-right text-slate-200">
                         <span className="blur-[2px] group-hover:blur-none transition-all cursor-crosshair">{asset.value}</span>
+                         <div className="text-[9px] text-slate-500 group-hover:text-primary transition-colors">@ ${(asset as any).price?.toFixed(2)}</div>
                       </td>
                     </tr>
                   ))}
@@ -206,30 +234,8 @@ export const Portfolio: React.FC = () => {
             </div>
           </Card>
 
-          {/* Stealth Settlements Info */}
-          <Card className="flex flex-col border-primary/20">
-            <div className="p-5 border-b border-border-dark flex justify-between items-center bg-black/40">
-              <h2 className="text-sm font-bold text-primary flex items-center gap-2 uppercase tracking-widest">
-                <Icon name="fingerprint" className="text-lg" /> 
-                Confidential Settlements
-              </h2>
-              <Badge label="STATELESS" color="slate" icon="visibility_off" />
-            </div>
-            <div className="p-8 flex flex-col items-center justify-center text-center">
-                <div className="w-16 h-16 bg-primary/5 rounded-full flex items-center justify-center mb-4 border border-primary/10">
-                    <Icon name="shield" className="text-3xl text-primary/50" />
-                </div>
-                <h3 className="text-white font-mono uppercase tracking-wide mb-2">Local History Disabled</h3>
-                <p className="text-xs text-slate-500 max-w-sm leading-relaxed mb-6">
-                    To ensure maximum privacy, your trade history and stealth keys are 
-                    <span className="text-slate-300 font-bold mx-1">never stored</span> 
-                    on this device. Please refer to your external wallet or the blockchain for settlement verification.
-                </p>
-                <div className="flex gap-3">
-                    <Button variant="secondary" icon="open_in_new">View Explorer</Button>
-                </div>
-            </div>
-          </Card>
+          {/* ... (rest of component) ... */}
+
         </div>
 
         {/* Sidebar Widgets */}

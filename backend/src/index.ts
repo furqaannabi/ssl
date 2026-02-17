@@ -11,6 +11,7 @@ import { verify } from "./routes/verify";
 import { order } from "./routes/order";
 import { auth } from "./routes/auth";
 import { user } from "./routes/user";
+import oracle from "./routes/oracle"; // Added this line
 import { pairs } from "./routes/pairs";
 import { startVaultListener } from "./listeners/ssl-vault-listener";
 
@@ -34,6 +35,7 @@ app.route("/api/verify", verify);
 app.route("/api/order", order);
 app.route("/api/auth", auth);
 app.route("/api/user", user);
+app.route("/api/oracle", oracle);
 app.route("/api/pairs", pairs);
 
 // ── 404 ──
