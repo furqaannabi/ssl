@@ -2,66 +2,87 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-    output   = "../generated/prisma"
-    provider = "prisma-client-js"
+  output   = "../generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
-    provider = "postgresql"
+  provider = "postgresql"
 }
 
 enum OrderStatus {
-    PENDING
-    OPEN
-    MATCHED
-    SETTLED
-    CANCELLED
+  PENDING
+  OPEN
+  MATCHED
+  SETTLED
+  CANCELLED
 }
 
 enum OrderSide {
-    BUY
-    SELL
+  BUY
+  SELL
 }
 
 model Order {
-    id               String      @id @default(uuid())
-    asset            String
-    quoteToken       String
-    amount           String
-    price            String
-    side             OrderSide
-    stealthPublicKey String
-    status           OrderStatus
-    createdAt        DateTime    @default(now())
-    userAddress      String?
-    user             User?       @relation(fields: [userAddress], references: [address])
+  id               String      @id @default(uuid())
+  pairId           String
+  pair             Pair        @relation(fields: [pairId], references: [id])
+  amount           String
+  price            String
+  side             OrderSide
+  stealthPublicKey String
+  status           OrderStatus
+  createdAt        DateTime    @default(now())
+  userAddress      String?
+  user             User?       @relation(fields: [userAddress], references: [address])
 }
 
 model User {
-    address    String         @id
-    name       String
-    orders     Order[]
-    balances   TokenBalance[]
-    sessions   Session[]
-    nonce      String?
-    isVerified Boolean        @default(false)
+  address    String         @id
+  name       String
+  orders     Order[]
+  balances   TokenBalance[]
+  sessions   Session[]
+  nonce      String?
+  isVerified Boolean        @default(false)
 }
 
 model TokenBalance {
-    id          String   @id @default(uuid())
-    token       String
-    balance     String
-    updatedAt   DateTime @updatedAt
-    userAddress String
-    user        User     @relation(fields: [userAddress], references: [address])
+  id          String   @id @default(uuid())
+  token       String
+  balance     String
+  updatedAt   DateTime @updatedAt
+  userAddress String
+  user        User     @relation(fields: [userAddress], references: [address])
 
-    @@unique([userAddress, token])
+  @@unique([userAddress, token])
 }
 
 model Session {
-    id          String   @id @default(uuid())
-    userAddress String
-    user        User     @relation(fields: [userAddress], references: [address])
-    expiresAt   DateTime
-    createdAt   DateTime @default(now())
+  id          String   @id @default(uuid())
+  userAddress String
+  user        User     @relation(fields: [userAddress], references: [address])
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+}
+
+model Token {
+  address  String @id
+  name     String
+  symbol   String
+  decimals Int    @default(18)
+
+  basePairs  Pair[] @relation("BaseToken")
+  quotePairs Pair[] @relation("QuoteToken")
+}
+
+model Pair {
+  id                String  @id @default(uuid())
+  baseTokenAddress  String
+  quoteTokenAddress String
+  baseToken         Token   @relation("BaseToken", fields: [baseTokenAddress], references: [address])
+  quoteToken        Token   @relation("QuoteToken", fields: [quoteTokenAddress], references: [address])
+  orders            Order[]
+
+  @@unique([baseTokenAddress, quoteTokenAddress])
 }

@@ -78,7 +78,7 @@ Returns orders created by the user. Optional `status` filter.
   "orders": [
     {
       "id": "order_1",
-      "asset": "0xTokenA",
+      "pairId": "pair-uuid",
       "amount": "100",
       "status": "OPEN",
       "createdAt": "2024-..."
@@ -149,8 +149,7 @@ Creates an order and streams the matching engine logs.
 **Request:**
 ```json
 {
-  "asset": "0xTokenA",
-  "quoteToken": "0xTokenB",
+  "pairId": "pair-uuid",
   "amount": "100",
   "price": "50",
   "side": "BUY",

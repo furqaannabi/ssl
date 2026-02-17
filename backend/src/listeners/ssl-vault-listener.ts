@@ -2,6 +2,7 @@
 import { ethers } from "ethers";
 import prisma from "../clients/prisma";
 import { sendToCRE } from "../lib/cre-client";
+import { config } from "../lib/config";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,12 +18,84 @@ if (!fs.existsSync(contractsPath)) {
 const contracts = fs.existsSync(contractsPath) ? JSON.parse(fs.readFileSync(contractsPath, "utf-8")) : {};
 const VAULT_ADDRESS = contracts.vault;
 
-// Minimal ABI
+// Minimal ABIs
 const VAULT_ABI = [
     "event Funded(address indexed token, uint256 amount, address indexed user)",
     "event WithdrawalRequested(address indexed user, uint256 amount, uint256 indexed withdrawalId, uint256 timestamp)",
     "function withdrawalRequests(uint256) view returns (address token, uint256 amount, bool claimed)"
 ];
+
+const ERC20_ABI = [
+    "function name() view returns (string)",
+    "function symbol() view returns (string)",
+    "function decimals() view returns (uint8)"
+];
+
+/**
+ * Ensure Token and Pair records exist for a deposited token.
+ * Creates a TOKEN/USDC pair if the token isn't USDC itself.
+ */
+async function ensurePairExists(tokenAddress: string, provider: ethers.JsonRpcProvider) {
+    const address = tokenAddress.toLowerCase();
+    const usdcAddress = config.usdcAddress.toLowerCase();
+
+    // Skip if the deposited token is USDC itself
+    if (address === usdcAddress) return;
+
+    // Check if pair already exists
+    const existingPair = await prisma.pair.findUnique({
+        where: {
+            baseTokenAddress_quoteTokenAddress: {
+                baseTokenAddress: address,
+                quoteTokenAddress: usdcAddress,
+            }
+        }
+    });
+
+    if (existingPair) return;
+
+    console.log(`[Listener] New token detected: ${address}. Creating pair...`);
+
+    const erc20 = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
+
+    // Fetch on-chain metadata for the deposited token
+    let name = "Unknown";
+    let symbol = "???";
+    let decimals = 18;
+    try {
+        [name, symbol, decimals] = await Promise.all([
+            erc20.name(),
+            erc20.symbol(),
+            erc20.decimals().then(Number),
+        ]);
+    } catch (err) {
+        console.warn(`[Listener] Could not fetch ERC20 metadata for ${address}:`, err);
+    }
+
+    // Upsert deposited token
+    await prisma.token.upsert({
+        where: { address },
+        update: {},
+        create: { address, name, symbol, decimals },
+    });
+
+    // Upsert USDC token (in case it hasn't been seeded yet)
+    await prisma.token.upsert({
+        where: { address: usdcAddress },
+        update: {},
+        create: { address: usdcAddress, name: "USD Coin", symbol: "USDC", decimals: 6 },
+    });
+
+    // Create the pair
+    await prisma.pair.create({
+        data: {
+            baseTokenAddress: address,
+            quoteTokenAddress: usdcAddress,
+        },
+    });
+
+    console.log(`[Listener] Created pair ${symbol}/USDC for token ${address}`);
+}
 
 export async function startVaultListener() {
     if (!VAULT_ADDRESS) {
@@ -53,6 +126,9 @@ export async function startVaultListener() {
                         name: `User ${user.slice(0, 6)}`
                     }
                 });
+
+                // Auto-create Token + Pair if this is a new token
+                await ensurePairExists(token, provider);
 
                 // Get Current Balance
                 const currentRecord = await prisma.tokenBalance.findUnique({

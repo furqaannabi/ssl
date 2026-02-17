@@ -27,8 +27,8 @@ export interface Asset {
 export interface Order {
   id: string;
   timestamp: string;
-  asset: string;
-  ticker: string;
+  pairId: string;
+  pairLabel: string;
   side: 'BUY' | 'SELL';
   filled: number;
   total: number;

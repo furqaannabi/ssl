@@ -6,6 +6,7 @@ import { sendToCRE } from "./cre-client";
 export async function matchOrders(newOrderId: string, onLog?: (log: string) => void) {
     const newOrder = await prisma.order.findUnique({
         where: { id: newOrderId },
+        include: { pair: true },
     });
 
     if (!newOrder || newOrder.status !== OrderStatus.OPEN) {
@@ -24,8 +25,7 @@ export async function matchOrders(newOrderId: string, onLog?: (log: string) => v
             where: {
                 side: oppositeSide,
                 status: OrderStatus.OPEN,
-                asset: newOrder.asset,
-                quoteToken: newOrder.quoteToken,
+                pairId: newOrder.pairId,
                 price: { lte: newOrder.price }, // Sell price <= Buy price
             },
             orderBy: {
@@ -37,8 +37,7 @@ export async function matchOrders(newOrderId: string, onLog?: (log: string) => v
             where: {
                 side: oppositeSide,
                 status: OrderStatus.OPEN,
-                asset: newOrder.asset,
-                quoteToken: newOrder.quoteToken,
+                pairId: newOrder.pairId,
                 price: { gte: newOrder.price }, // Buy price >= Sell price
             },
             orderBy: {
@@ -72,14 +71,18 @@ export async function matchOrders(newOrderId: string, onLog?: (log: string) => v
                 throw new Error("Missing userAddress on matched orders");
             }
 
+            // Resolve token addresses from the pair
+            const { baseTokenAddress, quoteTokenAddress } = newOrder.pair;
+
             // Send to CRE for settlement
             await sendToCRE({
                 action: "settle_match",
+                baseTokenAddress,
+                quoteTokenAddress,
                 buyer: {
                     orderId: buyer.id,
                     order: {
-                        asset: buyer.asset,
-                        quoteToken: buyer.quoteToken,
+                        pairId: buyer.pairId,
                         amount: buyer.amount,
                         price: buyer.price,
                         side: "BUY"
@@ -89,8 +92,7 @@ export async function matchOrders(newOrderId: string, onLog?: (log: string) => v
                 seller: {
                     orderId: seller.id,
                     order: {
-                        asset: seller.asset,
-                        quoteToken: seller.quoteToken,
+                        pairId: seller.pairId,
                         amount: seller.amount,
                         price: seller.price,
                         side: "SELL"

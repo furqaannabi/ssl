@@ -65,7 +65,7 @@
                 ],
                 "body": {
                     "mode": "raw",
-                    "raw": "{\n    \"nullifierHash\": \"0x456\",\n    \"asset\": \"0xAssetAddress\",\n    \"quoteToken\": \"0xQuoteAddress\",\n    \"amount\": \"100\",\n    \"price\": \"10\",\n    \"side\": \"BUY\",\n    \"stealthPublicKey\": \"0xStealthKey\"\n}"
+                    "raw": "{\n    \"nullifierHash\": \"0x456\",\n    \"pairId\": \"your-pair-uuid\",\n    \"amount\": \"100\",\n    \"price\": \"10\",\n    \"side\": \"BUY\",\n    \"stealthPublicKey\": \"0xStealthKey\"\n}"
                 },
                 "url": {
                     "raw": "{{baseUrl}}/api/order",

@@ -8,7 +8,6 @@ import { Hono } from "hono";
 import prisma from "../clients/prisma";
 import { matchOrders } from "../lib/matching-engine";
 import { OrderSide, OrderStatus } from "../../generated/prisma/client";
-import { recoverMessageAddress } from "viem";
 import { streamText } from 'hono/streaming'
 import { authMiddleware } from "../middleware/auth";
 
@@ -21,8 +20,7 @@ type Variables = {
 const order = new Hono<{ Variables: Variables }>();
 
 interface OrderInitPayload {
-    asset: string;
-    quoteToken: string;
+    pairId: string;
     amount: string;
     price: string;
     side: "BUY" | "SELL";
@@ -40,8 +38,7 @@ order.post("/", async (c) => {
 
     // Validate required fields
     const required = [
-        "asset",
-        "quoteToken",
+        "pairId",
         "amount",
         "price",
         "side",
@@ -60,11 +57,16 @@ order.post("/", async (c) => {
     }
 
     try {
+        // Validate pair exists
+        const pair = await prisma.pair.findUnique({ where: { id: body.pairId } });
+        if (!pair) {
+            return c.json({ error: "Invalid pairId: pair not found" }, 400);
+        }
+
         // Create order as PENDING
         const newOrder = await prisma.order.create({
             data: {
-                asset: body.asset,
-                quoteToken: body.quoteToken,
+                pairId: body.pairId,
                 amount: body.amount,
                 price: body.price,
                 side: body.side as OrderSide,

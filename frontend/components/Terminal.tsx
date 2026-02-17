@@ -8,7 +8,8 @@ export const Terminal: React.FC = () => {
   const [privacyLevel, setPrivacyLevel] = useState(3);
   const [stealthPublicKey, setStealthPublicKey] = useState<string>(''); // Stateless: Manual Input
   const [status, setStatus] = useState<'IDLE' | 'SIGNING' | 'SENDING' | 'ENCRYPTING' | 'MATCHING' | 'SETTLED'>('IDLE');
-  const [assetSymbol, setAssetSymbol] = useState<'TBILL' | 'PAXG'>('TBILL');
+  const [pairId, setPairId] = useState<string>('');
+  const [pairs, setPairs] = useState<{ id: string; baseToken: { symbol: string; name: string }; quoteToken: { symbol: string; name: string } }[]>([]);
   const [amount, setAmount] = useState('50000');
   const [price, setPrice] = useState('98.40');
   
@@ -16,6 +17,18 @@ export const Terminal: React.FC = () => {
   const { signMessageAsync } = useSignMessage();
 
   const API_URL = import.meta.env.VITE_API_URL || "https://arc.furqaannabi.com";
+
+  useEffect(() => {
+    fetch(`${API_URL}/api/pairs`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.pairs?.length) {
+          setPairs(data.pairs);
+          setPairId(data.pairs[0].id);
+        }
+      })
+      .catch(err => console.error("Failed to fetch pairs:", err));
+  }, []);
   
   const handlePlaceOrder = async () => {
     if (!isConnected) {
@@ -41,8 +54,7 @@ export const Terminal: React.FC = () => {
         console.log("Initializing order...");
         const initPayload = {
             nullifierHash,
-            asset: assetSymbol,
-            quoteToken: "USDC",
+            pairId,
             amount: parseFloat(amount), // Ensure numbers
             price: parseFloat(price),
             side,
@@ -174,15 +186,18 @@ export const Terminal: React.FC = () => {
                </div>
 
                <div className="space-y-2 relative bg-surface-dark/95 p-4 border border-border-dark backdrop-blur-sm">
-                  <label className="text-[10px] text-primary font-mono uppercase tracking-wider block mb-1">Asset Class</label>
+                  <label className="text-[10px] text-primary font-mono uppercase tracking-wider block mb-1">Trading Pair</label>
                   <div className="relative">
                      <select 
                         className="w-full bg-black border border-border-dark text-white text-sm px-3 py-2.5 focus:ring-1 focus:ring-primary focus:border-primary appearance-none font-mono rounded-none"
-                        value={assetSymbol}
-                        onChange={(e) => setAssetSymbol(e.target.value as any)}
+                        value={pairId}
+                        onChange={(e) => setPairId(e.target.value)}
                      >
-                        <option value="TBILL">US T-Bill (Short-Term)</option>
-                        <option value="PAXG">Paxos Gold (PAXG)</option>
+                        {pairs.length > 0 ? pairs.map(p => (
+                           <option key={p.id} value={p.id}>{p.baseToken.symbol} / {p.quoteToken.symbol}</option>
+                        )) : (
+                           <option value="">Loading pairs...</option>
+                        )}
                      </select>
                      <Icon name="expand_more" className="absolute right-3 top-2.5 text-primary pointer-events-none text-lg" />
                   </div>

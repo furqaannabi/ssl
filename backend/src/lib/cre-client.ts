@@ -17,8 +17,7 @@ export interface VerifyPayload {
 
 export interface OrderPayload {
     action: "order";
-    asset: string;
-    quoteToken: string;
+    pairId: string;
     amount: string;
     price: string;
     side: "BUY" | "SELL";
@@ -27,11 +26,12 @@ export interface OrderPayload {
 
 export interface MatchPayload {
     action: "settle_match";
+    baseTokenAddress: string;
+    quoteTokenAddress: string;
     buyer: {
         orderId: string;
         order: {
-            asset: string;
-            quoteToken: string;
+            pairId: string;
             amount: string;
             price: string;
             side: "BUY" | "SELL";
@@ -41,8 +41,7 @@ export interface MatchPayload {
     seller: {
         orderId: string;
         order: {
-            asset: string;
-            quoteToken: string;
+            pairId: string;
             amount: string;
             price: string;
             side: "BUY" | "SELL";

@@ -49,12 +49,12 @@ type VerificationResponse = {
 
 interface MatchPayload {
   action: "settle_match";
+  baseTokenAddress: string;
+  quoteTokenAddress: string;
   buyer: {
-    // nullifierHash removed
     orderId: string;
     order: {
-      asset: string;
-      quoteToken: string;
+      pairId: string;
       amount: string;
       price: string;
       side: "BUY" | "SELL";
@@ -62,11 +62,9 @@ interface MatchPayload {
     stealthPublicKey: string;
   };
   seller: {
-    // nullifierHash removed
     orderId: string;
     order: {
-      asset: string;
-      quoteToken: string;
+      pairId: string;
       amount: string;
       price: string;
       side: "BUY" | "SELL";
@@ -86,10 +84,8 @@ interface WithdrawPayload {
 type Payload = VerifyPayload | MatchPayload | WithdrawPayload;
 
 interface Order {
-  // nullifierHash removed
   order: {
-    asset: string;
-    quoteToken: string;
+    pairId: string;
     amount: string;
     price: string;
     side: "BUY" | "SELL";
@@ -345,8 +341,8 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
         orderId as `0x${string}`,
         buyerStealth.stealthAddress as `0x${string}`,
         sellerStealth.stealthAddress as `0x${string}`,
-        data.seller.order.asset as `0x${string}`,
-        data.seller.order.quoteToken as `0x${string}`,
+        data.baseTokenAddress as `0x${string}`,
+        data.quoteTokenAddress as `0x${string}`,
         tradeAmount,
         tradeAmount,
       ]
