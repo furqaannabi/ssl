@@ -10,8 +10,8 @@ import { formatUnits } from 'viem';
 
 // Initial Static Data (to be merged with dynamic balances)
 const initialAssets: Asset[] = [
-  { symbol: 'TBILL', name: 'Tokenized T-Bills', type: 'Fixed Income', allocation: 0, value: '$0.00', status: 'Active', icon: 'account_balance', colorClass: 'text-blue-400', address: CONTRACTS.bond || "0x..." }, 
-  { symbol: 'USDC', name: 'USDC Liquidity', type: 'Stablecoin', allocation: 0, value: '$0.00', status: 'Active', icon: 'account_balance_wallet', colorClass: 'text-slate-400', address: TOKENS.usdc },
+  { symbol: 'BOND', name: 'BOND', type: 'Fixed Income', allocation: 0, value: '$0.00', status: 'Active', icon: 'account_balance', colorClass: 'text-blue-400', address: TOKENS.bond }, 
+  { symbol: 'USDC', name: 'USDC', type: 'Stablecoin', allocation: 0, value: '$0.00', status: 'Active', icon: 'account_balance_wallet', colorClass: 'text-slate-400', address: TOKENS.usdc },
 ];
 
 const yieldData = [

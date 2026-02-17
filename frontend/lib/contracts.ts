@@ -5,17 +5,17 @@ import { VAULT_ABI } from './abi/valut_abi';
 // Constants (Placeholders - to be filled with actual deployment addresses)
 export const TOKENS = {
    
-    "usdc": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+    "usdc": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    "bond": "0xa328fe09fd9f42c4cf95785b00876ba0bc82847a",
 }
 
 export const CONTRACTS = {
     "vault": "0x987190756d7d9914be98c46fcabb863230ed3267",
-    "bond": "0xa328fe09fd9f42c4cf95785b00876ba0bc82847a",
 }
 
 export const TOKEN_DECIMALS: Record<string, number> = {
     USDC: 6,
-    PAXG: 18,
+    BOND: 18,
     TBILL: 18
 };
 
