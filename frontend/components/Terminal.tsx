@@ -9,8 +9,8 @@ export const Terminal: React.FC = () => {
   const [stealthPublicKey, setStealthPublicKey] = useState<string>(''); // Stateless: Manual Input
   const [status, setStatus] = useState<'IDLE' | 'SIGNING' | 'SENDING' | 'ENCRYPTING' | 'MATCHING' | 'SETTLED'>('IDLE');
   const [selectedPairId, setSelectedPairId] = useState<string>('');
-  const [amount, setAmount] = useState('50000');
-  const [price, setPrice] = useState('98.40');
+  const [amount, setAmount] = useState('10');
+  const [price, setPrice] = useState('100.00');
   
   const { address: eoaAddress, isConnected } = useConnection();
   const { mutateAsync: signMessageAsync } = useSignMessage();
@@ -49,15 +49,39 @@ export const Terminal: React.FC = () => {
   };
 
   const fetchOrderBook = async () => {
+      if (!selectedPairId) return; // Wait for pair selection
       try {
-          const res = await fetch(`${API_URL}/api/order/book`);
+          const res = await fetch(`${API_URL}/api/order/book?pairId=${selectedPairId}`);
           if (res.ok) {
               const data = await res.json();
               if (data.success) {
                   const orders = data.orders;
-                  // Process Orders into Book
-                  const bids = orders.filter((o: any) => o.side === 'BUY').sort((a: any, b: any) => Number(b.price) - Number(a.price));
-                  const asks = orders.filter((o: any) => o.side === 'SELL').sort((a: any, b: any) => Number(a.price) - Number(b.price));
+                  
+                  // Process Orders into Aggregated Levels
+                  // Group by Price
+                  const bidsMap = new Map<string, number>();
+                  const asksMap = new Map<string, number>();
+
+                  orders.forEach((o: any) => {
+                      const price = Number(o.price).toFixed(2);
+                      const amount = Number(o.amount);
+                      
+                      if (o.side === 'BUY') {
+                          bidsMap.set(price, (bidsMap.get(price) || 0) + amount);
+                      } else {
+                          asksMap.set(price, (asksMap.get(price) || 0) + amount);
+                      }
+                  });
+
+                  // Convert Map to Array & Sort
+                  const bids = Array.from(bidsMap.entries())
+                      .map(([price, amount]) => ({ price, amount }))
+                      .sort((a, b) => Number(b.price) - Number(a.price)); // Descending (Best Bid Top)
+
+                  const asks = Array.from(asksMap.entries())
+                      .map(([price, amount]) => ({ price, amount }))
+                      .sort((a, b) => Number(a.price) - Number(b.price)); // Ascending (Best Ask Top)
+
                   setOrderBook({ bids, asks });
               }
           }
@@ -67,14 +91,14 @@ export const Terminal: React.FC = () => {
   useEffect(() => {
       fetchPairs();
       if (isConnected) fetchMyOrders();
-      fetchOrderBook(); // Public data, always fetch or fetch on mount
-
+      // fetchOrderBook() is called below when selectedPairId changes
+      
       const interval = setInterval(() => {
           if (isConnected && activeTab === 'MY_ORDERS') fetchMyOrders();
-          if (activeTab === 'BOOK') fetchOrderBook();
+          if (activeTab === 'BOOK' && selectedPairId) fetchOrderBook();
       }, 3000);
       return () => clearInterval(interval);
-  }, [isConnected, activeTab]);
+  }, [isConnected, activeTab, selectedPairId]); // Add selectedPairId dependency
 
   const cancelOrder = async (orderId: string) => {
       try {
@@ -112,16 +136,14 @@ export const Terminal: React.FC = () => {
         return;
     }
 
-    try {
-        /*
-        // World ID Check (Optional based on config, but good for compliance)
-        const nullifierHash = localStorage.getItem("ssl_nullifier_hash");
-        if (!nullifierHash) {
-            toast.error("Identity Verified Required (World ID)");
-            return;
-        }
-        */
+    // Check Minimum Order Value (5 USDC)
+    const totalValue = Number(amount) * Number(price);
+    if (totalValue < 5) {
+        toast.error(`Order value must be at least 5 USDC (Current: ${totalValue.toFixed(2)} USDC)`);
+        return;
+    }
 
+    try {
         setLogs([]); // Clear previous logs
         setStatus('SIGNING'); 
         
@@ -344,7 +366,10 @@ export const Terminal: React.FC = () => {
                             className="w-full bg-black border border-border-dark text-white font-mono text-sm px-3 py-2.5 focus:ring-1 focus:ring-primary focus:border-primary text-right rounded-none" 
                             placeholder="0.00" 
                             value={amount}
-                            onChange={(e) => setAmount(e.target.value)}
+                            onChange={(e) => {
+                                const val = e.target.value;
+                                if (/^\d*\.?\d*$/.test(val)) setAmount(val);
+                            }}
                             type="text" 
                         />
                         <span className="absolute left-3 top-2.5 text-slate-600 font-mono text-xs">UNITS</span>
@@ -360,7 +385,10 @@ export const Terminal: React.FC = () => {
                             className="w-full bg-black border border-border-dark text-white font-mono text-sm px-3 py-2.5 focus:ring-1 focus:ring-primary focus:border-primary text-right rounded-none" 
                             placeholder="0.00" 
                             value={price}
-                            onChange={(e) => setPrice(e.target.value)}
+                            onChange={(e) => {
+                                const val = e.target.value;
+                                if (/^\d*\.?\d*$/.test(val)) setPrice(val);
+                            }}
                             type="text" 
                         />
                         <span className="absolute left-3 top-2.5 text-slate-600 font-mono text-xs">USDC</span>
@@ -368,20 +396,21 @@ export const Terminal: React.FC = () => {
                   </div>
                </div>
 
-               <Button 
-                fullWidth 
-                icon={status === 'IDLE' ? (stealthPublicKey ? "lock" : "lock_open") : "pending"} 
-                className="py-4 mt-6 uppercase tracking-wider"
-                onClick={handlePlaceOrder}
-                disabled={status !== 'IDLE'}
-               >
-                {status === 'SIGNING' ? "Requesting Signature..." :
-                 status === 'SENDING' ? "Sending to Enclave..." :
-                 status === 'ENCRYPTING' ? "Encrypting Order..." :
-                 status === 'MATCHING' ? "Matching Engine..." :
-                 status === 'SETTLED' ? "Order Settled!" :
-                 stealthPublicKey ? "Encrypt & Place Order" : "Enter Stealth Key"}
-               </Button>
+                <Button 
+                 fullWidth 
+                 icon={status === 'IDLE' ? (stealthPublicKey ? ((Number(amount) * Number(price)) >= 5 ? "lock" : "warning") : "lock_open") : "pending"} 
+                 className={`py-4 mt-6 uppercase tracking-wider ${(Number(amount) * Number(price)) < 5 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                 onClick={handlePlaceOrder}
+                 disabled={status !== 'IDLE' || (Number(amount) * Number(price)) < 5}
+                >
+                 {status === 'SIGNING' ? "Requesting Signature..." :
+                  status === 'SENDING' ? "Sending to Enclave..." :
+                  status === 'ENCRYPTING' ? "Encrypting Order..." :
+                  status === 'MATCHING' ? "Matching Engine..." :
+                  status === 'SETTLED' ? "Order Settled!" :
+                  (Number(amount) * Number(price)) < 5 ? "Min Order Value: 5 USDC" :
+                  stealthPublicKey ? "Encrypt & Place Order" : "Enter Stealth Key"}
+                </Button>
                <div className="text-[9px] text-slate-600 text-center font-mono uppercase tracking-wide mt-2">
                   TEE Verification: <span className="text-slate-400">{stealthPublicKey ? "READY" : "WAITING FOR KEY"}</span>
                </div>
@@ -480,10 +509,11 @@ export const Terminal: React.FC = () => {
                   {/* MY ORDERS TAB */}
                   {activeTab === 'MY_ORDERS' && (
                       <div className="absolute inset-0 flex flex-col z-20 bg-black/80 backdrop-blur-md">
-                          <div className="grid grid-cols-4 px-4 py-2 text-slate-500 border-b border-border-dark text-[9px] uppercase tracking-wider bg-surface-dark/50">
+                          <div className="grid grid-cols-5 px-4 py-2 text-slate-500 border-b border-border-dark text-[9px] uppercase tracking-wider bg-surface-dark/50">
                              <div>Asset</div>
+                             <div>Pair</div>
                              <div className="text-right">Side</div>
-                             <div className="text-right">Status</div>
+                             <div className="text-right hidden sm:block">Status</div>
                              <div className="text-right">Action</div>
                           </div>
                           
@@ -494,14 +524,20 @@ export const Terminal: React.FC = () => {
                                       <span className="text-[10px]">NO ACTIVE ORDERS</span>
                                   </div>
                               )}
-                              {myOrders.map((order) => (
-                                  <div key={order.id} className="grid grid-cols-4 px-4 py-3 border-b border-white/5 items-center hover:bg-white/5 transition-colors">
+                              {myOrders.map((order) => {
+                                  // Look up Pair info if needed (assuming order.pair exists or we can find it)
+                                  const pair = pairs.find(p => p.id === order.pairId);
+                                  const pairSymbol = pair ? `${pair.baseToken.symbol}/${pair.quoteToken.symbol}` : "UNK/USDC";
+
+                                  return (
+                                  <div key={order.id} className="grid grid-cols-5 px-4 py-3 border-b border-white/5 items-center hover:bg-white/5 transition-colors">
                                       <div className="flex flex-col">
-                                          <span className="text-white font-bold">{order.asset}</span>
+                                          <span className="text-white font-bold">{order.asset || pair?.baseToken.symbol || "UNK"}</span>
                                           <span className="text-[9px] text-slate-500">{(Number(order.amount)).toFixed(2)} @ {Number(order.price).toFixed(2)}</span>
                                       </div>
+                                      <div className="text-[9px] text-slate-400">{pairSymbol}</div>
                                       <div className={`text-right font-bold ${order.side === 'BUY' ? 'text-primary' : 'text-red-500'}`}>{order.side}</div>
-                                      <div className="text-right">
+                                      <div className="text-right hidden sm:block">
                                           <Badge variant={order.status === 'OPEN' ? 'success' : order.status === 'MATCHED' ? 'warning' : 'outline'}>
                                               {order.status}
                                           </Badge>
@@ -518,7 +554,7 @@ export const Terminal: React.FC = () => {
                                           )}
                                       </div>
                                   </div>
-                              ))}
+                              )})}
                           </div>
                       </div>
                   )}
@@ -534,13 +570,13 @@ export const Terminal: React.FC = () => {
                   {/* Asks (Sell Orders) - Red */}
                   <div className="flex-1 overflow-y-auto flex flex-col-reverse justify-end pb-2">
                      {orderBook.asks.length === 0 && <div className="text-center text-[9px] text-slate-700 py-2">NO ASK LIQUIDITY</div>}
-                     {orderBook.asks.map((order, i) => {
+                     {orderBook.asks.map((order: any, i) => {
                         const vol = Number(order.amount);
                         const maxVol = Math.max(...orderBook.asks.map((o:any) => Number(o.amount)), 100);
                         const width = `${(vol / maxVol) * 100}%`;
                         
                         return (
-                            <div key={order.id || i} className="grid grid-cols-3 px-4 py-1 hover:bg-red-900/10 cursor-pointer group relative border-b border-transparent hover:border-red-900/30">
+                            <div key={i} className="grid grid-cols-3 px-4 py-1 hover:bg-red-900/10 cursor-pointer group relative border-b border-transparent hover:border-red-900/30">
                                <span className="text-red-500">{Number(order.price).toFixed(2)}</span>
                                <span className="text-right text-slate-500 blur-[3px] group-hover:blur-none transition-all">{vol.toFixed(1)}</span>
                                <span className="text-right text-slate-500">{(Number(order.price) * vol).toFixed(0)}</span>
@@ -570,13 +606,13 @@ export const Terminal: React.FC = () => {
                   {/* Bids (Buy Orders) - Green/Primary */}
                   <div className="flex-1 overflow-y-auto pt-2">
                      {orderBook.bids.length === 0 && <div className="text-center text-[9px] text-slate-700 py-2">NO BID LIQUIDITY</div>}
-                     {orderBook.bids.map((order, i) => {
+                     {orderBook.bids.map((order: any, i) => {
                         const vol = Number(order.amount);
                         const maxVol = Math.max(...orderBook.bids.map((o:any) => Number(o.amount)), 100);
                         const width = `${(vol / maxVol) * 100}%`;
                         
                         return (
-                            <div key={order.id || i} className="grid grid-cols-3 px-4 py-1 hover:bg-primary/10 cursor-pointer group relative border-b border-transparent hover:border-primary/20">
+                            <div key={i} className="grid grid-cols-3 px-4 py-1 hover:bg-primary/10 cursor-pointer group relative border-b border-transparent hover:border-primary/20">
                                <span className="text-primary">{Number(order.price).toFixed(2)}</span>
                                <span className="text-right text-slate-500 blur-[3px] group-hover:blur-none transition-all">{vol.toFixed(1)}</span>
                                <span className="text-right text-slate-500">{(Number(order.price) * vol).toFixed(0)}</span>

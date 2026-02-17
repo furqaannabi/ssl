@@ -237,7 +237,18 @@ export async function startVaultListener() {
 
         console.log("[Listener] Listener attached successfully.");
 
+        // Keep function running to prevent exit, but also handle connection errors
+        await new Promise((resolve, reject) => {
+            provider.on("error", (err) => {
+                console.error("[Listener] Provider Error:", err);
+                reject(err);
+            });
+        });
+
     } catch (err) {
-        console.error("[Listener] Failed to start listener (RPC error?):", err);
+        console.error("[Listener] RPC Error or Connection Dropped:", err);
+        console.log("[Listener] Reconnecting in 5s...");
+        await new Promise(r => setTimeout(r, 5000));
+        return startVaultListener(); // Recursive restart
     }
 }
