@@ -14,7 +14,7 @@ export const Terminal: React.FC = () => {
   const [price, setPrice] = useState('98.40');
   
   const { address: eoaAddress, isConnected } = useConnection();
-  const { signMessageAsync } = useSignMessage();
+  const { mutateAsync: signMessageAsync } = useSignMessage();
 
   const API_URL = import.meta.env.VITE_API_URL || "https://arc.furqaannabi.com";
 
@@ -42,25 +42,31 @@ export const Terminal: React.FC = () => {
     }
 
     try {
+        /*
+        // World ID Check (Optional based on config, but good for compliance)
         const nullifierHash = localStorage.getItem("ssl_nullifier_hash");
         if (!nullifierHash) {
             toast.error("Identity Verified Required (World ID)");
             return;
         }
+        */
 
+        setLogs([]); // Clear previous logs
         setStatus('SIGNING'); 
         
         // 1. Initialize Order
-        console.log("Initializing order...");
+        // backend/src/routes/order.ts expects strings for amount/price
         const initPayload = {
             nullifierHash,
             pairId,
             amount: parseFloat(amount), // Ensure numbers
             price: parseFloat(price),
             side,
-            stealthPublicKey, // Use manual input
+            stealthPublicKey, 
             userAddress: eoaAddress 
         };
+
+        console.log("Sending Order Init:", initPayload);
 
         const initResponse = await fetch(`${API_URL}/api/order`, {
             method: "POST",
@@ -74,16 +80,16 @@ export const Terminal: React.FC = () => {
         }
 
         const { orderId, messageToSign } = await initResponse.json();
-        console.log("Order initialized:", orderId, "Message:", messageToSign);
+        setLogs(prev => [...prev, `Order Initialized: ${orderId.slice(0,8)}...`]);
         
         // 2. Sign Authorization Message with EOA
-        console.log("Requesting EOA signature...");
         const signature = await signMessageAsync({ 
             message: messageToSign, 
             account: eoaAddress as `0x${string}` 
         });
+        setLogs(prev => [...prev, `Authorization Signed`]);
 
-        // 3. Confirm Order with Signature
+        // 3. Confirm Order with Signature & Stream Logs
         setStatus('SENDING');
         const confirmResponse = await fetch(`${API_URL}/api/order/${orderId}/confirm`, {
             method: "POST",
@@ -96,23 +102,47 @@ export const Terminal: React.FC = () => {
             throw new Error(err.error || "Order confirmation failed");
         }
 
-        const confirmResult = await confirmResponse.json();
-        console.log("Order confirmed:", confirmResult);
-
-        // 4. Poll for Settlement (Display Only)
+        // Handle SSE Stream
         setStatus('MATCHING');
+        const reader = confirmResponse.body?.getReader();
+        const decoder = new TextDecoder();
         
-        // We do typically check for settlement data here to derive keys, 
-        // but in stateless mode + remote backend limitation, we might just show "Settled".
-        // If the user needs to claim funds, they would use their Private Key (which they have backed up)
-        // on a separate "Claim" or "History" page (out of scope for now, just placing order).
-        
-        setTimeout(() => setStatus('SETTLED'), 2000); // Simulate settlement for UX feedback
-        setTimeout(() => setStatus('IDLE'), 5000);
+        if (reader) {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                const chunk = decoder.decode(value, { stream: true });
+                const lines = chunk.split('\n').filter(line => line.trim() !== '');
+                
+                for (const line of lines) {
+                    try {
+                        const data = JSON.parse(line);
+                        if (data.type === 'log') {
+                            setLogs(prev => [...prev, data.message]);
+                        } else if (data.type === 'result') {
+                            setLogs(prev => [...prev, `SUCCESS: Order ${data.status}`]);
+                            fetchMyOrders(); // Refresh status
+                            if (data.status === 'SETTLED' || data.status === 'MATCHED') setStatus('SETTLED');
+                            else setStatus('IDLE');
+                            toast.success(`Order ${data.status}`);
+                        } else if (data.type === 'error') {
+                            toast.error(data.error);
+                            setStatus('IDLE');
+                        }
+                    } catch (e) {
+                        // console.error("Stream parse error", e);
+                    }
+                }
+            }
+        }
+
+        setTimeout(() => setStatus('IDLE'), 3000);
 
     } catch (err: any) {
         console.error("Order failed:", err);
-        alert(`Order failed: ${err.message || String(err)}`);
+        toast.error(err.message || "Order placement failed");
+        setLogs(prev => [...prev, `ERROR: ${err.message}`]);
         setStatus('IDLE');
     }
   };
@@ -335,11 +365,13 @@ export const Terminal: React.FC = () => {
                  <span className="text-[10px] font-mono font-bold text-slate-400 uppercase">SYSTEM LOGS</span>
               </div>
               <div className="flex-1 p-3 overflow-y-auto font-mono text-[10px] space-y-1 bg-black">
-                 <div className="flex gap-2"><span className="text-slate-600">[14:20:01]</span><span className="text-primary"> Connected to Node SGX-Alpha-9</span></div>
-                 <div className="flex gap-2"><span className="text-slate-600">[14:20:05]</span><span className="text-slate-300"> Fetching latest Merkle Root...</span></div>
-                 <div className="flex gap-2"><span className="text-slate-600">[14:20:06]</span><span className="text-slate-300"> Privacy pool depth updated (Block 18492011)</span></div>
-                 <div className="flex gap-2"><span className="text-slate-600">[14:20:12]</span><span className="text-yellow-600 font-bold"> Warning: High gas fees detected on Settlement Layer</span></div>
-                 <div className="flex gap-2"><span className="text-slate-600">[14:20:15]</span><span className="text-slate-300"> Order #9921 encrypted. <span className="text-slate-600">hash: 0x7f...a9b</span></span></div>
+                 {logs.length === 0 && <div className="text-slate-600 italic">Ready for logs...</div>}
+                 {logs.map((log, i) => (
+                     <div key={i} className="flex gap-2">
+                         <span className="text-slate-600">[{new Date().toLocaleTimeString().split(' ')[0]}]</span>
+                         <span className="text-slate-300">{log}</span>
+                     </div>
+                 ))}
                  <div className="flex gap-2"><span className="text-slate-600 animate-pulse">_</span></div>
               </div>
            </Card>
@@ -347,68 +379,134 @@ export const Terminal: React.FC = () => {
 
         {/* Order Book */}
         <div className="col-span-12 md:col-span-4 flex flex-col z-10">
-           <Card className="flex-1 flex flex-col shadow-heavy">
+            <Card className="flex-1 flex flex-col shadow-heavy">
                <div className="px-4 py-3 border-b border-border-dark bg-obsidian flex justify-between items-center">
-                  <h2 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2 font-mono">
-                     <Icon name="list_alt" className="text-primary text-sm" />
-                     Private Order Book
-                  </h2>
-                  <div className="px-2 py-0.5 bg-black border border-border-dark text-[9px] text-slate-400 font-mono uppercase tracking-wide">Obfuscated View</div>
+                  <div className="flex gap-2">
+                      <button 
+                        onClick={() => setActiveTab('BOOK')}
+                        className={`text-xs font-bold uppercase tracking-wider flex items-center gap-2 font-mono px-2 py-1 transition-colors ${activeTab === 'BOOK' ? 'text-primary bg-primary/10 border border-primary/20 rounded' : 'text-slate-500 hover:text-white'}`}
+                      >
+                         <Icon name="list_alt" className="text-sm" />
+                         Order Book
+                      </button>
+                      <button 
+                        onClick={() => setActiveTab('MY_ORDERS')}
+                        className={`text-xs font-bold uppercase tracking-wider flex items-center gap-2 font-mono px-2 py-1 transition-colors ${activeTab === 'MY_ORDERS' ? 'text-primary bg-primary/10 border border-primary/20 rounded' : 'text-slate-500 hover:text-white'}`}
+                      >
+                         <Icon name="person" className="text-sm" />
+                         My Orders
+                      </button>
+                  </div>
+                  {activeTab === 'BOOK' && <div className="px-2 py-0.5 bg-black border border-border-dark text-[9px] text-slate-400 font-mono uppercase tracking-wide">Obfuscated View</div>}
                </div>
                
-               <div className="flex-1 flex flex-col font-mono text-xs bg-black/50 backdrop-blur-sm">
-                  <div className="grid grid-cols-3 px-4 py-2 text-slate-500 border-b border-border-dark text-[9px] uppercase tracking-wider bg-surface-dark/50">
-                     <div>Price (USDC)</div>
-                     <div className="text-right">Vol (Masked)</div>
-                     <div className="text-right">Total</div>
-                  </div>
-                  
-                  {/* Asks */}
-                  <div className="flex-1 overflow-y-auto flex flex-col-reverse justify-end pb-2">
-                     {[
-                        { price: '98.55', vol: '12.5k', total: '240.2k', w: '20%' },
-                        { price: '98.52', vol: '50.0k', total: '227.7k', w: '40%' },
-                        { price: '98.50', vol: 'XX.Xk', total: '177.7k', w: '30%' },
-                        { price: '98.48', vol: '85.2k', total: '1XX.Xk', w: '50%' },
-                        { price: '98.45', vol: '20.0k', total: '45.0k', w: '10%' },
-                     ].map((row, i) => (
-                        <div key={i} className="grid grid-cols-3 px-4 py-1 hover:bg-red-900/10 cursor-pointer group relative border-b border-transparent hover:border-red-900/30">
-                           <span className="text-red-500">{row.price}</span>
-                           <span className="text-right text-slate-500 blur-[3px] group-hover:blur-none transition-all">{row.vol}</span>
-                           <span className="text-right text-slate-500">{row.total}</span>
-                           <div className="absolute right-0 top-0 bottom-0 bg-red-500/5 pointer-events-none" style={{width: row.w}}></div>
-                        </div>
-                     ))}
-                  </div>
+               <div className="flex-1 flex flex-col font-mono text-xs bg-black/50 backdrop-blur-sm relative">
+                  {/* MY ORDERS TAB */}
+                  {activeTab === 'MY_ORDERS' && (
+                      <div className="absolute inset-0 flex flex-col z-20 bg-black/80 backdrop-blur-md">
+                          <div className="grid grid-cols-4 px-4 py-2 text-slate-500 border-b border-border-dark text-[9px] uppercase tracking-wider bg-surface-dark/50">
+                             <div>Asset</div>
+                             <div className="text-right">Side</div>
+                             <div className="text-right">Status</div>
+                             <div className="text-right">Action</div>
+                          </div>
+                          
+                          <div className="flex-1 overflow-y-auto">
+                              {myOrders.length === 0 && (
+                                  <div className="flex flex-col items-center justify-center h-40 text-slate-600 gap-2">
+                                      <Icon name="inbox" className="text-2xl opacity-20" />
+                                      <span className="text-[10px]">NO ACTIVE ORDERS</span>
+                                  </div>
+                              )}
+                              {myOrders.map((order) => (
+                                  <div key={order.id} className="grid grid-cols-4 px-4 py-3 border-b border-white/5 items-center hover:bg-white/5 transition-colors">
+                                      <div className="flex flex-col">
+                                          <span className="text-white font-bold">{order.asset}</span>
+                                          <span className="text-[9px] text-slate-500">{(Number(order.amount)).toFixed(2)} @ {Number(order.price).toFixed(2)}</span>
+                                      </div>
+                                      <div className={`text-right font-bold ${order.side === 'BUY' ? 'text-primary' : 'text-red-500'}`}>{order.side}</div>
+                                      <div className="text-right">
+                                          <Badge variant={order.status === 'OPEN' ? 'success' : order.status === 'MATCHED' ? 'warning' : 'outline'}>
+                                              {order.status}
+                                          </Badge>
+                                      </div>
+                                      <div className="text-right">
+                                          {['OPEN', 'PENDING'].includes(order.status) && (
+                                              <Button 
+                                                variant="ghost" 
+                                                className="h-6 px-2 text-[8px] border-red-500/30 text-red-500 hover:bg-red-500/10"
+                                                onClick={() => cancelOrder(order.id)}
+                                              >
+                                                  CANCEL
+                                              </Button>
+                                          )}
+                                      </div>
+                                  </div>
+                              ))}
+                          </div>
+                      </div>
+                  )}
 
-                  {/* Spread */}
-                  <div className="py-3 border-y border-border-dark bg-surface-lighter flex items-center justify-between px-4 z-10">
-                     <span className="text-slate-500 text-[10px] uppercase tracking-wide">Spread: 0.03 (0.03%)</span>
-                     <div className="flex items-center gap-2">
-                        <Icon name="lock" className="text-primary text-[12px]" />
-                        <span className="text-white text-xs font-bold font-mono">98.42 USD</span>
-                     </div>
-                  </div>
+                  {/* PUBLIC BOOK (Real Data) */}
+                  <div className="opacity-100 flex-1 flex flex-col">
+                      <div className="grid grid-cols-3 px-4 py-2 text-slate-500 border-b border-border-dark text-[9px] uppercase tracking-wider bg-surface-dark/50">
+                         <div>Price (USDC)</div>
+                         <div className="text-right">Vol (Masked)</div>
+                         <div className="text-right">Total</div>
+                      </div>
+                      
+                      {/* Asks (Sells) - Sorted Price ASC */}
+                      <div className="flex-1 overflow-y-auto flex flex-col-reverse justify-end pb-2">
+                         {orderBook.filter(o => o.side === 'SELL').sort((a,b) => parseFloat(a.price) - parseFloat(b.price)).map((order, i) => (
+                            <div key={i} className="grid grid-cols-3 px-4 py-1 hover:bg-red-900/10 cursor-pointer group relative border-b border-transparent hover:border-red-900/30">
+                               <span className="text-red-500">{Number(order.price).toFixed(2)}</span>
+                               <span className="text-right text-slate-500 blur-[3px] group-hover:blur-none transition-all">
+                                   {(Number(order.amount)/1000).toFixed(1)}k
+                               </span>
+                               <span className="text-right text-slate-500">{(Number(order.amount) * Number(order.price) / 1000).toFixed(1)}k</span>
+                               <div className="absolute right-0 top-0 bottom-0 bg-red-500/5 pointer-events-none" style={{width: `${Math.min(Number(order.amount)/100, 100)}%`}}></div>
+                            </div>
+                         ))}
+                         {orderBook.filter(o => o.side === 'SELL').length === 0 && (
+                             <div className="text-center text-[10px] text-slate-700 py-4 italic">No Request Side Orders</div>
+                         )}
+                      </div>
 
-                  {/* Bids */}
-                  <div className="flex-1 overflow-y-auto pt-2">
-                     {[
-                        { price: '98.42', vol: '45.2k', total: '45.2k', w: '35%' },
-                        { price: '98.40', vol: '100.0k', total: '145.2k', w: '65%' },
-                        { price: '98.38', vol: 'XX.Xk', total: '167.2k', w: '15%' },
-                        { price: '98.35', vol: '12.1k', total: '179.3k', w: '10%' },
-                        { price: '98.30', vol: '50.0k', total: '2XX.3k', w: '40%' },
-                     ].map((row, i) => (
-                        <div key={i} className="grid grid-cols-3 px-4 py-1 hover:bg-primary/10 cursor-pointer group relative border-b border-transparent hover:border-primary/20">
-                           <span className="text-primary">{row.price}</span>
-                           <span className="text-right text-slate-500 blur-[3px] group-hover:blur-none transition-all">{row.vol}</span>
-                           <span className="text-right text-slate-500">{row.total}</span>
-                           <div className="absolute right-0 top-0 bottom-0 bg-primary/5 pointer-events-none" style={{width: row.w}}></div>
-                        </div>
-                     ))}
+                      {/* Spread */}
+                      <div className="py-3 border-y border-border-dark bg-surface-lighter flex items-center justify-between px-4 z-10">
+                         <span className="text-slate-500 text-[10px] uppercase tracking-wide">
+                             Spread: {orderBook.length > 1 ? (Math.abs(
+                                 Math.min(...orderBook.filter(o=>o.side==='SELL').map(o=>Number(o.price))) - 
+                                 Math.max(...orderBook.filter(o=>o.side==='BUY').map(o=>Number(o.price)))
+                             ) || 0).toFixed(2) : '-.--'}
+                         </span>
+                         <div className="flex items-center gap-2">
+                            <Icon name="lock" className="text-primary text-[12px]" />
+                            <span className="text-white text-xs font-bold font-mono">
+                                {orderBook.length > 0 ? Number(orderBook[0].price).toFixed(2) : '98.42'} USD
+                            </span>
+                         </div>
+                      </div>
+
+                      {/* Bids (Buys) - Sorted Price DESC */}
+                      <div className="flex-1 overflow-y-auto pt-2">
+                         {orderBook.filter(o => o.side === 'BUY').sort((a,b) => parseFloat(b.price) - parseFloat(a.price)).map((order, i) => (
+                            <div key={i} className="grid grid-cols-3 px-4 py-1 hover:bg-primary/10 cursor-pointer group relative border-b border-transparent hover:border-primary/20">
+                               <span className="text-primary">{Number(order.price).toFixed(2)}</span>
+                               <span className="text-right text-slate-500 blur-[3px] group-hover:blur-none transition-all">
+                                   {(Number(order.amount)/1000).toFixed(1)}k
+                               </span>
+                               <span className="text-right text-slate-500">{(Number(order.amount) * Number(order.price) / 1000).toFixed(1)}k</span>
+                               <div className="absolute right-0 top-0 bottom-0 bg-primary/5 pointer-events-none" style={{width: `${Math.min(Number(order.amount)/100, 100)}%`}}></div>
+                            </div>
+                         ))}
+                          {orderBook.filter(o => o.side === 'BUY').length === 0 && (
+                             <div className="text-center text-[10px] text-slate-700 py-4 italic">No Offing Side Orders</div>
+                         )}
+                      </div>
                   </div>
                </div>
-           </Card>
+            </Card>
         </div>
     </div>
   );
