@@ -8,7 +8,7 @@ export const Terminal: React.FC = () => {
   const [privacyLevel, setPrivacyLevel] = useState(3);
   const [stealthPublicKey, setStealthPublicKey] = useState<string>(''); // Stateless: Manual Input
   const [status, setStatus] = useState<'IDLE' | 'SIGNING' | 'SENDING' | 'ENCRYPTING' | 'MATCHING' | 'SETTLED'>('IDLE');
-  const [assetSymbol, setAssetSymbol] = useState<'TBILL' | 'PAXG'>('TBILL');
+  const [selectedPairId, setSelectedPairId] = useState<string>('');
   const [amount, setAmount] = useState('50000');
   const [price, setPrice] = useState('98.40');
   
@@ -29,7 +29,11 @@ export const Terminal: React.FC = () => {
         const res = await fetch(`${API_URL}/api/pairs`);
         if (res.ok) {
             const data = await res.json();
-            if (data.success) setPairs(data.pairs);
+            if (data.success && data.pairs.length > 0) {
+                setPairs(data.pairs);
+                // Default to first pair if none selected
+                if (!selectedPairId) setSelectedPairId(data.pairs[0].id);
+            }
         }
     } catch (e) { console.error("Failed to fetch pairs", e); }
   };
@@ -102,9 +106,9 @@ export const Terminal: React.FC = () => {
     }
 
     // Find Pair ID
-    const pair = pairs.find(p => p.baseToken.symbol === assetSymbol && p.quoteToken.symbol === "USDC");
+    const pair = pairs.find(p => p.id === selectedPairId);
     if (!pair) {
-        toast.error(`Trading pair ${assetSymbol}/USDC not found`);
+        toast.error(`Trading pair not found`);
         return;
     }
 
@@ -288,13 +292,13 @@ export const Terminal: React.FC = () => {
                   <div className="relative">
                      <select 
                         className="w-full bg-black border border-border-dark text-white text-sm px-3 py-2.5 focus:ring-1 focus:ring-primary focus:border-primary appearance-none font-mono rounded-none"
-                        value={assetSymbol}
-                        onChange={(e) => setAssetSymbol(e.target.value as any)}
+                        value={selectedPairId}
+                        onChange={(e) => setSelectedPairId(e.target.value)}
                      >
                         {pairs.length > 0 ? (
                             pairs.map(pair => (
-                                <option key={pair.id} value={pair.baseToken.symbol}>
-                                    {pair.baseToken.name} ({pair.baseToken.symbol})
+                                <option key={pair.id} value={pair.id}>
+                                    {pair.baseToken.name} ({pair.baseToken.symbol}/{pair.quoteToken.symbol})
                                 </option>
                             ))
                         ) : (
