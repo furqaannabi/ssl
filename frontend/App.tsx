@@ -59,7 +59,7 @@ function AppContent() {
         const initAuth = async () => {
              // 1. Try to get current user session
              let user = await auth.getMe();
-             
+             console.log("User", user);
              // 2. If not logged in, try to login
              if (!user) {
                  try {
@@ -90,10 +90,13 @@ function AppContent() {
    // Listen for verification updates handling (Legacy/Local updates)
    useEffect(() => {
         const handleVerificationUpdate = () => {
-            // Re-fetch me to get latest status if local event triggers
-            auth.getMe().then(user => {
-                if(user) setIsHumanVerified(user.isVerified);
-            });
+            console.log("App: Received world-id-updated event. Optimistically verifying...");
+            
+
+            // Re-fetch me to get latest status if local event triggers (Background Sync)
+                auth.getMe().then(user => {
+                    if(user) setIsHumanVerified(user.isVerified);
+                });
         };
         window.addEventListener("world-id-updated", handleVerificationUpdate);
         return () => window.removeEventListener("world-id-updated", handleVerificationUpdate);

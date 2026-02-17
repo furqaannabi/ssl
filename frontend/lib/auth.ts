@@ -64,6 +64,7 @@ export const auth = {
       // If not, we might need verify credentials: 'include'
       const res = await fetch(`${API_URL}/api/user/me`, {
           credentials: 'include',
+          cache: 'no-store',
       });
       
       if (res.status === 401 || res.status === 403) return null;
