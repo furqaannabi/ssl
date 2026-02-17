@@ -1,6 +1,9 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Icon, Card, Badge, Button } from './UI';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
+import WorldIdKit from './WorldIdKit';
+import { auth } from '../lib/auth';
+import { useConnection } from 'wagmi';
 
 const logs = [
   { time: '2023-10-24 14:02:11', event: 'Proof of Solvency Gen', hash: '0x8a...3b12', status: 'VERIFIED', color: 'primary' },
@@ -11,12 +14,63 @@ const logs = [
   { time: '2023-10-24 09:30:00', event: 'System Init', hash: '0x00...0000', status: 'COMPLETE', color: 'slate' },
 ];
 
-const zkpData = [
-  { name: 'Completed', value: 75 },
-  { name: 'Remaining', value: 25 },
-];
+
+
 
 export const Compliance: React.FC = () => {
+    const [isHumanVerified, setIsHumanVerified] = useState(false);
+    const [stats, setStats] = useState<any>(null);
+    const { isConnected } = useConnection();
+
+    useEffect(() => {
+        const init = async () => {
+            // 1. Check User Auth
+            const user = await auth.getMe();
+            if (user) setIsHumanVerified(user.isVerified);
+
+            // 2. Fetch Compliance Stats
+            try {
+                const res = await fetch(`${import.meta.env.VITE_API_URL}/api/compliance/stats`, {
+                    credentials: 'include'
+                });
+                const data = await res.json();
+                if (data.success) {
+                    setStats(data.stats);
+                }
+            } catch (e) {
+                console.error("Failed to fetch compliance stats", e);
+            }
+        };
+
+        if (isConnected) init();
+
+        const handleVerificationUpdate = () => {
+             setIsHumanVerified(true); 
+             setTimeout(init, 1000); 
+        };
+
+        window.addEventListener("world-id-updated", handleVerificationUpdate);
+        return () => window.removeEventListener("world-id-updated", handleVerificationUpdate);
+    }, [isConnected]);
+
+    // Calculate time diff string
+    const getTimeSince = (dateStr: string) => {
+        if (!dateStr) return "-";
+        const seconds = Math.floor((new Date().getTime() - new Date(dateStr).getTime()) / 1000);
+        if (seconds < 60) return `${seconds}s ago`;
+        return `${Math.floor(seconds / 60)}m ago`;
+    };
+
+    const zkpCompleted = stats?.zkpCompleted || 0;
+    const zkpPending = stats?.zkpPending || 0;
+    const totalZkp = zkpCompleted + zkpPending;
+    const zkpPercentage = totalZkp > 0 ? Math.round((zkpCompleted / totalZkp) * 100) : 100;
+
+    const zkpChartData = [
+        { name: 'Completed', value: Math.max(zkpCompleted, 1) }, // Ensure at least 1 for chart
+        { name: 'Remaining', value: zkpPending }
+    ];
+
   return (
     <div className="h-full flex flex-col p-6 overflow-hidden relative">
        <div className="absolute inset-0 bg-grid-pattern opacity-10 pointer-events-none"></div>
@@ -34,22 +88,37 @@ export const Compliance: React.FC = () => {
              </div>
              <div className="mt-4 pt-3 border-t border-border-dark flex items-center gap-2">
                <span className="w-1.5 h-1.5 rounded-full bg-primary"></span>
-               <span className="text-xs text-slate-400">Last verified: Today, 09:41 AM</span>
+               <span className="text-xs text-slate-400">System Active • {stats?.totalVerifiedUsers || 0} Verified Users</span>
              </div>
           </Card>
 
-          <Card className="p-5 group">
+          <Card className="p-5 group relative overflow-hidden">
              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-               <Icon name="badge" className="text-6xl text-slate-300" />
+               <Icon name="fingerprint" className="text-6xl text-slate-300" />
              </div>
-             <h3 className="text-slate-400 text-xs font-medium uppercase tracking-wider mb-1">Accredited Investor Verification</h3>
+             <h3 className="text-slate-400 text-xs font-medium uppercase tracking-wider mb-1">Human Verification</h3>
              <div className="flex items-center gap-3">
-               <span className="text-2xl font-bold text-white tracking-tight">VALID</span>
-               <span className="text-xs font-mono text-primary bg-primary/10 px-2 py-0.5 rounded border border-primary/20">Exp: 2025</span>
+               <span className={`text-2xl font-bold tracking-tight ${isHumanVerified ? 'text-white' : 'text-slate-500'}`}>
+                   {isHumanVerified ? "VERIFIED" : "UNVERIFIED"}
+               </span>
+               {isHumanVerified && (
+                   <span className="text-xs font-mono text-blue-400 bg-blue-900/20 px-2 py-0.5 rounded border border-blue-400/20">World ID</span>
+               )}
              </div>
-             <div className="mt-4 pt-3 border-t border-border-dark flex items-center gap-2">
-               <Icon name="fingerprint" className="text-xs text-slate-500" />
-               <span className="text-xs text-slate-400">WorldID Biometric Match</span>
+             <div className="mt-4 pt-3 border-t border-border-dark flex flex-col gap-2">
+               {!isHumanVerified ? (
+                   <div className="w-full">
+                       <p className="text-[10px] text-slate-500 mb-2">Verify your unique personhood to access compliant pools.</p>
+                       <div className="max-w-[200px]">
+                           <WorldIdKit />
+                       </div>
+                   </div>
+               ) : (
+                   <div className="flex items-center gap-2">
+                        <Icon name="verified" className="text-xs text-blue-400" />
+                        <span className="text-xs text-slate-400">Credential valid & active</span>
+                   </div>
+               )}
              </div>
           </Card>
 
@@ -59,11 +128,11 @@ export const Compliance: React.FC = () => {
              </div>
              <h3 className="text-slate-400 text-xs font-medium uppercase tracking-wider mb-1">Recent Oracle Check</h3>
              <div className="flex items-center gap-3">
-               <span className="text-2xl font-bold text-white tracking-tight">14s ago</span>
+               <span className="text-2xl font-bold text-white tracking-tight">{stats ? getTimeSince(stats.oracleLastUpdate) : "..."}</span>
              </div>
              <div className="mt-4 pt-3 border-t border-border-dark flex items-center justify-between">
                <span className="text-xs text-slate-400">via Chainlink Functions</span>
-               <span className="text-[10px] font-mono text-slate-500">Block #18239402</span>
+               <span className="text-[10px] font-mono text-slate-500">Live Feed</span>
              </div>
           </Card>
        </div>
@@ -91,9 +160,9 @@ export const Compliance: React.FC = () => {
                          </tr>
                       </thead>
                       <tbody className="text-xs font-mono">
-                         {logs.map((log, i) => (
+                         {stats?.logs?.map((log: any, i: number) => (
                             <tr key={i} className="hover:bg-slate-800/50 transition-colors border-b border-border-dark/30 group">
-                               <td className="py-3 px-4 text-slate-400">{log.time}</td>
+                               <td className="py-3 px-4 text-slate-400">{new Date(log.time).toLocaleString()}</td>
                                <td className="py-3 px-4 text-white font-display">{log.event}</td>
                                <td className="py-3 px-4 text-slate-500 group-hover:text-primary transition-colors cursor-pointer">{log.hash}</td>
                                <td className="py-3 px-4 text-right">
@@ -101,6 +170,9 @@ export const Compliance: React.FC = () => {
                                </td>
                             </tr>
                          ))}
+                         {!stats?.logs?.length && (
+                             <tr><td colSpan={4} className="p-4 text-center text-slate-500">No recent activity</td></tr>
+                         )}
                       </tbody>
                    </table>
                 </div>
@@ -110,8 +182,8 @@ export const Compliance: React.FC = () => {
           {/* ZKP Visualization */}
           <div className="lg:col-span-1">
              <Card className="h-full flex flex-col relative overflow-hidden">
-                <div className="p-4 border-b border-border-dark flex items-center justify-between bg-black/20 z-10">
-                   <h3 className="text-sm font-semibold text-white tracking-wide">ZKP Generation Status</h3>
+                <div className="p-4 border-border-dark flex items-center justify-between bg-black/20 z-10">
+                   <h3 className="text-sm font-semibold text-white tracking-wide">Order Settlement Status</h3>
                    <Icon name="lock" className="text-primary animate-pulse text-sm" />
                 </div>
                 
@@ -123,7 +195,7 @@ export const Compliance: React.FC = () => {
                      <ResponsiveContainer width="100%" height="100%">
                        <PieChart>
                          <Pie
-                           data={zkpData}
+                           data={zkpChartData}
                            cx="50%"
                            cy="50%"
                            innerRadius={60}
@@ -139,19 +211,21 @@ export const Compliance: React.FC = () => {
                        </PieChart>
                      </ResponsiveContainer>
                      <div className="absolute inset-0 flex flex-col items-center justify-center">
-                        <span className="text-3xl font-bold text-white font-mono">75%</span>
-                        <span className="text-[10px] text-primary uppercase tracking-widest mt-1">Generating</span>
+                        <span className="text-3xl font-bold text-white font-mono">{zkpPercentage}%</span>
+                        <span className="text-[10px] text-primary uppercase tracking-widest mt-1">
+                            {zkpPending > 0 ? "Settling" : "Settled"}
+                        </span>
                      </div>
                    </div>
                    
                    <div className="w-full space-y-3 z-10">
                      <div className="flex justify-between items-center text-xs">
-                        <span className="text-slate-400">Proof Type</span>
-                        <span className="font-mono text-white">zk-SNARK</span>
+                        <span className="text-slate-400">Method</span>
+                        <span className="font-mono text-white">Confidential Match</span>
                      </div>
                      <div className="flex justify-between items-center text-xs">
-                        <span className="text-slate-400">Circuits</span>
-                        <span className="font-mono text-white">1,024</span>
+                        <span className="text-slate-400">Total Orders</span>
+                        <span className="font-mono text-white">{totalZkp}</span>
                      </div>
                      <div className="flex justify-between items-center text-xs">
                         <span className="text-slate-400">Privacy Shield</span>
@@ -160,7 +234,7 @@ export const Compliance: React.FC = () => {
                    </div>
                    
                    <div className="mt-6 text-[10px] text-slate-500 text-center max-w-[200px] leading-tight">
-                     Zero-Knowledge Proofs ensure regulatory compliance without revealing underlying asset data.
+                     Orders are cryptographically secured to ensure regulatory compliance without revealing underlying data.
                    </div>
                 </div>
              </Card>
