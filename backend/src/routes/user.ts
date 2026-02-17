@@ -66,7 +66,10 @@ user.get("/orders", authMiddleware, async (c) => {
         }
 
         const orders = await prisma.order.findMany({
-            where: whereClause,
+            where: {
+                ...whereClause,
+                userAddress: { equals: userAddress, mode: "insensitive" }
+            },
             orderBy: { createdAt: "desc" },
         });
 
