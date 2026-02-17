@@ -113,6 +113,17 @@ function generateStealthAddress(
   spendingPublicKeyHex: string,
   ephemeralSeed: string
 ): StealthResult {
+  // Validate spending public key format (uncompressed: 65 bytes = 0x04 + 128 hex)
+  if (
+    !spendingPublicKeyHex ||
+    !spendingPublicKeyHex.startsWith("0x04") ||
+    spendingPublicKeyHex.length !== 132
+  ) {
+    throw new Error(
+      `Invalid stealthPublicKey: expected 65-byte uncompressed secp256k1 key (0x04..., 132 chars), got ${spendingPublicKeyHex?.length ?? 0} chars: ${spendingPublicKeyHex?.slice(0, 20) ?? "undefined"}...`
+    );
+  }
+
   // Deterministic ephemeral private key from seed (avoids needing crypto.getRandomValues in WASM)
   const ephemeralPrivBytes = toBytes(keccak256(toBytes(ephemeralSeed)));
   const ephemeralPublicKey = secp256k1.getPublicKey(ephemeralPrivBytes, false); // uncompressed 65 bytes
@@ -311,7 +322,8 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
     );
 
     // Generate ECDH stealth addresses
-    // data.buyer.stealthPublicKey is usually hex string
+    runtime.log("Buyer stealthPubKey (" + data.buyer.stealthPublicKey?.length + " chars): " + data.buyer.stealthPublicKey?.slice(0, 20) + "...");
+    runtime.log("Seller stealthPubKey (" + data.seller.stealthPublicKey?.length + " chars): " + data.seller.stealthPublicKey?.slice(0, 20) + "...");
     const buyerStealth = generateStealthAddress(
       data.buyer.stealthPublicKey,
       tradeNonce + "_buyer"

@@ -56,6 +56,17 @@ order.post("/", async (c) => {
         return c.json({ error: "side must be BUY or SELL" }, 400);
     }
 
+    // Validate stealthPublicKey is an uncompressed secp256k1 public key (65 bytes = 0x04 + 128 hex chars)
+    if (
+        !body.stealthPublicKey.startsWith("0x04") ||
+        body.stealthPublicKey.length !== 132 ||
+        !/^0x04[0-9a-fA-F]{128}$/.test(body.stealthPublicKey)
+    ) {
+        return c.json({
+            error: "Invalid stealthPublicKey. Must be an uncompressed secp256k1 public key (65 bytes, starting with 0x04)."
+        }, 400);
+    }
+
     const parsedAmount = parseFloat(body.amount);
     const parsedPrice = parseFloat(body.price);
 
