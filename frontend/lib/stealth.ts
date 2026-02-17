@@ -10,6 +10,8 @@ export interface SpendingKeypair {
   privateKey: `0x${string}`;
   /** Public key — send with orders. Hex "0x04..." (uncompressed, 65 bytes) */
   publicKey: `0x${string}`;
+  /** Derived Stealth Address — Valid Ethereum Address */
+  address: `0x${string}`;
 }
 
 /**
@@ -19,10 +21,17 @@ export interface SpendingKeypair {
 export function generateSpendingKeypair(): SpendingKeypair {
   const privateKeyBytes = secp256k1.utils.randomPrivateKey();
   const publicKeyBytes = secp256k1.getPublicKey(privateKeyBytes, false);
+  const publicKeyHex = toHex(publicKeyBytes);
+  
+  // Derive address (Hash of pubkey without 0x04 prefix)
+  const pubWithoutPrefix = publicKeyBytes.slice(1);
+  const addressHash = keccak256(toHex(pubWithoutPrefix));
+  const address = `0x${addressHash.slice(-40)}` as `0x${string}`;
 
   return {
     privateKey: toHex(privateKeyBytes),
-    publicKey: toHex(publicKeyBytes),
+    publicKey: publicKeyHex,
+    address
   };
 }
 
