@@ -17,13 +17,23 @@ export const Terminal: React.FC = () => {
 
   const API_URL = import.meta.env.VITE_API_URL || "https://arc.furqaannabi.com";
   // Order State
-  // Order State
   const [myOrders, setMyOrders] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'BOOK' | 'MY_ORDERS'>('BOOK');
   const [logs, setLogs] = useState<string[]>([]);
   const [orderBook, setOrderBook] = useState<{bids: any[], asks: any[]}>({ bids: [], asks: [] });
-
+    const [pairs, setPairs] = useState<any[]>([]);
+    
   // Fetch Data
+  const fetchPairs = async () => {
+    try {
+        const res = await fetch(`${API_URL}/api/pairs`);
+        if (res.ok) {
+            const data = await res.json();
+            if (data.success) setPairs(data.pairs);
+        }
+    } catch (e) { console.error("Failed to fetch pairs", e); }
+  };
+
   const fetchMyOrders = async () => {
       try {
           const res = await fetch(`${API_URL}/api/user/orders?status=OPEN`, { credentials: "include" });
@@ -51,6 +61,7 @@ export const Terminal: React.FC = () => {
   };
 
   useEffect(() => {
+      fetchPairs();
       if (isConnected) fetchMyOrders();
       fetchOrderBook(); // Public data, always fetch or fetch on mount
 
@@ -90,6 +101,13 @@ export const Terminal: React.FC = () => {
         return;
     }
 
+    // Find Pair ID
+    const pair = pairs.find(p => p.baseToken.symbol === assetSymbol && p.quoteToken.symbol === "USDC");
+    if (!pair) {
+        toast.error(`Trading pair ${assetSymbol}/USDC not found`);
+        return;
+    }
+
     try {
         /*
         // World ID Check (Optional based on config, but good for compliance)
@@ -106,8 +124,7 @@ export const Terminal: React.FC = () => {
         // 1. Initialize Order
         // backend/src/routes/order.ts expects strings for amount/price
         const initPayload = {
-            asset: assetSymbol,
-            quoteToken: "USDC",
+            pairId: pair.id,
             amount: String(amount), 
             price: String(price),
             side,
@@ -115,7 +132,7 @@ export const Terminal: React.FC = () => {
             userAddress: eoaAddress 
         };
 
-        console.log("Sending Order Init:", initPayload);
+        console.log("Sending Order Init with Pair:", initPayload);
 
         const initResponse = await fetch(`${API_URL}/api/order`, {
             method: "POST",
@@ -274,8 +291,15 @@ export const Terminal: React.FC = () => {
                         value={assetSymbol}
                         onChange={(e) => setAssetSymbol(e.target.value as any)}
                      >
-                        <option value="TBILL">US T-Bill (Short-Term)</option>
-                        <option value="PAXG">Paxos Gold (PAXG)</option>
+                        {pairs.length > 0 ? (
+                            pairs.map(pair => (
+                                <option key={pair.id} value={pair.baseToken.symbol}>
+                                    {pair.baseToken.name} ({pair.baseToken.symbol})
+                                </option>
+                            ))
+                        ) : (
+                            <option disabled>Loading markets...</option>
+                        )}
                      </select>
                      <Icon name="expand_more" className="absolute right-3 top-2.5 text-primary pointer-events-none text-lg" />
                   </div>

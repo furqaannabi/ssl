@@ -130,19 +130,19 @@ export const ProfileModal: React.FC<{ isOpen: boolean; onClose: () => void }> = 
 
     useEffect(() => {
         const checkStatus = async () => {
-            console.log("ProfileModal: Checking status...");
+            // console.log("ProfileModal: Checking status...");
             const user = await auth.getMe();
-            console.log("ProfileModal: User status:", user);
+            // console.log("ProfileModal: User status:", user);
             if (user) {
                 setIsHumanVerified(user.isVerified);
-                console.log("ProfileModal: Set verified to", user.isVerified);
+                // console.log("ProfileModal: Set verified to", user.isVerified);
             }
         };
 
         if (isOpen) checkStatus();
 
         const handleVerificationUpdate = () => {
-             console.log("ProfileModal: Received update event. Optimistically verifying...");
+            //  console.log("ProfileModal: Received update event. Optimistically verifying...");
              setIsHumanVerified(true); // Optimistic Update
              
              // Add a small delay to ensure DB write is propagated for the background check
