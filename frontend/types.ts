@@ -24,6 +24,7 @@ export interface Asset {
   colorClass: string;
   address?: string;
   rawValue?: number;
+  balance?: number;
 }
 
 export interface Order {

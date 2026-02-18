@@ -79,7 +79,8 @@ export const Portfolio: React.FC = () => {
                     value: `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
                     rawValue: value,
                     price: price, // Store for reference if needed
-                    change24h: change24h
+                    change24h: change24h,
+                    balance: balance 
                 };
             });
 
@@ -293,6 +294,7 @@ export const Portfolio: React.FC = () => {
             setIsWithdrawalOpen(false);
             fetchBalances(); // Refresh balances on close
         }} 
+        assets={assets}
       />
     </div>
   );

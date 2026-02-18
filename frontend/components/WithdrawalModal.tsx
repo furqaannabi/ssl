@@ -8,14 +8,18 @@ import { baseSepolia } from 'wagmi/chains';
 import { parseUnits, decodeEventLog } from 'viem';
 import { config } from '../lib/wagmi';
 
+import { Asset } from '../types';
+
 interface WithdrawalModalProps {
     isOpen: boolean;
     onClose: () => void;
+    assets: Asset[];
 }
 
 export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({ 
     isOpen, 
-    onClose
+    onClose,
+    assets
 }) => {
     const [step, setStep] = useState<'DETAILS' | 'REQUESTING' | 'PROCESSING' | 'SUCCESS'>('DETAILS');
     const [amount, setAmount] = useState("10");
@@ -225,11 +229,29 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
                                 <div className="relative">
                                     <input 
                                         type="text"
-                                        className="w-full bg-black border border-border-dark text-white text-sm px-3 py-2.5 focus:ring-1 focus:ring-primary font-mono pr-12 outline-none"
+                                        className="w-full bg-black border border-border-dark text-white text-sm px-3 py-2.5 focus:ring-1 focus:ring-primary font-mono pr-16 outline-none"
                                         value={amount}
                                         onChange={(e) => setAmount(e.target.value)}
                                     />
-                                    <span className="absolute right-3 top-2.5 text-slate-500 font-mono text-xs">{token}</span>
+                                    <div className="absolute right-3 top-2 flex items-center gap-2">
+                                        <button 
+                                            onClick={() => {
+                                                const asset = assets.find(a => a.symbol.toUpperCase() === token.toUpperCase());
+                                                if (asset && asset.balance) setAmount(asset.balance.toString());
+                                            }}
+                                            className="text-[10px] text-primary hover:text-white uppercase font-bold tracking-wider border border-primary/30 hover:bg-primary/20 px-1.5 py-0.5 rounded transition-colors"
+                                        >
+                                            MAX
+                                        </button>
+                                        <span className="text-slate-500 font-mono text-xs">{token}</span>
+                                    </div>
+                                </div>
+                                <div className="text-right mt-1">
+                                    <span className="text-[10px] text-slate-500 font-mono">
+                                        Available: <span className="text-slate-300">{
+                                            assets.find(a => a.symbol.toUpperCase() === token.toUpperCase())?.balance?.toFixed(4) || "0.00"
+                                        }</span> {token}
+                                    </span>
                                 </div>
                             </div>
                         </div>
