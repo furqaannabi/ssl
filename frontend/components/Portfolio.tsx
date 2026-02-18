@@ -187,6 +187,7 @@ export const Portfolio: React.FC = () => {
                     <th className="px-6 py-4 font-semibold text-center">Privacy Shield</th>
                     <th className="px-6 py-4 font-semibold">Asset</th>
                     <th className="px-6 py-4 font-semibold">Type</th>
+                    <th className="px-6 py-4 font-semibold text-right">Quantity</th>
                     <th className="px-6 py-4 font-semibold text-right">Allocation</th>
                     <th className="px-6 py-4 font-semibold text-right">Position Size</th>
                   </tr>
@@ -221,6 +222,9 @@ export const Portfolio: React.FC = () => {
                         </div>
                       </td>
                       <td className="px-6 py-4 text-slate-400">{asset.type}</td>
+                      <td className="px-6 py-4 text-right text-slate-300 font-mono">
+                        {asset.balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) || "0.00"}
+                      </td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end space-x-2">
                           <span className="text-white">{asset.allocation}%</span>
