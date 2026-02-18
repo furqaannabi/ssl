@@ -4,9 +4,13 @@ import { Asset } from '../types';
 import { Icon, Badge, Card, Button } from './UI';
 import { StealthKeyReveal } from './StealthKeyReveal';
 import { FundingModal } from './FundingModal';
+import { WithdrawalModal } from './WithdrawalModal';
 import { auth } from '../lib/auth';
 import { TOKENS, TOKEN_DECIMALS, CONTRACTS } from '../lib/contracts';
 import { formatUnits } from 'viem';
+
+// ... (keep initialAssets and yieldData as is, but omitting for brevity if not changed, wait - I should keep them if I use replace_file_content safely)
+// Actually I will just insert the import and the modal usage.
 
 // Initial Static Data (to be merged with dynamic balances)
 const initialAssets: Asset[] = [
@@ -25,11 +29,11 @@ const yieldData = [
   { name: 'Aug', value: 13000 },
 ];
 
-// ...
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
 
 export const Portfolio: React.FC = () => {
   const [isFundingOpen, setIsFundingOpen] = useState(false);
+  const [isWithdrawalOpen, setIsWithdrawalOpen] = useState(false);
   const [assets, setAssets] = useState<Asset[]>(initialAssets);
   const [totalValue, setTotalValue] = useState<number>(0);
 
@@ -110,13 +114,14 @@ export const Portfolio: React.FC = () => {
           <h2 className="text-xl font-bold text-white font-display tracking-tight uppercase">Portfolio Overview</h2>
           <p className="text-[10px] text-slate-500 font-mono tracking-widest mt-1">CONFIDENTIAL ASSET MANAGEMENT SYSTEM</p>
         </div>
-        <Button variant="primary" icon="add" onClick={() => {
-          console.log("Deposit Assets button clicked - opening modal");
-          setIsFundingOpen(true);
-          
-        }}>
-          Deposit Assets
-        </Button>
+        <div className="flex gap-3">
+            <Button variant="ghost" icon="remove_circle_outline" onClick={() => setIsWithdrawalOpen(true)} className="border border-red-500/30 text-red-400 hover:bg-red-500/10">
+              Withdraw
+            </Button>
+            <Button variant="primary" icon="add" onClick={() => setIsFundingOpen(true)}>
+              Deposit Assets
+            </Button>
+        </div>
       </div>
 
       {/* Metrics Row */}
@@ -279,6 +284,13 @@ export const Portfolio: React.FC = () => {
         isOpen={isFundingOpen} 
         onClose={() => {
             setIsFundingOpen(false);
+            fetchBalances(); // Refresh balances on close
+        }} 
+      />
+      <WithdrawalModal 
+        isOpen={isWithdrawalOpen} 
+        onClose={() => {
+            setIsWithdrawalOpen(false);
             fetchBalances(); // Refresh balances on close
         }} 
       />

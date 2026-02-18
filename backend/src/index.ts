@@ -69,4 +69,5 @@ startVaultListener().catch((err) => {
 export default {
     port: config.port,
     fetch: app.fetch,
+    idleTimeout: 120, // Increased to 120s for long-running matching engine operations
 };

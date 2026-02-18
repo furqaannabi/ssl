@@ -185,22 +185,26 @@ interface ModalProps {
   onClose: () => void;
   title: string;
   children: React.ReactNode;
+  isDismissible?: boolean;
 }
 
-export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children }) => {
+export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, isDismissible = true }) => {
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && isDismissible) onClose();
     };
     if (isOpen) window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, isDismissible]);
 
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/80 backdrop-blur-sm transition-opacity" onClick={onClose}></div>
+      <div 
+        className={`absolute inset-0 bg-black/80 backdrop-blur-sm transition-opacity ${isDismissible ? 'cursor-pointer' : ''}`} 
+        onClick={() => isDismissible && onClose()}
+      ></div>
       <div className="relative w-full max-w-md z-10 animate-appear">
         <Card className="shadow-2xl ring-1 ring-border-dark bg-surface-dark">
              <div className="flex items-center justify-between px-5 py-4 border-b border-border-dark bg-surface-lighter/50">
@@ -208,9 +212,11 @@ export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children }
                     <span className="w-1.5 h-1.5 rounded-full bg-primary shadow-glow"></span>
                     {title}
                 </h3>
-                <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors flex items-center">
-                    <Icon name="close" className="text-lg" />
-                </button>
+                {isDismissible && (
+                    <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors flex items-center">
+                        <Icon name="close" className="text-lg" />
+                    </button>
+                )}
              </div>
              <div className="p-6 max-h-[85vh] overflow-y-auto">
                 {children}

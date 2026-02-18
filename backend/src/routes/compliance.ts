@@ -45,7 +45,7 @@ compliance.get("/stats", async (c) => {
             ...recentOrders.map(o => ({
                 time: o.createdAt,
                 event: `Order ${o.side} ${o.pair.baseToken.symbol}`,
-                hash: o.stealthPublicKey ? `${o.stealthPublicKey.slice(0,6)}...` : "N/A",
+                hash: o.stealthAddress ? `${o.stealthAddress.slice(0,6)}...` : "N/A",
                 status: o.status === 'OPEN' ? 'LOGGED' : o.status,
                 color: o.status === 'OPEN' ? 'yellow' : 'primary'
             })),

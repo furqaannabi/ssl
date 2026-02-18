@@ -152,7 +152,12 @@ export const FundingModal: React.FC<FundingModalProps> = ({
     }, [isTxSuccess, txHash, step, token, amount, writeContract, eoaAddress, chain]);
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Deposit Confidential Assets">
+        <Modal 
+            isOpen={isOpen} 
+            onClose={onClose} 
+            title="Deposit Confidential Assets"
+            isDismissible={step === 'DETAILS' || step === 'SUCCESS'}
+        >
             <div className="space-y-6">
                 {step === 'DETAILS' && (
                     <>
