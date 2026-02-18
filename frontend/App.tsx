@@ -119,15 +119,19 @@ function AppContent() {
                <NavLink
                  key={item.path}
                  to={item.path}
-                 className={`group relative w-10 h-10 flex items-center justify-center transition-all duration-300 ${isActive ? 'text-primary' : 'text-slate-500 hover:text-slate-200'}`}
+                 className={({ isActive }) => `group relative w-10 h-10 flex items-center justify-center transition-all duration-300 ${isActive ? 'text-primary' : 'text-slate-500 hover:text-slate-200'}`}
                >
-                 <Icon name={item.icon} className={`text-2xl transition-all ${isActive ? 'scale-110 drop-shadow-[0_0_5px_rgba(13,242,89,0.5)]' : ''}`} />
-                 {isActive && <div className="absolute -left-5 top-1/2 -translate-y-1/2 w-1 h-6 bg-primary rounded-r shadow-glow"></div>}
-                 
-                 {/* Tooltip */}
-                 <span className="absolute left-14 bg-surface-lighter border border-border-dark px-2 py-1 text-xs text-primary opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 font-mono shadow-xl pointer-events-none">
-                   {item.label}
-                 </span>
+                 {({ isActive }) => (
+                    <>
+                        <Icon name={item.icon} className={`text-2xl transition-all ${isActive ? 'scale-110 drop-shadow-[0_0_5px_rgba(13,242,89,0.5)]' : ''}`} />
+                        {isActive && <div className="absolute -left-5 top-1/2 -translate-y-1/2 w-1 h-6 bg-primary rounded-r shadow-glow"></div>}
+                        
+                        {/* Tooltip */}
+                        <span className="absolute left-14 bg-surface-lighter border border-border-dark px-2 py-1 text-xs text-primary opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 font-mono shadow-xl pointer-events-none">
+                            {item.label}
+                        </span>
+                    </>
+                 )}
                </NavLink>
              );
            })}

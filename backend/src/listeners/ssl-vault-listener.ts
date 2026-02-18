@@ -161,6 +161,17 @@ export async function startVaultListener() {
                     }
                 });
 
+                // Record Transaction
+                await prisma.transaction.create({
+                    data: {
+                        type: "DEPOSIT",
+                        token: token,
+                        amount: amount.toString(),
+                        userAddress: user,
+                        txHash: event.log.transactionHash
+                    }
+                });
+
                 console.log(`[Listener] Updated balance for ${user}: ${newBalance.toString()}`);
 
             } catch (err) {
@@ -248,6 +259,16 @@ export async function startVaultListener() {
                             },
                         }),
                 ]);
+
+                await prisma.transaction.create({
+                    data: {
+                        type: "WITHDRAWAL",
+                        token: token,
+                        amount: amount.toString(),
+                        userAddress: user,
+                        txHash: event.log.transactionHash
+                    }
+                });
 
                 console.log(`[Listener] Deducted ${requestedAmount} from ${user}. New Balance: ${newBalance}`);
 

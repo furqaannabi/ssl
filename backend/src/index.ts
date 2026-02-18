@@ -11,8 +11,11 @@ import { verify } from "./routes/verify";
 import { order } from "./routes/order";
 import { auth } from "./routes/auth";
 import { user } from "./routes/user";
+import oracle from "./routes/oracle";
+import history from "./routes/history";
 import { pairs } from "./routes/pairs";
 import { withdraw } from "./routes/withdraw";
+import { compliance } from "./routes/compliance";
 import { startVaultListener } from "./listeners/ssl-vault-listener";
 
 const app = new Hono();
@@ -35,8 +38,11 @@ app.route("/api/verify", verify);
 app.route("/api/order", order);
 app.route("/api/auth", auth);
 app.route("/api/user", user);
+app.route("/api/oracle", oracle);
+app.route("/api/history", history);
 app.route("/api/pairs", pairs);
 app.route("/api/withdraw", withdraw);
+app.route("/api/compliance", compliance);
 
 // ── 404 ──
 app.notFound((c) => c.json({ error: "Not found" }, 404));

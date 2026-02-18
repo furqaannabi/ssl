@@ -1,6 +1,6 @@
 # SSL Backend API Documentation
 
-This directory contains the backend service for the Stealth Settlement Layer (SSL). It handles user authentication, World ID verification, and order matching via the Chainlink CRE.
+This directory contains the backend service for the Stealth Settlement Layer (SSL). It handles user authentication, World ID verification, order matching via the Chainlink CRE, withdrawals, transaction history, a mock price oracle, and compliance reporting.
 
 ## Authentication
 
@@ -169,7 +169,7 @@ Returns all `OPEN` orders.
 **POST** `/api/order`
 *(Requires Auth Cookie)*
 
-Creates an order and streams the matching engine logs.
+Creates an order and streams the matching engine logs. The `stealthAddress` is a standard Ethereum address (0x + 40 hex chars) generated client-side for privacy-preserving settlement.
 
 **Request:**
 ```json
@@ -178,7 +178,7 @@ Creates an order and streams the matching engine logs.
   "amount": "100",
   "price": "50",
   "side": "BUY",
-  "stealthPublicKey": "0x...",
+  "stealthAddress": "0x1234567890abcdef1234567890abcdef12345678",
   "userAddress": "0x123..."
 }
 ```
@@ -203,3 +203,171 @@ Cancels an `OPEN` order.
   "status": "CANCELLED"
 }
 ```
+
+---
+
+## Withdrawals
+
+### Request Withdrawal
+**POST** `/api/withdraw`
+*(Requires Auth Cookie)*
+
+Processes a withdrawal after the user has called `requestWithdrawal` on-chain. Deducts the internal balance, forwards to the CRE for on-chain settlement, and streams progress. On CRE failure the balance is automatically refunded.
+
+**Request:**
+```json
+{
+  "token": "0xTokenA",
+  "amount": "1000000000000000000",
+  "withdrawalId": "42"
+}
+```
+
+**Response (SSE Stream):**
+```json
+{"type": "log", "message": "Balance deducted. Forwarding withdrawal to CRE..."}
+{"type": "log", "message": "CRE processing..."}
+{"type": "result", "success": true, "withdrawalId": "42", "status": "COMPLETED"}
+```
+
+Withdrawal statuses: `PENDING` -> `PROCESSING` -> `COMPLETED` | `FAILED`
+
+### List Withdrawals
+**GET** `/api/withdraw?status=COMPLETED`
+*(Requires Auth Cookie)*
+
+Returns the authenticated user's withdrawals. Optional `status` filter (`PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`).
+
+**Response:**
+```json
+{
+  "success": true,
+  "withdrawals": [
+    {
+      "id": "uuid",
+      "withdrawalId": "42",
+      "userAddress": "0x123...",
+      "token": "0xTokenA",
+      "amount": "1000000000000000000",
+      "status": "COMPLETED",
+      "txHash": null,
+      "createdAt": "2024-...",
+      "updatedAt": "2024-..."
+    }
+  ]
+}
+```
+
+---
+
+## Transaction History
+
+### Get Unified History
+**GET** `/api/history`
+*(Requires Auth Cookie)*
+
+Returns a merged, chronologically-sorted list of the user's orders and on-chain transactions (deposits & withdrawals). Limited to the 50 most recent of each type.
+
+**Response:**
+```json
+{
+  "success": true,
+  "history": [
+    {
+      "id": "uuid",
+      "type": "ORDER",
+      "side": "BUY",
+      "status": "OPEN",
+      "asset": "TBILL/USDC",
+      "amount": "100",
+      "price": "50",
+      "filled": "0",
+      "hash": "0x1234...5678",
+      "createdAt": "2024-..."
+    },
+    {
+      "id": "uuid",
+      "type": "DEPOSIT",
+      "side": "IN",
+      "status": "COMPLETED",
+      "asset": "0xTokenA",
+      "amount": "1000000000000000000",
+      "price": "-",
+      "filled": "1000000000000000000",
+      "hash": "0xabcd...ef01",
+      "createdAt": "2024-..."
+    }
+  ]
+}
+```
+
+---
+
+## Price Oracle
+
+### Get Prices
+**GET** `/api/oracle/prices`
+
+Returns simulated live market prices for supported assets. Uses sine-wave oscillation + random noise around base prices.
+
+**Response:**
+```json
+{
+  "success": true,
+  "prices": {
+    "BOND": { "symbol": "BOND", "price": "100.03", "change24h": "0.03%", "trend": "UP" },
+    "USDC": { "symbol": "USDC", "price": "1.00", "change24h": "0.00%", "trend": "FLAT" },
+    "TBILL": { "symbol": "TBILL", "price": "98.47", "change24h": "0.02%", "trend": "UP" },
+    "BTC": { "symbol": "BTC", "price": "64250.00", "change24h": "0.08%", "trend": "UP" },
+    "ETH": { "symbol": "ETH", "price": "3465.00", "change24h": "0.43%", "trend": "UP" },
+    "SOL": { "symbol": "SOL", "price": "145.50", "change24h": "0.34%", "trend": "UP" }
+  }
+}
+```
+
+---
+
+## Compliance Dashboard
+
+### Get Stats
+**GET** `/api/compliance/stats`
+
+Returns system-wide compliance metrics: verified user count, ZKP proof stats, and a unified audit log of recent orders and transactions.
+
+**Response:**
+```json
+{
+  "success": true,
+  "stats": {
+    "oracleLastUpdate": "2024-01-01T00:00:00.000Z",
+    "totalVerifiedUsers": 12,
+    "zkpPending": 3,
+    "zkpCompleted": 47,
+    "logs": [
+      {
+        "time": "2024-...",
+        "event": "Order BUY TBILL",
+        "hash": "0x1234...",
+        "status": "LOGGED",
+        "color": "yellow"
+      },
+      {
+        "time": "2024-...",
+        "event": "DEPOSIT 0xTo...",
+        "hash": "0xabcd...",
+        "status": "CONFIRMED",
+        "color": "primary"
+      }
+    ]
+  }
+}
+```
+
+---
+
+## Vault Listener
+
+The backend runs a WebSocket listener (`ssl-vault-listener`) that watches the `SSLVault` contract on Base Sepolia for:
+
+- **`Funded`** — Auto-creates user, token, and trading pair records; updates internal balances; records a `DEPOSIT` transaction.
+- **`WithdrawalRequested`** — Validates sufficient balance, atomically deducts balance + creates a `Withdrawal` record, records a `WITHDRAWAL` transaction, and forwards to the CRE. Skips withdrawals already handled by the `/api/withdraw` endpoint to prevent double-processing.

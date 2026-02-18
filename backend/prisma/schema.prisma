@@ -46,14 +46,14 @@ model Order {
 }
 
 model User {
-  address     String         @id
-  name        String
-  orders      Order[]
-  balances    TokenBalance[]
-  sessions    Session[]
-  withdrawals Withdrawal[]
-  nonce       String?
-  isVerified  Boolean        @default(false)
+  address    String         @id
+  name       String
+  orders     Order[]
+  balances   TokenBalance[]
+  transactions Transaction[]
+  sessions   Session[]
+  nonce      String?
+  isVerified Boolean        @default(false)
 }
 
 model TokenBalance {
@@ -107,4 +107,16 @@ model Pair {
   orders            Order[]
 
   @@unique([baseTokenAddress, quoteTokenAddress])
+}
+
+
+model Transaction {
+  id          String   @id @default(uuid())
+  type        String   // DEPOSIT, WITHDRAWAL
+  token       String
+  amount      String
+  txHash      String?
+  createdAt   DateTime @default(now())
+  userAddress String
+  user        User     @relation(fields: [userAddress], references: [address])
 }
