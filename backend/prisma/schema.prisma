@@ -51,6 +51,7 @@ model User {
   orders     Order[]
   balances   TokenBalance[]
   transactions Transaction[]
+  withdrawals  Withdrawal[]
   sessions   Session[]
   nonce      String?
   isVerified Boolean        @default(false)
