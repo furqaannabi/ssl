@@ -33,8 +33,9 @@ interface OrderConfirmPayload {
 }
 
 // ── Step 1: Create Order (PENDING) ──
-order.post("/", async (c) => {
+order.post("/", authMiddleware, async (c) => {
     const body = await c.req.json<OrderInitPayload>();
+    const userAddress = (c.get("user") as string).toLowerCase();
 
     // Validate required fields
     const required = [
@@ -43,7 +44,6 @@ order.post("/", async (c) => {
         "price",
         "side",
         "stealthAddress",
-        "userAddress",
     ] as const;
 
     for (const field of required) {
@@ -94,11 +94,11 @@ order.post("/", async (c) => {
                 side: body.side as OrderSide,
                 stealthAddress: body.stealthAddress,
                 status: OrderStatus.PENDING, // Wait for signature
-                userAddress: body.userAddress,
+                userAddress: userAddress,
             },
         });
 
-        console.log(`[order] Created PENDING order ${newOrder.id} for ${body.userAddress}`);
+        console.log(`[order] Created PENDING order ${newOrder.id} for ${userAddress}`);
 
         return c.json({
             success: true,

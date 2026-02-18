@@ -121,4 +121,13 @@ auth.post("/login", async (c) => {
     }
 });
 
+// ── POST /logout ──
+auth.post("/logout", async (c) => {
+    setCookie(c, "token", "", {
+        path: "/",
+        maxAge: 0,
+    });
+    return c.json({ success: true, message: "Logged out" });
+});
+
 export { auth };

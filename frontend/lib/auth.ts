@@ -78,7 +78,11 @@ export const auth = {
   },
   
   async logout() {
-      // Backend likely needs a logout route to clear HTTPOnly cookie.
-      // For now, we can only clear client state.
+      try {
+          await fetch(`${API_URL}/api/auth/logout`, { method: "POST" });
+          window.location.reload();
+      } catch (e) {
+          console.error("Logout failed:", e);
+      }
   }
 };

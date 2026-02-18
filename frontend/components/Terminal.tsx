@@ -168,6 +168,13 @@ export const Terminal: React.FC = () => {
         });
 
         if (!initResponse.ok) {
+           if (initResponse.status === 401) {
+               toast.error("Session expired. Logging out...");
+               setTimeout(() => {
+                   import('../lib/auth').then(({ auth }) => auth.logout());
+               }, 1000);
+               return;
+           }
            const err = await initResponse.json();
            throw new Error(err.error || "Order initialization failed");
         }
@@ -235,7 +242,14 @@ export const Terminal: React.FC = () => {
 
     } catch (err: any) {
         console.error("Order failed:", err);
-        toast.error(err.message || "Order placement failed");
+        if (err.message.includes("Unlimited") || err.message.includes("Unauthorized") || err.message.includes("401")) {
+             toast.error("Session expired. Logging out...");
+             setTimeout(() => {
+                 import('../lib/auth').then(({ auth }) => auth.logout());
+             }, 1000);
+        } else {
+            toast.error(err.message || "Order placement failed");
+        }
         setLogs(prev => [...prev, `ERROR: ${err.message}`]);
         setStatus('IDLE');
     }
