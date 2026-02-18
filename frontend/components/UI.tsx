@@ -40,7 +40,8 @@ import {
   Sliders,
   Network,
   Check,
-  Plus
+  Plus,
+  LogOut
 } from 'lucide-react';
 
 // Icon Mapping
@@ -94,6 +95,7 @@ const iconMap: Record<string, React.ElementType> = {
   // Fallbacks
   user: User,
   activity: Activity,
+  logout: LogOut,
 };
 
 // Icon Component
