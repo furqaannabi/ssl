@@ -64,7 +64,7 @@ export const Terminal: React.FC = () => {
 
                   orders.forEach((o: any) => {
                       const price = Number(o.price).toFixed(2);
-                      const amount = Number(o.amount);
+                      const amount = Number(o.amount) - Number(o.filledAmount || 0);
                       
                       if (o.side === 'BUY') {
                           bidsMap.set(price, (bidsMap.get(price) || 0) + amount);
