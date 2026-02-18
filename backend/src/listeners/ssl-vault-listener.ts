@@ -113,7 +113,9 @@ export async function startVaultListener() {
         const contract = new ethers.Contract(VAULT_ADDRESS, VAULT_ABI, provider);
 
         // ── Funded Event ──
-        contract.on("Funded", async (token, amount, user, event) => {
+        contract.on("Funded", async (rawToken, amount, rawUser, event) => {
+            const token = rawToken.toLowerCase();
+            const user = rawUser.toLowerCase();
             console.log(`[Listener] Funded: ${user} deposited ${amount.toString()} of ${token}`);
 
             try {
@@ -180,7 +182,8 @@ export async function startVaultListener() {
         });
 
         // ── WithdrawalRequested Event ──
-        contract.on("WithdrawalRequested", async (user, amount, withdrawalId, timestamp, event) => {
+        contract.on("WithdrawalRequested", async (rawUser, amount, withdrawalId, timestamp, event) => {
+            const user = rawUser.toLowerCase();
             console.log(`[Listener] WithdrawalRequested: ID ${withdrawalId} by ${user} for amount ${amount}`);
 
             try {

@@ -16,7 +16,8 @@ function generateNonce(): string {
 
 // ── GET /nonce/:address ──
 auth.get("/nonce/:address", async (c) => {
-    const address = c.req.param("address");
+    const rawAddress = c.req.param("address");
+    const address = rawAddress.toLowerCase();
 
     try {
         const nonce = generateNonce();
@@ -52,9 +53,11 @@ auth.post("/login", async (c) => {
         return c.json({ error: "Missing address or signature" }, 400);
     }
 
+    const address = body.address.toLowerCase();
+
     try {
         const user = await prisma.user.findUnique({
-            where: { address: body.address },
+            where: { address },
         });
 
         if (!user || !user.nonce) {
