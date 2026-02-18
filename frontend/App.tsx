@@ -193,11 +193,18 @@ function AppContent() {
                      </span>
                   </div>
                </div>
-              <div className="h-8 w-px bg-border-dark hidden lg:block"></div>
               <div className="text-right hidden lg:block">
                  <div className="text-[10px] text-slate-500 font-mono uppercase tracking-wider">Net Liquidity</div>
                  <div className="text-sm font-mono font-bold text-white tracking-tight">$42,592,104.00</div>
               </div>
+              
+              <button 
+                  onClick={() => auth.logout()}
+                  className="p-2 text-slate-500 hover:text-red-500 transition-colors"
+                  title="Logout"
+              >
+                  <Icon name="logout" className="text-xl" />
+              </button>
             </div>
          </header>
 
