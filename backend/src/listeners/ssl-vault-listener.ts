@@ -173,16 +173,23 @@ export async function startVaultListener() {
             console.log(`[Listener] WithdrawalRequested: ID ${withdrawalId} by ${user} for amount ${amount}`);
 
             try {
-                // Fetch Token from Contract State
-                // withdrawalRequests(id) -> (token, amount, claimed)
+                const wId = withdrawalId.toString();
+
+                // Skip if already handled by the /api/withdraw endpoint
+                const existing = await prisma.withdrawal.findUnique({
+                    where: { withdrawalId: wId },
+                });
+
+                if (existing && (existing.status === "PROCESSING" || existing.status === "COMPLETED")) {
+                    console.log(`[Listener] Withdrawal ${wId} already handled via API (${existing.status}). Skipping.`);
+                    return;
+                }
+
                 const request = await contract.withdrawalRequests(withdrawalId);
                 const token = request.token;
-                // Verify amount matches?
-                // request.amount should match event amount.
 
                 console.log(`[Listener] Withdrawal details: Token ${token}, Amount ${request.amount}`);
 
-                // Check Database Balance
                 const balanceRecord = await prisma.tokenBalance.findUnique({
                     where: {
                         userAddress_token: {
@@ -195,40 +202,70 @@ export async function startVaultListener() {
                 const currentBalance = balanceRecord ? BigInt(balanceRecord.balance) : BigInt(0);
                 const requestedAmount = BigInt(amount);
 
-                if (currentBalance >= requestedAmount) {
-                    // Deduct Balance
-                    const newBalance = currentBalance - requestedAmount;
+                if (currentBalance < requestedAmount) {
+                    console.error(`[Listener] Insufficient balance for withdrawal ${wId}. Has ${currentBalance}, requested ${requestedAmount}.`);
 
-                    await prisma.tokenBalance.update({
+                    // Record as FAILED so the user can see it
+                    if (!existing) {
+                        await prisma.withdrawal.create({
+                            data: {
+                                withdrawalId: wId,
+                                userAddress: user,
+                                token,
+                                amount: amount.toString(),
+                                status: "FAILED",
+                            },
+                        });
+                    }
+                    return;
+                }
+
+                const newBalance = currentBalance - requestedAmount;
+
+                // Deduct balance + record withdrawal atomically
+                await prisma.$transaction([
+                    prisma.tokenBalance.update({
                         where: {
                             userAddress_token: {
                                 userAddress: user,
                                 token: token
                             }
                         },
-                        data: {
-                            balance: newBalance.toString()
-                        }
-                    });
+                        data: { balance: newBalance.toString() },
+                    }),
+                    existing
+                        ? prisma.withdrawal.update({
+                            where: { withdrawalId: wId },
+                            data: { status: "PROCESSING" },
+                        })
+                        : prisma.withdrawal.create({
+                            data: {
+                                withdrawalId: wId,
+                                userAddress: user,
+                                token,
+                                amount: amount.toString(),
+                                status: "PROCESSING",
+                            },
+                        }),
+                ]);
 
-                    console.log(`[Listener] Deducted ${requestedAmount} from ${user}. New Balance: ${newBalance}`);
+                console.log(`[Listener] Deducted ${requestedAmount} from ${user}. New Balance: ${newBalance}`);
 
-                    // Forward to CRE
-                    console.log(`[Listener] Forwarding withdrawal to CRE...`);
-                    const result = await sendToCRE({
-                        action: "withdraw",
-                        withdrawalId: withdrawalId.toString(),
-                        userAddress: user,
-                        amount: amount.toString(),
-                        token: token
-                    });
+                console.log(`[Listener] Forwarding withdrawal ${wId} to CRE...`);
+                const result = await sendToCRE({
+                    action: "withdraw",
+                    withdrawalId: wId,
+                    userAddress: user,
+                    amount: amount.toString(),
+                    token: token
+                });
 
-                    console.log(`[Listener] CRE Withdrawal Result:`, result);
+                await prisma.withdrawal.update({
+                    where: { withdrawalId: wId },
+                    data: { status: "COMPLETED" },
+                });
 
-                } else {
-                    console.error(`[Listener] Insufficient balance for withdrawal ${withdrawalId}. User has ${currentBalance}, requested ${requestedAmount}.`);
-                    // TODO: Could flag this withdrawal as "Pending Funding" or "Invalid" in DB if we tracked requests.
-                }
+                console.log(`[Listener] CRE Withdrawal Result:`, result);
 
             } catch (err) {
                 console.error("[Listener] Error handling WithdrawalRequested:", err);

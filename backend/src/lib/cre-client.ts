@@ -21,7 +21,7 @@ export interface OrderPayload {
     amount: string;
     price: string;
     side: "BUY" | "SELL";
-    stealthPublicKey: string;
+    stealthAddress: string;
 }
 
 export interface MatchPayload {
@@ -31,23 +31,11 @@ export interface MatchPayload {
     tradeAmount: string;
     buyer: {
         orderId: string;
-        order: {
-            pairId: string;
-            amount: string;
-            price: string;
-            side: "BUY" | "SELL";
-        };
-        stealthPublicKey: string;
+        stealthAddress: string;
     };
     seller: {
         orderId: string;
-        order: {
-            pairId: string;
-            amount: string;
-            price: string;
-            side: "BUY" | "SELL";
-        };
-        stealthPublicKey: string;
+        stealthAddress: string;
     };
 }
 

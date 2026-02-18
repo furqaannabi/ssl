@@ -6,7 +6,7 @@ export const Terminal: React.FC = () => {
   const { toast } = useToast();
   const [side, setSide] = useState<'BUY' | 'SELL'>('BUY');
   const [privacyLevel, setPrivacyLevel] = useState(3);
-  const [stealthPublicKey, setStealthPublicKey] = useState<string>(''); // Stateless: Manual Input
+  const [stealthAddress, setStealthAddress] = useState<string>('');
   const [status, setStatus] = useState<'IDLE' | 'SIGNING' | 'SENDING' | 'ENCRYPTING' | 'MATCHING' | 'SETTLED'>('IDLE');
   const [selectedPairId, setSelectedPairId] = useState<string>('');
   const [amount, setAmount] = useState('10');
@@ -124,8 +124,8 @@ export const Terminal: React.FC = () => {
         return;
     }
     
-    if (!stealthPublicKey || !stealthPublicKey.startsWith('0x')) {
-        toast.error("Invalid Stealth Public Key. Generate in Profile.");
+    if (!stealthAddress || !/^0x[0-9a-fA-F]{40}$/.test(stealthAddress)) {
+        toast.error("Invalid Stealth Address. Generate in Profile.");
         return;
     }
 
@@ -154,7 +154,7 @@ export const Terminal: React.FC = () => {
             amount: String(amount), 
             price: String(price),
             side,
-            stealthPublicKey, 
+            stealthAddress, 
             userAddress: eoaAddress 
         };
 
@@ -267,7 +267,7 @@ export const Terminal: React.FC = () => {
                {/* Stealth Key Input */}
                <div className="bg-obsidian/50 p-3 rounded border border-border-dark space-y-2">
                    <div className="flex justify-between items-center">
-                        <label className="text-[10px] text-primary font-mono uppercase tracking-wider">Stealth Public Key</label>
+                        <label className="text-[10px] text-primary font-mono uppercase tracking-wider">Stealth Address</label>
                         <Button 
                             variant="ghost" 
                             className="text-[8px] h-5 px-2 text-primary border border-primary/20 hover:bg-primary/10"
@@ -281,11 +281,11 @@ export const Terminal: React.FC = () => {
                                         return;
                                     }
 
-                                    if(cleanedText.startsWith('0x')) {
-                                        setStealthPublicKey(cleanedText);
-                                        toast.success("Public Key Pasted");
+                                    if(/^0x[0-9a-fA-F]{40}$/.test(cleanedText)) {
+                                        setStealthAddress(cleanedText);
+                                        toast.success("Stealth Address Pasted");
                                     } else {
-                                        toast.error("Invalid Key Format (Must start with 0x)");
+                                        toast.error("Invalid Address Format (0x + 40 hex chars)");
                                     }
                                 } catch(e) { 
                                     console.error("Clipboard error", e); 
@@ -298,8 +298,8 @@ export const Terminal: React.FC = () => {
                    </div>
                    <input 
                         type="text" 
-                        value={stealthPublicKey}
-                        onChange={(e) => setStealthPublicKey(e.target.value)}
+                        value={stealthAddress}
+                        onChange={(e) => setStealthAddress(e.target.value)}
                         placeholder="0x..."
                         className="w-full bg-black border border-border-light rounded p-2 text-[10px] font-mono text-white focus:border-primary outline-none"
                    />
@@ -398,7 +398,7 @@ export const Terminal: React.FC = () => {
 
                 <Button 
                  fullWidth 
-                 icon={status === 'IDLE' ? (stealthPublicKey ? ((Number(amount) * Number(price)) >= 5 ? "lock" : "warning") : "lock_open") : "pending"} 
+                 icon={status === 'IDLE' ? (stealthAddress ? ((Number(amount) * Number(price)) >= 5 ? "lock" : "warning") : "lock_open") : "pending"} 
                  className={`py-4 mt-6 uppercase tracking-wider ${(Number(amount) * Number(price)) < 5 ? 'opacity-50 cursor-not-allowed' : ''}`}
                  onClick={handlePlaceOrder}
                  disabled={status !== 'IDLE' || (Number(amount) * Number(price)) < 5}
@@ -409,10 +409,10 @@ export const Terminal: React.FC = () => {
                   status === 'MATCHING' ? "Matching Engine..." :
                   status === 'SETTLED' ? "Order Settled!" :
                   (Number(amount) * Number(price)) < 5 ? "Min Order Value: 5 USDC" :
-                  stealthPublicKey ? "Encrypt & Place Order" : "Enter Stealth Key"}
+                  stealthAddress ? "Encrypt & Place Order" : "Enter Stealth Address"}
                 </Button>
                <div className="text-[9px] text-slate-600 text-center font-mono uppercase tracking-wide mt-2">
-                  TEE Verification: <span className="text-slate-400">{stealthPublicKey ? "READY" : "WAITING FOR KEY"}</span>
+                  TEE Verification: <span className="text-slate-400">{stealthAddress ? "READY" : "WAITING FOR ADDRESS"}</span>
                </div>
             </div>
           </Card>

@@ -15,8 +15,7 @@ import {
   consensusIdenticalAggregation,
   ok,
 } from "@chainlink/cre-sdk";
-import { keccak256, encodePacked, encodeAbiParameters, parseAbiParameters, toBytes, toHex } from "viem";
-import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { keccak256, encodePacked, encodeAbiParameters, parseAbiParameters } from "viem";
 
 // ──────────────────────────────────────────────
 // Types
@@ -54,23 +53,11 @@ interface MatchPayload {
   tradeAmount: string;
   buyer: {
     orderId: string;
-    order: {
-      pairId: string;
-      amount: string;
-      price: string;
-      side: "BUY" | "SELL";
-    };
-    stealthPublicKey: string;
+    stealthAddress: string;
   };
   seller: {
     orderId: string;
-    order: {
-      pairId: string;
-      amount: string;
-      price: string;
-      side: "BUY" | "SELL";
-    };
-    stealthPublicKey: string;
+    stealthAddress: string;
   };
 }
 
@@ -83,86 +70,6 @@ interface WithdrawPayload {
 }
 
 type Payload = VerifyPayload | MatchPayload | WithdrawPayload;
-
-interface Order {
-  order: {
-    pairId: string;
-    amount: string;
-    price: string;
-    side: "BUY" | "SELL";
-  };
-  stealthPublicKey: string;
-}
-
-interface StealthResult {
-  stealthAddress: string;
-  ephemeralPublicKey: string;
-}
-
-// ──────────────────────────────────────────────
-// State
-// ──────────────────────────────────────────────
-
-
-
-// ──────────────────────────────────────────────
-// ECDH Stealth Address (EIP-5564 style)
-// ──────────────────────────────────────────────
-
-function generateStealthAddress(
-  spendingPublicKeyHex: string,
-  ephemeralSeed: string
-): StealthResult {
-  // Validate spending public key format (uncompressed: 65 bytes = 0x04 + 128 hex)
-  if (
-    !spendingPublicKeyHex ||
-    !spendingPublicKeyHex.startsWith("0x04") ||
-    spendingPublicKeyHex.length !== 132
-  ) {
-    throw new Error(
-      `Invalid stealthPublicKey: expected 65-byte uncompressed secp256k1 key (0x04..., 132 chars), got ${spendingPublicKeyHex?.length ?? 0} chars: ${spendingPublicKeyHex?.slice(0, 20) ?? "undefined"}...`
-    );
-  }
-
-  // Deterministic ephemeral private key from seed (avoids needing crypto.getRandomValues in WASM)
-  const ephemeralPrivBytes = toBytes(keccak256(toBytes(ephemeralSeed)));
-  const ephemeralPublicKey = secp256k1.getPublicKey(ephemeralPrivBytes, false); // uncompressed 65 bytes
-
-  // ECDH: shared secret = ephemeralPrivate * spendingPublic
-  const spendingPubBytes = hexToUint8Array(spendingPublicKeyHex);
-  const sharedPoint = secp256k1.getSharedSecret(ephemeralPrivBytes, spendingPubBytes);
-  const sharedHash = keccak256(toHex(sharedPoint));
-
-  // Stealth public key = S + hash(sharedSecret) * G
-  const S = secp256k1.Point.fromBytes(spendingPubBytes);
-  const hashScalar = BigInt(sharedHash);
-  const offsetPoint = secp256k1.Point.BASE.multiply(hashScalar);
-  const stealthPoint = S.add(offsetPoint);
-  const stealthPubBytes = stealthPoint.toBytes(false); // uncompressed 65 bytes
-
-  // Address = last 20 bytes of keccak256(pubkey without 0x04 prefix)
-  const pubKeyWithoutPrefix = stealthPubBytes.slice(1);
-  const addressHash = keccak256(toHex(pubKeyWithoutPrefix));
-  const stealthAddress = "0x" + addressHash.slice(-40);
-
-  return {
-    stealthAddress,
-    ephemeralPublicKey: toHex(ephemeralPublicKey),
-  };
-}
-
-function hexToUint8Array(hex: string): Uint8Array {
-  const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
-  const bytes = new Uint8Array(clean.length / 2);
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(clean.substring(i * 2, i * 2 + 2), 16);
-  }
-  return bytes;
-}
-
-// ──────────────────────────────────────────────
-// Matching engine
-// ──────────────────────────────────────────────
 
 
 
@@ -309,41 +216,24 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
   if (data.action === "settle_match") {
     runtime.log("Settlement request for " + data.buyer.orderId + " <-> " + data.seller.orderId);
 
-    // Trade amount provided by backend matching engine (supports partial fills)
     const tradeAmount = BigInt(data.tradeAmount);
     runtime.log("Trade amount: " + tradeAmount.toString());
 
-    // Deterministic trade nonce from order IDs
-    const tradeNonce = keccak256(
-      encodePacked(
-        ["string", "string"],
-        [data.buyer.orderId, data.seller.orderId]
-      )
-    );
+    // Stealth addresses provided by the frontend (generated client-side)
+    const buyerStealthAddr = data.buyer.stealthAddress;
+    const sellerStealthAddr = data.seller.stealthAddress;
 
-    // Generate ECDH stealth addresses
-    runtime.log("Buyer stealthPubKey (" + data.buyer.stealthPublicKey?.length + " chars): " + data.buyer.stealthPublicKey?.slice(0, 20) + "...");
-    runtime.log("Seller stealthPubKey (" + data.seller.stealthPublicKey?.length + " chars): " + data.seller.stealthPublicKey?.slice(0, 20) + "...");
-    const buyerStealth = generateStealthAddress(
-      data.buyer.stealthPublicKey,
-      tradeNonce + "_buyer"
-    );
-    const sellerStealth = generateStealthAddress(
-      data.seller.stealthPublicKey,
-      tradeNonce + "_seller"
-    );
+    runtime.log("Stealth buyer: " + buyerStealthAddr);
+    runtime.log("Stealth seller: " + sellerStealthAddr);
 
-    runtime.log("Stealth buyer: " + buyerStealth.stealthAddress);
-    runtime.log("Stealth seller: " + sellerStealth.stealthAddress);
-
+    // Deterministic order ID from order IDs + stealth addresses
     const orderId = keccak256(
       encodePacked(
-        ["string", "string", "string"],
-        [tradeNonce, buyerStealth.stealthAddress, sellerStealth.stealthAddress]
+        ["string", "string", "string", "string"],
+        [data.buyer.orderId, data.seller.orderId, buyerStealthAddr, sellerStealthAddr]
       )
     );
 
-    // Encode settle report
     const reportData = encodeAbiParameters(
       parseAbiParameters(
         "uint8 reportType, bytes32 orderId, address stealthBuyer, address stealthSeller, address tokenA, address tokenB, uint256 amountA, uint256 amountB"
@@ -351,8 +241,8 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
       [
         1,
         orderId as `0x${string}`,
-        buyerStealth.stealthAddress as `0x${string}`,
-        sellerStealth.stealthAddress as `0x${string}`,
+        buyerStealthAddr as `0x${string}`,
+        sellerStealthAddr as `0x${string}`,
         data.baseTokenAddress as `0x${string}`,
         data.quoteTokenAddress as `0x${string}`,
         tradeAmount,
@@ -366,8 +256,8 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
     return JSON.stringify({
       status: "settled",
       orderId,
-      stealthBuyer: buyerStealth.stealthAddress,
-      stealthSeller: sellerStealth.stealthAddress,
+      stealthBuyer: buyerStealthAddr,
+      stealthSeller: sellerStealthAddr,
       txHash,
     });
   }

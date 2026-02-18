@@ -101,24 +101,12 @@ export async function matchOrders(newOrderId: string, onLog?: (log: string) => v
                 tradeAmount: tradeAmount.toString(),
                 buyer: {
                     orderId: buyer.id,
-                    order: {
-                        pairId: buyer.pairId,
-                        amount: buyer.amount,
-                        price: buyer.price,
-                        side: "BUY"
-                    },
-                    stealthPublicKey: buyer.stealthPublicKey
+                    stealthAddress: buyer.stealthAddress,
                 },
                 seller: {
                     orderId: seller.id,
-                    order: {
-                        pairId: seller.pairId,
-                        amount: seller.amount,
-                        price: seller.price,
-                        side: "SELL"
-                    },
-                    stealthPublicKey: seller.stealthPublicKey
-                }
+                    stealthAddress: seller.stealthAddress,
+                },
             }, onLog);
         } catch (error) {
             console.error("[MatchingEngine] Settlement failed:", error);

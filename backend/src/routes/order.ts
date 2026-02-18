@@ -24,8 +24,8 @@ interface OrderInitPayload {
     amount: string;
     price: string;
     side: "BUY" | "SELL";
-    stealthPublicKey: string;
-    userAddress: string; // Required for signature verification
+    stealthAddress: string;
+    userAddress: string;
 }
 
 interface OrderConfirmPayload {
@@ -42,7 +42,7 @@ order.post("/", async (c) => {
         "amount",
         "price",
         "side",
-        "stealthPublicKey",
+        "stealthAddress",
         "userAddress",
     ] as const;
 
@@ -56,14 +56,9 @@ order.post("/", async (c) => {
         return c.json({ error: "side must be BUY or SELL" }, 400);
     }
 
-    // Validate stealthPublicKey is an uncompressed secp256k1 public key (65 bytes = 0x04 + 128 hex chars)
-    if (
-        !body.stealthPublicKey.startsWith("0x04") ||
-        body.stealthPublicKey.length !== 132 ||
-        !/^0x04[0-9a-fA-F]{128}$/.test(body.stealthPublicKey)
-    ) {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(body.stealthAddress)) {
         return c.json({
-            error: "Invalid stealthPublicKey. Must be an uncompressed secp256k1 public key (65 bytes, starting with 0x04)."
+            error: "Invalid stealthAddress. Must be a valid Ethereum address (0x + 40 hex chars)."
         }, 400);
     }
 
@@ -97,7 +92,7 @@ order.post("/", async (c) => {
                 amount: body.amount,
                 price: body.price,
                 side: body.side as OrderSide,
-                stealthPublicKey: body.stealthPublicKey,
+                stealthAddress: body.stealthAddress,
                 status: OrderStatus.PENDING, // Wait for signature
                 userAddress: body.userAddress,
             },
