@@ -13,6 +13,7 @@ import { auth } from "./routes/auth";
 import { user } from "./routes/user";
 import { pairs } from "./routes/pairs";
 import { withdraw } from "./routes/withdraw";
+import oracle from "./routes/oracle";
 import { startVaultListener } from "./listeners/ssl-vault-listener";
 
 const app = new Hono();
@@ -37,6 +38,7 @@ app.route("/api/auth", auth);
 app.route("/api/user", user);
 app.route("/api/pairs", pairs);
 app.route("/api/withdraw", withdraw);
+app.route("/api/oracle", oracle);
 
 // ── 404 ──
 app.notFound((c) => c.json({ error: "Not found" }, 404));

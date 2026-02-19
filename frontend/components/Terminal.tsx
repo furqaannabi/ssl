@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Icon, Card, Button, Badge, useToast } from './UI';
+import { OracleIndicator } from './OracleIndicator';
 import { useConnection, useSignMessage } from 'wagmi';
 import { CHAINS } from '../lib/chain-config';
 
@@ -607,11 +608,16 @@ export const Terminal: React.FC = () => {
                     <Icon name="memory" className="text-primary text-sm" />
                     Secure Execution Engine <span className="text-[10px] text-primary border border-primary/30 px-1 py-0.5 ml-2 font-normal">LIVE</span>
                  </h2>
-                 <div className="flex items-center gap-2 text-[10px] font-mono text-slate-400 uppercase">
-                    <span className="w-1.5 h-1.5 bg-primary animate-pulse"></span>
-                    LATENCY: 12ms
-                 </div>
-              </div>
+                  <div className="flex items-center gap-2 text-[10px] font-mono text-slate-400 uppercase">
+                     <span className="w-1.5 h-1.5 bg-primary animate-pulse"></span>
+                     LATENCY: 12ms
+                  </div>
+               </div>
+               
+               {/* Oracle Integration */}
+               <div className="px-4 py-3 border-b border-border-dark bg-obsidian/40 min-h-[60px] flex flex-col justify-center">
+                  <OracleIndicator pairId={selectedPairId} />
+               </div>
               
               <div className="flex-1 relative z-10 p-6 flex flex-col justify-between bg-black/50 backdrop-blur-sm">
                  {/* Steps */}
