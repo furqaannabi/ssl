@@ -5,7 +5,7 @@ import { streamText } from "hono/streaming";
 import { authMiddleware } from "../middleware/auth";
 
 type Variables = {
-    userAddress: string;
+    user: string;
 };
 
 export const withdraw = new Hono<{ Variables: Variables }>();
@@ -14,7 +14,8 @@ withdraw.use("*", authMiddleware);
 
 // ── POST /api/withdraw ──
 withdraw.post("/", async (c) => {
-    const userAddress = c.get("userAddress");
+    // FIX: authMiddleware sets "user", not "userAddress"
+    const userAddress = c.get("user") as string;
     const body = await c.req.json<{
         token: string;
         amount: string;
@@ -50,7 +51,11 @@ withdraw.post("/", async (c) => {
             });
 
             await prisma.$transaction([
-                prisma.$executeRaw`UPDATE "TokenBalance" SET "balance" = ${newBalance.toString()} WHERE "id" = ${balanceRecord!.id}`,
+                // Use updateMany to be safe/consistent, or standard update if ID is unique
+                prisma.tokenBalance.updateMany({
+                   where: { id: balanceRecord!.id },
+                   data: { balance: newBalance.toString() }
+                }),
                 existing
                     ? prisma.withdrawal.update({
                         where: { withdrawalId: body.withdrawalId },
@@ -98,7 +103,10 @@ withdraw.post("/", async (c) => {
                 console.error("[withdraw] CRE failed, refunding balance:", creError);
 
                 await prisma.$transaction([
-                    prisma.$executeRaw`UPDATE "TokenBalance" SET "balance" = ${currentBalance.toString()} WHERE "id" = ${balanceRecord!.id}`,
+                     prisma.tokenBalance.updateMany({
+                        where: { id: balanceRecord!.id },
+                        data: { balance: currentBalance.toString() },
+                    }),
                     prisma.withdrawal.update({
                         where: { withdrawalId: body.withdrawalId },
                         data: { status: "FAILED" },
@@ -120,7 +128,7 @@ withdraw.post("/", async (c) => {
 
 // ── GET /api/withdraw ──
 withdraw.get("/", async (c) => {
-    const userAddress = c.get("userAddress");
+    const userAddress = c.get("user");
     const status = c.req.query("status");
 
     const where: any = { userAddress };
