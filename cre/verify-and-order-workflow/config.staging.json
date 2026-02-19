@@ -9,8 +9,9 @@
       "chainId": 84532,
       "chainSelector": "ethereum-testnet-sepolia-base-1",
       "ccipChainSelector": "10344971235874465080",
-      "vault": "0xe774bdeb66738c6647df64166f7c5170a3b45324",
+      "vault": "0xa5720afcbcaa36004ed06ac5f8b79faecd8de93c",
       "usdc": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+      "link": "0xE4aB69C077896252FAFBD49EFD26B5D171A32410",
       "ccipRouter": "0xD3b06cEbF099CE7DA4AcCf578aaEBFDBd6e88a93",
       "forwarder": "0x82300bd7c3958625581cc2F77bC6464dcEcDF3e5"
     },
@@ -18,8 +19,9 @@
       "chainId": 421614,
       "chainSelector": "ethereum-testnet-sepolia-arbitrum-1",
       "ccipChainSelector": "3478487238524512106",
-      "vault": "0x722cfb0e21acdd84408e9b2aefd117be7359bf81",
+      "vault": "0x866f581a2fb26da0ef550d6cadd405bbe96eebde",
       "usdc": "",
+      "link": "0xb1D4538B4571d411F07960EF2838Ce337FE1E80E",
       "ccipRouter": "0x2a9C5afB0d0e4BAb2BCdaE109EC4b0c4Be15a165",
       "forwarder": "0x82300bd7c3958625581cc2F77bC6464dcEcDF3e5"
     }

@@ -35,6 +35,7 @@ contract StealthSettlementVault is
     using SafeERC20 for IERC20;
 
     IRouterClient public immutable ccipRouter;
+    IERC20 public immutable linkToken;
 
     /// @notice address => verified
     mapping(address => bool) public override isVerified;
@@ -51,16 +52,15 @@ contract StealthSettlementVault is
 
     constructor(
         address _forwarderAddress,
-        address _ccipRouter
+        address _ccipRouter,
+        address _linkToken
     ) ReceiverTemplate(_forwarderAddress) {
         ccipRouter = IRouterClient(_ccipRouter);
+        linkToken = IERC20(_linkToken);
     }
 
-    receive() external payable {}
-
-    function withdrawFees(address to) external onlyOwner {
-        (bool ok, ) = to.call{value: address(this).balance}("");
-        require(ok, "SSL: fee withdraw failed");
+    function withdrawFees(address _token, address _to) external onlyOwner {
+        IERC20(_token).safeTransfer(_to, IERC20(_token).balanceOf(address(this)));
     }
 
     // ──────────────────────────────────────────────
@@ -248,15 +248,17 @@ contract StealthSettlementVault is
                     allowOutOfOrderExecution: true
                 })
             ),
-            feeToken: address(0) // pay in native
+            feeToken: address(linkToken)
         });
 
         IERC20(token).safeIncreaseAllowance(address(ccipRouter), amount);
 
         uint256 fee = ccipRouter.getFee(destChainSelector, message);
-        require(address(this).balance >= fee, "SSL: insufficient CCIP fee");
+        require(linkToken.balanceOf(address(this)) >= fee, "SSL: insufficient LINK for CCIP fee");
 
-        bytes32 messageId = ccipRouter.ccipSend{value: fee}(
+        linkToken.safeIncreaseAllowance(address(ccipRouter), fee);
+
+        bytes32 messageId = ccipRouter.ccipSend(
             destChainSelector,
             message
         );

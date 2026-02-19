@@ -28,11 +28,11 @@ if [ ! -f "$ADDRESSES_FILE" ]; then
 fi
 
 # ── Known chains ──
-# Format: NAME  RPC_ALIAS  CHAIN_ID  CHAIN_SELECTOR  CCIP_SELECTOR  USDC  CCIP_ROUTER  FORWARDER
+# Format: NAME  CHAIN_ID|CHAIN_SELECTOR|CCIP_SELECTOR|USDC|LINK|CCIP_ROUTER|FORWARDER|ALCHEMY_SLUG
 
 declare -A CHAINS
-CHAINS[baseSepolia]="84532|ethereum-testnet-sepolia-base-1|10344971235874465080|0x036CbD53842c5426634e7929541eC2318f3dCF7e|0xD3b06cEbF099CE7DA4AcCf578aaEBFDBd6e88a93|0x82300bd7c3958625581cc2F77bC6464dcEcDF3e5|base-sepolia"
-CHAINS[arbitrumSepolia]="421614|ethereum-testnet-sepolia-arbitrum-1|3478487238524512106||0x2a9C5afB0d0e4BAb2BCdaE109EC4b0c4Be15a165|0x82300bd7c3958625581cc2F77bC6464dcEcDF3e5|arb-sepolia"
+CHAINS[baseSepolia]="84532|ethereum-testnet-sepolia-base-1|10344971235874465080|0x036CbD53842c5426634e7929541eC2318f3dCF7e|0xE4aB69C077896252FAFBD49EFD26B5D171A32410|0xD3b06cEbF099CE7DA4AcCf578aaEBFDBd6e88a93|0x82300bd7c3958625581cc2F77bC6464dcEcDF3e5|base-sepolia"
+CHAINS[arbitrumSepolia]="421614|ethereum-testnet-sepolia-arbitrum-1|3478487238524512106||0xb1D4538B4571d411F07960EF2838Ce337FE1E80E|0x2a9C5afB0d0e4BAb2BCdaE109EC4b0c4Be15a165|0x82300bd7c3958625581cc2F77bC6464dcEcDF3e5|arb-sepolia"
 
 extract_address() {
     local name=$1 file=$2
@@ -49,7 +49,7 @@ deploy_chain() {
         exit 1
     fi
 
-    IFS='|' read -r CHAIN_ID CHAIN_SEL CCIP_SEL USDC CCIP_ROUTER FORWARDER ALCHEMY_SLUG <<< "$DATA"
+    IFS='|' read -r CHAIN_ID CHAIN_SEL CCIP_SEL USDC LINK CCIP_ROUTER FORWARDER ALCHEMY_SLUG <<< "$DATA"
 
     echo ""
     echo "========================================"
@@ -91,6 +91,7 @@ deploy_chain() {
         ccipChainSelector: '$CCIP_SEL',
         vault: '$VAULT_ADDR',
         usdc: '$USDC',
+        link: '$LINK',
         ccipRouter: '$CCIP_ROUTER',
         forwarder: '$FORWARDER',
         rpcUrl: 'https://$ALCHEMY_SLUG.g.alchemy.com/v2/',
@@ -113,6 +114,7 @@ deploy_chain() {
         c.chains['$RPC_NAME'].chainSelector = '$CHAIN_SEL';
         c.chains['$RPC_NAME'].ccipChainSelector = '$CCIP_SEL';
         c.chains['$RPC_NAME'].usdc = '$USDC';
+        c.chains['$RPC_NAME'].link = '$LINK';
         c.chains['$RPC_NAME'].ccipRouter = '$CCIP_ROUTER';
         c.chains['$RPC_NAME'].forwarder = '$FORWARDER';
         c.chains['$RPC_NAME'].chainId = $CHAIN_ID;

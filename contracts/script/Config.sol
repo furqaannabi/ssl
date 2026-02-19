@@ -14,6 +14,7 @@ library SSLChains {
     address constant BASE_SEPOLIA_CCIP_ROUTER   = 0xD3b06cEbF099CE7DA4AcCf578aaebFDBd6e88a93;
     address constant BASE_SEPOLIA_FORWARDER     = 0x82300bd7c3958625581cc2F77bC6464dcEcDF3e5;
     address constant BASE_SEPOLIA_USDC          = 0x036CbD53842c5426634e7929541eC2318f3dCF7e;
+    address constant BASE_SEPOLIA_LINK          = 0xE4aB69C077896252FAFBD49EFD26B5D171A32410;
 
     // ── Arbitrum Sepolia ──
     uint64  constant ARB_SEPOLIA_CCIP_SELECTOR  = 3478487238524512106;
@@ -21,6 +22,7 @@ library SSLChains {
     address constant ARB_SEPOLIA_CCIP_ROUTER    = 0x2a9C5afB0d0e4BAb2BCdaE109EC4b0c4Be15a165;
     address constant ARB_SEPOLIA_FORWARDER      = 0xD41263567DdfeAd91504199b8c6c87371e83ca5d;
     address constant ARB_SEPOLIA_USDC          = 0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d;
+    address constant ARB_SEPOLIA_LINK          = 0xb1D4538B4571d411F07960EF2838Ce337FE1E80E;
 
     // ── Ethereum Sepolia ──
     uint64  constant ETH_SEPOLIA_CCIP_SELECTOR  = 16015286601757825753;
@@ -28,6 +30,7 @@ library SSLChains {
     address constant ETH_SEPOLIA_CCIP_ROUTER    = 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59;
     address constant ETH_SEPOLIA_FORWARDER      = 0x15fC6ae953E024d975e77382eEeC56A9101f9F88;
     address constant ETH_SEPOLIA_USDC          = 0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d;
+    address constant ETH_SEPOLIA_LINK          = 0x779877A7B0D9E8603169DdbD7836e478b4624789;
     /**
      * @notice Resolve CCIP router for the current chain (block.chainid).
      *         Reverts if the chain is unknown.
@@ -45,6 +48,16 @@ library SSLChains {
     function forwarder() internal view returns (address) {
         if (block.chainid == BASE_SEPOLIA_CHAIN_ID)  return BASE_SEPOLIA_FORWARDER;
         if (block.chainid == ARB_SEPOLIA_CHAIN_ID)   return ARB_SEPOLIA_FORWARDER;
+        revert("SSLChains: unsupported chain");
+    }
+
+    /**
+     * @notice Resolve LINK token for the current chain.
+     */
+    function linkToken() internal view returns (address) {
+        if (block.chainid == BASE_SEPOLIA_CHAIN_ID)  return BASE_SEPOLIA_LINK;
+        if (block.chainid == ARB_SEPOLIA_CHAIN_ID)   return ARB_SEPOLIA_LINK;
+        if (block.chainid == ETH_SEPOLIA_CHAIN_ID)   return ETH_SEPOLIA_LINK;
         revert("SSLChains: unsupported chain");
     }
 
