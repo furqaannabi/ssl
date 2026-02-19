@@ -242,7 +242,7 @@ The script:
 3. Extracts deployed addresses from broadcast files
 4. Writes `backend/addresses.json` and updates CRE config
 
-Environment variables: `PRIVATE_KEY` (required), `FORWARDER_ADDRESS` / `CCIP_ROUTER` / `LINK_TOKEN` (optional overrides, auto-resolved from `SSLChains`). `LINK_FUND` controls how much LINK to seed the vault with (default 5 LINK).
+Environment variables: `PRIVATE_KEY` (required), `FORWARDER_ADDRESS` / `CCIP_ROUTER` / `LINK_TOKEN` (optional overrides, auto-resolved from `SSLChains`). `LINK_FUND` controls how much LINK to seed the vault with (default 1 LINK).
 
 ### Backend
 
