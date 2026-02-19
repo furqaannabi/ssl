@@ -115,7 +115,7 @@ model Pair {
 
 model Transaction {
   id            String   @id @default(uuid())
-  type          String   // DEPOSIT, WITHDRAWAL
+  type          String   // DEPOSIT, WITHDRAWAL, SETTLEMENT, CROSS_CHAIN_SETTLE, TOKEN_RELEASE
   token         String
   amount        String
   chainSelector String   @default("ethereum-testnet-sepolia-base-1")
@@ -123,4 +123,32 @@ model Transaction {
   createdAt     DateTime @default(now())
   userAddress   String
   user          User     @relation(fields: [userAddress], references: [address])
+}
+
+enum SettlementStatus {
+  PENDING
+  SETTLED
+  BRIDGING
+  COMPLETED
+  FAILED
+}
+
+model Settlement {
+  id                String           @id @default(uuid())
+  orderId           String           @unique
+  type              String           // SAME_CHAIN, CROSS_CHAIN
+  status            SettlementStatus @default(PENDING)
+  sourceChain       String?
+  destChain         String?
+  stealthBuyer      String?
+  stealthSeller     String?
+  ccipMessageId     String?
+  destChainSelector String?
+  token             String?
+  amount            String?
+  settleTxHash      String?
+  bridgeTxHash      String?
+  releaseTxHash     String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 }

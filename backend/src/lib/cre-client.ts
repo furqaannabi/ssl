@@ -29,6 +29,10 @@ export interface MatchPayload {
     baseTokenAddress: string;
     quoteTokenAddress: string;
     tradeAmount: string;
+    crossChain?: boolean;
+    sourceChainSelector?: string;
+    destChainSelector?: string;
+    ccipDestSelector?: string;
     buyer: {
         orderId: string;
         stealthAddress: string;

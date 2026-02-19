@@ -101,27 +101,24 @@ deploy_chain() {
 
     echo "Updated addresses.json for $RPC_NAME"
 
-    # Update CRE configs
+    # Update CRE config (same chains structure)
     CRE_CONFIG="../cre/verify-and-order-workflow/config.staging.json"
     if [ -f "$CRE_CONFIG" ]; then
-        if [ "$RPC_NAME" = "baseSepolia" ]; then
-            node -e "
-            const fs = require('fs');
-            const c = JSON.parse(fs.readFileSync('$CRE_CONFIG','utf8'));
-            c.vaultAddress = '$VAULT_ADDR';
-            fs.writeFileSync('$CRE_CONFIG', JSON.stringify(c, null, 2));
-            "
-            echo "Updated CRE config vaultAddress"
-        fi
-        if [ "$RPC_NAME" = "arbitrumSepolia" ]; then
-            node -e "
-            const fs = require('fs');
-            const c = JSON.parse(fs.readFileSync('$CRE_CONFIG','utf8'));
-            c.arbVaultAddress = '$VAULT_ADDR';
-            fs.writeFileSync('$CRE_CONFIG', JSON.stringify(c, null, 2));
-            "
-            echo "Updated CRE config arbVaultAddress"
-        fi
+        node -e "
+        const fs = require('fs');
+        const c = JSON.parse(fs.readFileSync('$CRE_CONFIG','utf8'));
+        if (!c.chains) c.chains = {};
+        if (!c.chains['$RPC_NAME']) c.chains['$RPC_NAME'] = {};
+        c.chains['$RPC_NAME'].vault = '$VAULT_ADDR';
+        c.chains['$RPC_NAME'].chainSelector = '$CHAIN_SEL';
+        c.chains['$RPC_NAME'].ccipChainSelector = '$CCIP_SEL';
+        c.chains['$RPC_NAME'].usdc = '$USDC';
+        c.chains['$RPC_NAME'].ccipRouter = '$CCIP_ROUTER';
+        c.chains['$RPC_NAME'].forwarder = '$FORWARDER';
+        c.chains['$RPC_NAME'].chainId = $CHAIN_ID;
+        fs.writeFileSync('$CRE_CONFIG', JSON.stringify(c, null, 2));
+        "
+        echo "Updated CRE config for $RPC_NAME"
     fi
 
     # Backwards compat: contracts.json (base only)

@@ -21,14 +21,32 @@ import { keccak256, encodePacked, encodeAbiParameters, parseAbiParameters } from
 // Types
 // ──────────────────────────────────────────────
 
+type ChainEntry = {
+  chainId: number;
+  chainSelector: string;
+  ccipChainSelector: string;
+  vault: string;
+  usdc: string;
+  ccipRouter: string;
+  forwarder: string;
+};
+
 type Config = {
-  vaultAddress: string;
-  chainSelectorName: string;
   authorizedEVMAddress: string;
   gasLimit: string;
   worldIdVerifyUrl: string;
   worldIdAction: string;
+  primaryChain: string;
+  chains: Record<string, ChainEntry>;
 };
+
+function getPrimaryChain(config: Config): ChainEntry {
+  return config.chains[config.primaryChain];
+}
+
+function findChainBySelector(config: Config, selectorName: string): ChainEntry | undefined {
+  return Object.values(config.chains).find(c => c.chainSelector === selectorName);
+}
 
 interface VerifyPayload {
   action: "verify";
@@ -51,6 +69,10 @@ interface MatchPayload {
   baseTokenAddress: string;
   quoteTokenAddress: string;
   tradeAmount: string;
+  crossChain?: boolean;
+  sourceChainSelector?: string;
+  destChainSelector?: string;
+  ccipDestSelector?: string;
   buyer: {
     orderId: string;
     stealthAddress: string;
@@ -71,21 +93,24 @@ interface WithdrawPayload {
 
 type Payload = VerifyPayload | MatchPayload | WithdrawPayload;
 
-
-
 // ──────────────────────────────────────────────
 // Report helpers
 // ──────────────────────────────────────────────
 
-function sendReport(runtime: Runtime<Config>, reportData: `0x${string}`) {
+function sendReportToChain(
+  runtime: Runtime<Config>,
+  reportData: `0x${string}`,
+  chainSelectorName: string,
+  vaultAddress: string
+) {
   const network = getNetwork({
     chainFamily: "evm",
-    chainSelectorName: runtime.config.chainSelectorName,
+    chainSelectorName,
     isTestnet: true,
   });
 
   if (!network) {
-    throw new Error("Network not found: " + runtime.config.chainSelectorName);
+    throw new Error("Network not found: " + chainSelectorName);
   }
 
   const evmClient = new EVMClient(network.chainSelector.selector);
@@ -101,18 +126,27 @@ function sendReport(runtime: Runtime<Config>, reportData: `0x${string}`) {
 
   const writeResult = evmClient
     .writeReport(runtime, {
-      receiver: runtime.config.vaultAddress,
+      receiver: vaultAddress,
       report: reportResponse,
       gasConfig: { gasLimit: runtime.config.gasLimit },
     })
     .result();
 
   if (writeResult.txStatus !== TxStatus.SUCCESS) {
-    throw new Error("Report tx failed: " + writeResult.txStatus);
+    throw new Error("Report tx failed on " + chainSelectorName + ": " + writeResult.txStatus);
   }
 
   return bytesToHex(writeResult.txHash || new Uint8Array(32));
+}
 
+function sendReport(runtime: Runtime<Config>, reportData: `0x${string}`) {
+  const primary = getPrimaryChain(runtime.config);
+  return sendReportToChain(
+    runtime,
+    reportData,
+    primary.chainSelector,
+    primary.vault
+  );
 }
 
 // ──────────────────────────────────────────────
@@ -126,9 +160,7 @@ const verifyProof = (sendRequester: HTTPSendRequester, config: Config, data: Ver
     proof: data.proof,
     credential_type: data.credential_type,
     verification_level: data.verification_level,
-    action: config.worldIdAction, // Assuming 'verify' action maps to World ID action, or generic 'verify'. 
-    // If 'action' in payload is distinct from World ID 'action', we might need adjustment.
-    // For now assuming the payload contains the necessary World ID fields.
+    action: config.worldIdAction,
     signal: data.signal,
   };
 
@@ -175,7 +207,6 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
   if (data.action === "verify") {
     runtime.log("Verify request for nullifier: " + data.nullifierHash + ", address: " + data.userAddress);
 
-    // Call Verification (Single Execution)
     const httpClient = new HTTPClient();
     const verificationResult = httpClient
       .sendRequest(
@@ -195,7 +226,6 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
 
     runtime.log("Proof Verified. Proceeding to on-chain report for address: " + data.userAddress);
 
-    // Report (type=0, address)
     const reportData = encodeAbiParameters(
       parseAbiParameters("uint8 reportType, address user"),
       [0, data.userAddress as `0x${string}`]
@@ -217,16 +247,13 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
     runtime.log("Settlement request for " + data.buyer.orderId + " <-> " + data.seller.orderId);
 
     const tradeAmount = BigInt(data.tradeAmount);
-    runtime.log("Trade amount: " + tradeAmount.toString());
 
-    // Stealth addresses provided by the frontend (generated client-side)
     const buyerStealthAddr = data.buyer.stealthAddress;
     const sellerStealthAddr = data.seller.stealthAddress;
 
     runtime.log("Stealth buyer: " + buyerStealthAddr);
     runtime.log("Stealth seller: " + sellerStealthAddr);
 
-    // Deterministic order ID from order IDs + stealth addresses
     const orderId = keccak256(
       encodePacked(
         ["string", "string", "string", "string"],
@@ -234,6 +261,75 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
       )
     );
 
+    // ── Cross-chain settlement ──
+    if (data.crossChain && data.ccipDestSelector && data.destChainSelector) {
+      runtime.log("Cross-chain settlement detected");
+
+      const primary = getPrimaryChain(runtime.config);
+      const sourceChain = data.sourceChainSelector || primary.chainSelector;
+      const destChain = data.destChainSelector;
+
+      const sourceCfg = findChainBySelector(runtime.config, sourceChain);
+      const destCfg = findChainBySelector(runtime.config, destChain);
+
+      if (!sourceCfg || !sourceCfg.vault) throw new Error("Source chain not configured: " + sourceChain);
+      if (!destCfg || !destCfg.vault) throw new Error("Dest chain not configured: " + destChain);
+
+      const sourceVault = sourceCfg.vault;
+      const destVault = destCfg.vault;
+
+      const ccipDestSelectorBigInt = BigInt(data.ccipDestSelector);
+
+      // Report 1: crossChainSettle (type=3) on SOURCE vault
+      // Bridges quoteToken (USDC) from source to seller on destination chain
+      const bridgeReport = encodeAbiParameters(
+        parseAbiParameters(
+          "uint8 reportType, bytes32 orderId, uint64 destChainSelector, address recipient, address token, uint256 amount"
+        ),
+        [
+          3,
+          orderId as `0x${string}`,
+          ccipDestSelectorBigInt,
+          sellerStealthAddr as `0x${string}`,
+          data.quoteTokenAddress as `0x${string}`,
+          tradeAmount,
+        ]
+      );
+
+      runtime.log("Sending crossChainSettle (type=3) to " + sourceChain + " vault " + sourceVault);
+      const bridgeTxHash = sendReportToChain(runtime, bridgeReport, sourceChain, sourceVault);
+      runtime.log("Bridge tx: " + bridgeTxHash);
+
+      // Report 2: releaseToken (type=4) on DESTINATION vault
+      // Releases baseToken to buyer on the destination chain
+      const releaseReport = encodeAbiParameters(
+        parseAbiParameters(
+          "uint8 reportType, bytes32 orderId, address recipient, address token, uint256 amount"
+        ),
+        [
+          4,
+          orderId as `0x${string}`,
+          buyerStealthAddr as `0x${string}`,
+          data.baseTokenAddress as `0x${string}`,
+          tradeAmount,
+        ]
+      );
+
+      runtime.log("Sending releaseToken (type=4) to " + destChain + " vault " + destVault);
+      const releaseTxHash = sendReportToChain(runtime, releaseReport, destChain, destVault);
+      runtime.log("Release tx: " + releaseTxHash);
+
+      return JSON.stringify({
+        status: "settled_cross_chain",
+        orderId,
+        stealthBuyer: buyerStealthAddr,
+        stealthSeller: sellerStealthAddr,
+        bridgeTxHash,
+        releaseTxHash,
+      });
+    }
+
+    // ── Same-chain settlement (type=1) ──
     const reportData = encodeAbiParameters(
       parseAbiParameters(
         "uint8 reportType, bytes32 orderId, address stealthBuyer, address stealthSeller, address tokenA, address tokenB, uint256 amountA, uint256 amountB"
@@ -262,13 +358,10 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
     });
   }
 
-
-
   // ── Action: withdraw ──
   if (data.action === "withdraw") {
     runtime.log("Withdrawal request " + data.withdrawalId + " for " + data.userAddress);
 
-    // Report (type=2, user, withdrawalId)
     const reportData = encodeAbiParameters(
       parseAbiParameters("uint8 reportType, address user, uint256 withdrawalId"),
       [2, data.userAddress as `0x${string}`, BigInt(data.withdrawalId)]

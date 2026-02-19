@@ -6,6 +6,9 @@ import { getActiveChains, type ChainConfig } from "../lib/config";
 const VAULT_ABI = [
     "event Funded(address indexed token, uint256 amount, address indexed user)",
     "event WithdrawalRequested(address indexed user, uint256 amount, uint256 indexed withdrawalId, uint256 timestamp)",
+    "event Settled(bytes32 indexed orderId, address stealthBuyer, address stealthSeller)",
+    "event CrossChainSettled(bytes32 indexed orderId, uint64 destChainSelector, address recipient, bytes32 ccipMessageId)",
+    "event TokenReleased(bytes32 indexed orderId, address recipient, address token, uint256 amount)",
     "function withdrawalRequests(uint256) view returns (address token, uint256 amount, bool claimed)"
 ];
 
@@ -258,6 +261,91 @@ async function startChainListener(chainName: string, chain: ChainConfig) {
                 console.log(`${tag} CRE Withdrawal Result:`, result);
             } catch (err) {
                 console.error(`${tag} Error handling WithdrawalRequested:`, err);
+            }
+        });
+
+        // ── Settled Event (same-chain) ──
+        contract.on("Settled", async (orderId: string, stealthBuyer: string, stealthSeller: string, event: any) => {
+            console.log(`${tag} Settled: orderId=${orderId}`);
+            try {
+                await prisma.settlement.upsert({
+                    where: { orderId },
+                    update: {
+                        status: "SETTLED",
+                        stealthBuyer: stealthBuyer.toLowerCase(),
+                        stealthSeller: stealthSeller.toLowerCase(),
+                        settleTxHash: event.log.transactionHash,
+                        sourceChain: chainSelector,
+                    },
+                    create: {
+                        orderId,
+                        type: "SAME_CHAIN",
+                        status: "SETTLED",
+                        sourceChain: chainSelector,
+                        stealthBuyer: stealthBuyer.toLowerCase(),
+                        stealthSeller: stealthSeller.toLowerCase(),
+                        settleTxHash: event.log.transactionHash,
+                    },
+                });
+            } catch (err) {
+                console.error(`${tag} Error handling Settled:`, err);
+            }
+        });
+
+        // ── CrossChainSettled Event ──
+        contract.on("CrossChainSettled", async (orderId: string, destChainSel: bigint, recipient: string, ccipMessageId: string, event: any) => {
+            console.log(`${tag} CrossChainSettled: orderId=${orderId} ccipMessageId=${ccipMessageId}`);
+            try {
+                await prisma.settlement.upsert({
+                    where: { orderId },
+                    update: {
+                        status: "BRIDGING",
+                        ccipMessageId,
+                        destChainSelector: destChainSel.toString(),
+                        bridgeTxHash: event.log.transactionHash,
+                    },
+                    create: {
+                        orderId,
+                        type: "CROSS_CHAIN",
+                        status: "BRIDGING",
+                        sourceChain: chainSelector,
+                        destChainSelector: destChainSel.toString(),
+                        ccipMessageId,
+                        stealthSeller: recipient.toLowerCase(),
+                        bridgeTxHash: event.log.transactionHash,
+                    },
+                });
+            } catch (err) {
+                console.error(`${tag} Error handling CrossChainSettled:`, err);
+            }
+        });
+
+        // ── TokenReleased Event ──
+        contract.on("TokenReleased", async (orderId: string, recipient: string, token: string, amount: bigint, event: any) => {
+            console.log(`${tag} TokenReleased: orderId=${orderId} recipient=${recipient} token=${token} amount=${amount}`);
+            try {
+                await prisma.settlement.upsert({
+                    where: { orderId },
+                    update: {
+                        status: "COMPLETED",
+                        stealthBuyer: recipient.toLowerCase(),
+                        token: token.toLowerCase(),
+                        amount: amount.toString(),
+                        releaseTxHash: event.log.transactionHash,
+                    },
+                    create: {
+                        orderId,
+                        type: "CROSS_CHAIN",
+                        status: "COMPLETED",
+                        destChain: chainSelector,
+                        stealthBuyer: recipient.toLowerCase(),
+                        token: token.toLowerCase(),
+                        amount: amount.toString(),
+                        releaseTxHash: event.log.transactionHash,
+                    },
+                });
+            } catch (err) {
+                console.error(`${tag} Error handling TokenReleased:`, err);
             }
         });
 

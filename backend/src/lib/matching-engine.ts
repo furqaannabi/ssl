@@ -1,6 +1,8 @@
 import prisma from "../clients/prisma";
 import { OrderSide, OrderStatus } from "../../generated/prisma/client";
 import { sendToCRE } from "./cre-client";
+import type { MatchPayload } from "./cre-client";
+import { config } from "./config";
 import { parseUnits } from "ethers";
 
 function remaining(order: { amount: string; filledAmount: string }): bigint {
@@ -115,22 +117,42 @@ export async function matchOrders(newOrderId: string, onLog?: (log: string) => v
         const costQuote = Number(tradeAmount) * price;
         const quoteAmountWei = parseUnits(costQuote.toFixed(quoteToken.decimals), quoteToken.decimals);
 
-        // Send to CRE (Mock/Sim)
+        // Detect cross-chain: tokens on different chains
+        const isCrossChain = baseToken.chainSelector !== quoteToken.chainSelector;
+
+        const crePayload: MatchPayload = {
+            action: "settle_match",
+            baseTokenAddress,
+            quoteTokenAddress,
+            tradeAmount: tradeAmount.toString(),
+            buyer: {
+                orderId: buyer.id,
+                stealthAddress: buyer.stealthAddress,
+            },
+            seller: {
+                orderId: seller.id,
+                stealthAddress: seller.stealthAddress,
+            },
+        };
+
+        if (isCrossChain) {
+            const sourceChainCfg = Object.values(config.chains).find(
+                c => c.chainSelector === quoteToken.chainSelector
+            );
+            const destChainCfg = Object.values(config.chains).find(
+                c => c.chainSelector === baseToken.chainSelector
+            );
+
+            crePayload.crossChain = true;
+            crePayload.sourceChainSelector = quoteToken.chainSelector;
+            crePayload.destChainSelector = baseToken.chainSelector;
+            crePayload.ccipDestSelector = destChainCfg?.ccipChainSelector || "";
+
+            log(`Cross-chain trade: ${quoteToken.chainSelector} -> ${baseToken.chainSelector}`);
+        }
+
         try {
-            await sendToCRE({
-                action: "settle_match",
-                baseTokenAddress,
-                quoteTokenAddress,
-                tradeAmount: tradeAmount.toString(),
-                buyer: {
-                    orderId: buyer.id,
-                    stealthAddress: buyer.stealthAddress,
-                },
-                seller: {
-                    orderId: seller.id,
-                    stealthAddress: seller.stealthAddress,
-                },
-            }, onLog);
+            await sendToCRE(crePayload, onLog);
         } catch (error) {
             console.error("[MatchingEngine] Settlement failed:", error);
             log(`Settlement failed: ${error}`);
