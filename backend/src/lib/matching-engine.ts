@@ -140,36 +140,18 @@ export async function matchOrders(newOrderId: string, onLog?: (log: string) => v
         // DB Updates: Order Status + Balances
         // TODO: This should be a robust transaction. optimizing for simple atomic update here.
         
-        // Helper to update balance
-        const updateBalance = async (user: string, token: string, delta: bigint) => {
-             // We need to fetch current first to do math in JS (Prisma doesn't support atomic increment on string fields easily without raw query)
-             // But for safety in this specific prototype, we will trust the read-modify-write within logic or use raw if needed. 
-             // Since we need to support any token, we'll try read-modify-write.
-             const record = await prisma.tokenBalance.findUnique({
-                 where: { userAddress_token: { userAddress: user, token } }
-             });
-             const current = record ? BigInt(record.balance) : 0n;
-             const newVal = current + delta;
-             
-             return prisma.tokenBalance.upsert({
-                 where: { userAddress_token: { userAddress: user, token } },
-                 update: { balance: newVal.toString() },
-                 create: { userAddress: user, token, balance: newVal.toString() }
-             });
-        };
+        const baseChain = baseToken.chainSelector;
+        const quoteChain = quoteToken.chainSelector;
 
-        // Buyer: +Base, -Quote
-        // Seller: -Base, +Quote
-        
-        // WE EXECUTE IN SEQUENCE (Ideal would be interactive transaction but limitations apply)
-        // We will perform the balance calculations and push them into the $transaction if possible, 
-        // OR execute them right before.
-        
-        // Reading current balances to prepare updates
-        const buyerBase = await prisma.tokenBalance.findUnique({ where: { userAddress_token: { userAddress: buyer.userAddress!, token: baseTokenAddress } } });
-        const buyerQuote = await prisma.tokenBalance.findUnique({ where: { userAddress_token: { userAddress: buyer.userAddress!, token: quoteTokenAddress } } });
-        const sellerBase = await prisma.tokenBalance.findUnique({ where: { userAddress_token: { userAddress: seller.userAddress!, token: baseTokenAddress } } });
-        const sellerQuote = await prisma.tokenBalance.findUnique({ where: { userAddress_token: { userAddress: seller.userAddress!, token: quoteTokenAddress } } });
+        const findBal = (user: string, token: string, chainSelector: string) =>
+            prisma.tokenBalance.findUnique({
+                where: { userAddress_token_chainSelector: { userAddress: user, token, chainSelector } }
+            });
+
+        const buyerBase = await findBal(buyer.userAddress!, baseTokenAddress, baseChain);
+        const buyerQuote = await findBal(buyer.userAddress!, quoteTokenAddress, quoteChain);
+        const sellerBase = await findBal(seller.userAddress!, baseTokenAddress, baseChain);
+        const sellerQuote = await findBal(seller.userAddress!, quoteTokenAddress, quoteChain);
 
         const buyerBaseBal = buyerBase ? BigInt(buyerBase.balance) : 0n;
         const buyerQuoteBal = buyerQuote ? BigInt(buyerQuote.balance) : 0n;
@@ -177,7 +159,6 @@ export async function matchOrders(newOrderId: string, onLog?: (log: string) => v
         const sellerQuoteBal = sellerQuote ? BigInt(sellerQuote.balance) : 0n;
 
         await prisma.$transaction([
-            // Update Orders
             prisma.order.update({
                 where: { id: order.id },
                 data: {
@@ -192,30 +173,25 @@ export async function matchOrders(newOrderId: string, onLog?: (log: string) => v
                     status: matchFullyFilled ? OrderStatus.SETTLED : OrderStatus.OPEN,
                 },
             }),
-            // Update Balances
-            // Buyer: +Base
             prisma.tokenBalance.upsert({
-                where: { userAddress_token: { userAddress: buyer.userAddress!, token: baseTokenAddress } },
+                where: { userAddress_token_chainSelector: { userAddress: buyer.userAddress!, token: baseTokenAddress, chainSelector: baseChain } },
                 update: { balance: (buyerBaseBal + baseAmountWei).toString() },
-                create: { userAddress: buyer.userAddress!, token: baseTokenAddress, balance: (baseAmountWei).toString() }
+                create: { userAddress: buyer.userAddress!, token: baseTokenAddress, chainSelector: baseChain, balance: (baseAmountWei).toString() }
             }),
-            // Buyer: -Quote
             prisma.tokenBalance.upsert({
-                where: { userAddress_token: { userAddress: buyer.userAddress!, token: quoteTokenAddress } },
+                where: { userAddress_token_chainSelector: { userAddress: buyer.userAddress!, token: quoteTokenAddress, chainSelector: quoteChain } },
                 update: { balance: (buyerQuoteBal - quoteAmountWei).toString() },
-                create: { userAddress: buyer.userAddress!, token: quoteTokenAddress, balance: (-quoteAmountWei).toString() } // Should not happen ifsolvent
+                create: { userAddress: buyer.userAddress!, token: quoteTokenAddress, chainSelector: quoteChain, balance: (-quoteAmountWei).toString() }
             }),
-            // Seller: -Base
             prisma.tokenBalance.upsert({
-                where: { userAddress_token: { userAddress: seller.userAddress!, token: baseTokenAddress } },
+                where: { userAddress_token_chainSelector: { userAddress: seller.userAddress!, token: baseTokenAddress, chainSelector: baseChain } },
                 update: { balance: (sellerBaseBal - baseAmountWei).toString() },
-                create: { userAddress: seller.userAddress!, token: baseTokenAddress, balance: (-baseAmountWei).toString() }
+                create: { userAddress: seller.userAddress!, token: baseTokenAddress, chainSelector: baseChain, balance: (-baseAmountWei).toString() }
             }),
-            // Seller: +Quote
             prisma.tokenBalance.upsert({
-                where: { userAddress_token: { userAddress: seller.userAddress!, token: quoteTokenAddress } },
+                where: { userAddress_token_chainSelector: { userAddress: seller.userAddress!, token: quoteTokenAddress, chainSelector: quoteChain } },
                 update: { balance: (sellerQuoteBal + quoteAmountWei).toString() },
-                create: { userAddress: seller.userAddress!, token: quoteTokenAddress, balance: (quoteAmountWei).toString() }
+                create: { userAddress: seller.userAddress!, token: quoteTokenAddress, chainSelector: quoteChain, balance: (quoteAmountWei).toString() }
             })
         ]);
 

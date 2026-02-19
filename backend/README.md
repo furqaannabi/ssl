@@ -1,6 +1,29 @@
 # SSL Backend API Documentation
 
-This directory contains the backend service for the Stealth Settlement Layer (SSL). It handles user authentication, World ID verification, order matching via the Chainlink CRE, withdrawals, transaction history, a mock price oracle, and compliance reporting.
+Backend service for the Stealth Settlement Layer (SSL). Handles user authentication, World ID verification, order matching, multi-chain vault event listening, withdrawals, and CRE integration.
+
+## Multi-Chain Architecture
+
+The backend listens for vault events on **all chains with deployed vaults**. Chain configuration is loaded from `addresses.json`:
+
+```json
+{
+    "chains": {
+        "baseSepolia": {
+            "chainId": 84532,
+            "chainSelector": "ethereum-testnet-sepolia-base-1",
+            "vault": "0x...",
+            "usdc": "0x...",
+            "wsUrl": "wss://base-sepolia.g.alchemy.com/v2/"
+        },
+        "arbitrumSepolia": { ... }
+    }
+}
+```
+
+Token balances are tracked per-user, per-token, **per-chain** (`chainSelector` in `TokenBalance`). The vault listener spawns one WebSocket connection per active chain and tags all deposits/withdrawals with the chain they occurred on.
+
+---
 
 ## Authentication
 
@@ -8,8 +31,6 @@ The backend uses **SIWE (Sign-In with Ethereum)** and **HttpOnly Cookies** for a
 
 ### 1. Get Nonce
 **GET** `/api/auth/nonce/:address`
-
-Generates a random nonce for the user to sign.
 
 **Response:**
 ```json
@@ -21,8 +42,6 @@ Generates a random nonce for the user to sign.
 ### 2. Login
 **POST** `/api/auth/login`
 
-Verifies the signature and sets a secure `token` cookie.
-
 **Request:**
 ```json
 {
@@ -33,69 +52,42 @@ Verifies the signature and sets a secure `token` cookie.
 
 **Response:**
 ```json
-{
-  "success": true
-}
+{ "success": true }
 ```
-*Note: A `token` cookie is set in the response headers (HttpOnly, Secure).*
 
 ---
 
 ## User Profile
 
 ### Get Current User
-**GET** `/api/user/me`
-*(Requires Auth Cookie)*
+**GET** `/api/user/me` *(Requires Auth Cookie)*
 
-Returns user details and token balances.
+Returns user details and token balances across all chains.
 
 **Response:**
 ```json
 {
   "success": true,
   "user": {
-    "id": "uuid",
     "address": "0x123...",
     "isVerified": true,
     "balances": [
-        { "token": "0xTokenA", "balance": "1000000000000000000" }
+      { "token": "0xTokenA", "balance": "1000000000000000000", "chainSelector": "ethereum-testnet-sepolia-base-1" },
+      { "token": "0xTokenB", "balance": "500000000", "chainSelector": "ethereum-testnet-sepolia-arbitrum-1" }
     ]
   }
 }
 ```
-*Note: If `isVerified` is false locally, the server checks the `SSLVault` smart contract. If verified on-chain, it updates the database and returns `true`.*
 
 ### Get User Orders
-**GET** `/api/user/orders?status=OPEN`
-*(Requires Auth Cookie)*
-
-Returns orders created by the user. Optional `status` filter.
-
-**Response:**
-```json
-{
-  "success": true,
-  "orders": [
-    {
-      "id": "order_1",
-      "pairId": "pair-uuid",
-      "amount": "100",
-      "status": "OPEN",
-      "createdAt": "2024-..."
-    }
-  ]
-}
-```
+**GET** `/api/user/orders?status=OPEN` *(Requires Auth Cookie)*
 
 ---
 
 ## Verification
 
 ### Verify World ID
-**POST** `/api/verify`
-*(Requires Auth Cookie)*
-
-Submits a World ID proof. The server validates it and streams the verification progress from the CRE.
+**POST** `/api/verify` *(Requires Auth Cookie)*
 
 **Request:**
 ```json
@@ -112,7 +104,6 @@ Submits a World ID proof. The server validates it and streams the verification p
 **Response (SSE Stream):**
 ```json
 {"type": "log", "message": "Starting CRE verification..."}
-{"type": "log", "message": "Proof verified on-chain..."}
 {"type": "result", "success": true, "status": "VERIFIED"}
 ```
 
@@ -123,7 +114,7 @@ Submits a World ID proof. The server validates it and streams the verification p
 ### List Pairs
 **GET** `/api/pairs`
 
-Returns all available trading pairs with token metadata. Pairs are auto-created when a new token is deposited into the vault.
+Returns all trading pairs. Pairs are auto-created when new tokens are deposited into any vault.
 
 **Response:**
 ```json
@@ -132,10 +123,8 @@ Returns all available trading pairs with token metadata. Pairs are auto-created 
   "pairs": [
     {
       "id": "pair-uuid",
-      "baseTokenAddress": "0xTokenA",
-      "quoteTokenAddress": "0xUSDC",
-      "baseToken": { "symbol": "TBILL", "name": "T-Bill Token", "address": "0xTokenA", "decimals": 18 },
-      "quoteToken": { "symbol": "USDC", "name": "USD Coin", "address": "0xUSDC", "decimals": 6 }
+      "baseToken": { "symbol": "TBILL", "address": "0x...", "decimals": 18, "chainSelector": "ethereum-testnet-sepolia-base-1" },
+      "quoteToken": { "symbol": "USDC", "address": "0x...", "decimals": 6, "chainSelector": "ethereum-testnet-sepolia-base-1" }
     }
   ]
 }
@@ -148,28 +137,8 @@ Returns all available trading pairs with token metadata. Pairs are auto-created 
 ### Get Orderbook
 **GET** `/api/order/book`
 
-Returns all `OPEN` orders.
-
-**Response:**
-```json
-{
-  "success": true,
-  "orders": [
-    {
-      "id": "order_abc",
-      "side": "BUY",
-      "price": "1500",
-      "amount": "1.5"
-    }
-  ]
-}
-```
-
 ### Place Order
-**POST** `/api/order`
-*(Requires Auth Cookie)*
-
-Creates an order and streams the matching engine logs. The `stealthAddress` is a standard Ethereum address (0x + 40 hex chars) generated client-side for privacy-preserving settlement.
+**POST** `/api/order` *(Requires Auth Cookie)*
 
 **Request:**
 ```json
@@ -190,29 +159,16 @@ Creates an order and streams the matching engine logs. The `stealthAddress` is a
 ```
 
 ### Cancel Order
-**POST** `/api/order/:id/cancel`
-*(Requires Auth Cookie)*
-
-Cancels an `OPEN` order.
-
-**Response:**
-```json
-{
-  "success": true,
-  "orderId": "order_123",
-  "status": "CANCELLED"
-}
-```
+**POST** `/api/order/:id/cancel` *(Requires Auth Cookie)*
 
 ---
 
 ## Withdrawals
 
 ### Request Withdrawal
-**POST** `/api/withdraw`
-*(Requires Auth Cookie)*
+**POST** `/api/withdraw` *(Requires Auth Cookie)*
 
-Processes a withdrawal after the user has called `requestWithdrawal` on-chain. Deducts the internal balance, forwards to the CRE for on-chain settlement, and streams progress. On CRE failure the balance is automatically refunded.
+Deducts internal balance, forwards to CRE for on-chain settlement, streams progress. On CRE failure the balance is auto-refunded.
 
 **Request:**
 ```json
@@ -226,80 +182,20 @@ Processes a withdrawal after the user has called `requestWithdrawal` on-chain. D
 **Response (SSE Stream):**
 ```json
 {"type": "log", "message": "Balance deducted. Forwarding withdrawal to CRE..."}
-{"type": "log", "message": "CRE processing..."}
 {"type": "result", "success": true, "withdrawalId": "42", "status": "COMPLETED"}
 ```
 
-Withdrawal statuses: `PENDING` -> `PROCESSING` -> `COMPLETED` | `FAILED`
-
 ### List Withdrawals
-**GET** `/api/withdraw?status=COMPLETED`
-*(Requires Auth Cookie)*
-
-Returns the authenticated user's withdrawals. Optional `status` filter (`PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`).
-
-**Response:**
-```json
-{
-  "success": true,
-  "withdrawals": [
-    {
-      "id": "uuid",
-      "withdrawalId": "42",
-      "userAddress": "0x123...",
-      "token": "0xTokenA",
-      "amount": "1000000000000000000",
-      "status": "COMPLETED",
-      "txHash": null,
-      "createdAt": "2024-...",
-      "updatedAt": "2024-..."
-    }
-  ]
-}
-```
+**GET** `/api/withdraw?status=COMPLETED` *(Requires Auth Cookie)*
 
 ---
 
 ## Transaction History
 
 ### Get Unified History
-**GET** `/api/history`
-*(Requires Auth Cookie)*
+**GET** `/api/history` *(Requires Auth Cookie)*
 
-Returns a merged, chronologically-sorted list of the user's orders and on-chain transactions (deposits & withdrawals). Limited to the 50 most recent of each type.
-
-**Response:**
-```json
-{
-  "success": true,
-  "history": [
-    {
-      "id": "uuid",
-      "type": "ORDER",
-      "side": "BUY",
-      "status": "OPEN",
-      "asset": "TBILL/USDC",
-      "amount": "100",
-      "price": "50",
-      "filled": "0",
-      "hash": "0x1234...5678",
-      "createdAt": "2024-..."
-    },
-    {
-      "id": "uuid",
-      "type": "DEPOSIT",
-      "side": "IN",
-      "status": "COMPLETED",
-      "asset": "0xTokenA",
-      "amount": "1000000000000000000",
-      "price": "-",
-      "filled": "1000000000000000000",
-      "hash": "0xabcd...ef01",
-      "createdAt": "2024-..."
-    }
-  ]
-}
-```
+Returns merged, chronologically-sorted orders and on-chain transactions. Each transaction includes a `chainSelector` indicating which chain it occurred on.
 
 ---
 
@@ -308,22 +204,7 @@ Returns a merged, chronologically-sorted list of the user's orders and on-chain 
 ### Get Prices
 **GET** `/api/oracle/prices`
 
-Returns simulated live market prices for supported assets. Uses sine-wave oscillation + random noise around base prices.
-
-**Response:**
-```json
-{
-  "success": true,
-  "prices": {
-    "BOND": { "symbol": "BOND", "price": "100.03", "change24h": "0.03%", "trend": "UP" },
-    "USDC": { "symbol": "USDC", "price": "1.00", "change24h": "0.00%", "trend": "FLAT" },
-    "TBILL": { "symbol": "TBILL", "price": "98.47", "change24h": "0.02%", "trend": "UP" },
-    "BTC": { "symbol": "BTC", "price": "64250.00", "change24h": "0.08%", "trend": "UP" },
-    "ETH": { "symbol": "ETH", "price": "3465.00", "change24h": "0.43%", "trend": "UP" },
-    "SOL": { "symbol": "SOL", "price": "145.50", "change24h": "0.34%", "trend": "UP" }
-  }
-}
-```
+Returns simulated live market prices for supported assets.
 
 ---
 
@@ -332,42 +213,58 @@ Returns simulated live market prices for supported assets. Uses sine-wave oscill
 ### Get Stats
 **GET** `/api/compliance/stats`
 
-Returns system-wide compliance metrics: verified user count, ZKP proof stats, and a unified audit log of recent orders and transactions.
-
-**Response:**
-```json
-{
-  "success": true,
-  "stats": {
-    "oracleLastUpdate": "2024-01-01T00:00:00.000Z",
-    "totalVerifiedUsers": 12,
-    "zkpPending": 3,
-    "zkpCompleted": 47,
-    "logs": [
-      {
-        "time": "2024-...",
-        "event": "Order BUY TBILL",
-        "hash": "0x1234...",
-        "status": "LOGGED",
-        "color": "yellow"
-      },
-      {
-        "time": "2024-...",
-        "event": "DEPOSIT 0xTo...",
-        "hash": "0xabcd...",
-        "status": "CONFIRMED",
-        "color": "primary"
-      }
-    ]
-  }
-}
-```
+Returns system-wide compliance metrics: verified user count, ZKP proof stats, and audit log.
 
 ---
 
-## Vault Listener
+## Multi-Chain Vault Listener
 
-The backend runs a WebSocket listener (`ssl-vault-listener`) that watches the `SSLVault` contract on Base Sepolia for:
+The backend runs WebSocket listeners for **every chain with a vault in `addresses.json`**:
 
-- **`Funded`** — Auto-creates user, token, and trading pair records; updates internal balances; records a `DEPOSIT` transaction.
-- **`WithdrawalRequested`** — Validates sufficient balance, atomically deducts balance + creates a `Withdrawal` record, records a `WITHDRAWAL` transaction, and forwards to the CRE. Skips withdrawals already handled by the `/api/withdraw` endpoint to prevent double-processing.
+- **`Funded`** -- Auto-creates user, token, and trading pair records; updates internal balances tagged with `chainSelector`; records a `DEPOSIT` transaction.
+- **`WithdrawalRequested`** -- Validates sufficient balance on the correct chain, atomically deducts balance, forwards to CRE. Skips withdrawals already handled by `/api/withdraw`.
+
+Each listener reconnects automatically on connection drops (5s backoff).
+
+---
+
+## Data Model (Prisma)
+
+```
+Token (address, name, symbol, decimals, chainSelector)
+  └── Pair (baseTokenAddress, quoteTokenAddress)
+        └── Order (pairId, amount, price, side, status, stealthAddress, userAddress)
+
+User (address, name, isVerified, nonce)
+  ├── Order[]
+  ├── TokenBalance[] (token, balance, chainSelector)   ← @@unique([userAddress, token, chainSelector])
+  ├── Withdrawal[] (withdrawalId, token, amount, status)
+  ├── Transaction[] (type, token, amount, chainSelector, txHash)
+  └── Session[]
+```
+
+Order lifecycle: `PENDING` -> `OPEN` -> `MATCHED` -> `SETTLED` (or `CANCELLED`)
+Withdrawal lifecycle: `PENDING` -> `PROCESSING` -> `COMPLETED` | `FAILED`
+
+---
+
+## Configuration
+
+### addresses.json
+
+Multi-chain address registry, auto-populated by `contracts/deploy.sh`. Contains per-chain vault, USDC, CCIP router, forwarder, and RPC/WS URLs.
+
+### contracts.json (Legacy)
+
+Single-chain backwards-compat file with `vault`, `bond`, `usdc` for Base Sepolia. Still read by `config.ts` for legacy references.
+
+### Environment Variables
+
+| Variable | Description |
+|---|---|
+| `EVM_PRIVATE_KEY` | Backend signer private key |
+| `ALCHEMY_API_KEY` | Alchemy API key (used for all chain WS URLs) |
+| `JWT_SECRET` | Secret for SIWE session tokens |
+| `DATABASE_URL` | PostgreSQL connection string |
+| `CRE_GATEWAY_URL` | Production CRE gateway (optional) |
+| `CRE_WORKFLOW_ID` | Production CRE workflow ID (optional) |

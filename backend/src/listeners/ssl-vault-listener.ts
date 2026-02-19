@@ -1,24 +1,8 @@
-
 import { ethers } from "ethers";
 import prisma from "../clients/prisma";
 import { sendToCRE } from "../lib/cre-client";
-import { config } from "../lib/config";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { getActiveChains, type ChainConfig } from "../lib/config";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Load contract address
-const contractsPath = path.resolve(__dirname, "../../contracts.json");
-if (!fs.existsSync(contractsPath)) {
-    console.warn("[Listener] contracts.json not found, skipping listener startup.");
-}
-const contracts = fs.existsSync(contractsPath) ? JSON.parse(fs.readFileSync(contractsPath, "utf-8")) : {};
-const VAULT_ADDRESS = contracts.vault;
-
-// Minimal ABIs
 const VAULT_ABI = [
     "event Funded(address indexed token, uint256 amount, address indexed user)",
     "event WithdrawalRequested(address indexed user, uint256 amount, uint256 indexed withdrawalId, uint256 timestamp)",
@@ -32,33 +16,32 @@ const ERC20_ABI = [
 ];
 
 /**
- * Ensure Token and Pair records exist for a deposited token.
- * Creates a TOKEN/USDC pair if the token isn't USDC itself.
+ * Ensure Token and Pair records exist for a deposited token on a given chain.
  */
-async function ensurePairExists(tokenAddress: string, provider: ethers.WebSocketProvider) {
+async function ensurePairExists(
+    tokenAddress: string,
+    chainSelector: string,
+    usdcAddress: string,
+    provider: ethers.WebSocketProvider
+) {
     const address = tokenAddress.toLowerCase();
-    const usdcAddress = config.usdcAddress.toLowerCase();
+    const usdc = usdcAddress.toLowerCase();
 
-    // Skip if the deposited token is USDC itself
-    if (address === usdcAddress) return;
+    if (address === usdc) return;
 
-    // Check if pair already exists
     const existingPair = await prisma.pair.findUnique({
         where: {
             baseTokenAddress_quoteTokenAddress: {
                 baseTokenAddress: address,
-                quoteTokenAddress: usdcAddress,
+                quoteTokenAddress: usdc,
             }
         }
     });
-
     if (existingPair) return;
 
-    console.log(`[Listener] New token detected: ${address}. Creating pair...`);
+    console.log(`[Listener:${chainSelector}] New token detected: ${address}. Creating pair...`);
 
     const erc20 = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
-
-    // Fetch on-chain metadata for the deposited token
     let name = "Unknown";
     let symbol = "???";
     let decimals = 18;
@@ -69,166 +52,154 @@ async function ensurePairExists(tokenAddress: string, provider: ethers.WebSocket
             erc20.decimals().then(Number),
         ]);
     } catch (err) {
-        console.warn(`[Listener] Could not fetch ERC20 metadata for ${address}:`, err);
+        console.warn(`[Listener:${chainSelector}] Could not fetch ERC20 metadata for ${address}:`, err);
     }
 
-    // Upsert deposited token
     await prisma.token.upsert({
         where: { address },
         update: {},
-        create: { address, name, symbol, decimals },
+        create: { address, name, symbol, decimals, chainSelector },
     });
 
-    // Upsert USDC token (in case it hasn't been seeded yet)
     await prisma.token.upsert({
-        where: { address: usdcAddress },
+        where: { address: usdc },
         update: {},
-        create: { address: usdcAddress, name: "USD Coin", symbol: "USDC", decimals: 6 },
+        create: { address: usdc, name: "USD Coin", symbol: "USDC", decimals: 6, chainSelector: "ethereum-testnet-sepolia-base-1" },
     });
 
-    // Create the pair
     await prisma.pair.create({
         data: {
             baseTokenAddress: address,
-            quoteTokenAddress: usdcAddress,
+            quoteTokenAddress: usdc,
         },
     });
 
-    console.log(`[Listener] Created pair ${symbol}/USDC for token ${address}`);
+    console.log(`[Listener:${chainSelector}] Created pair ${symbol}/USDC for token ${address}`);
 }
 
-export async function startVaultListener() {
-    if (!VAULT_ADDRESS) {
-        console.warn("[Listener] VAULT_ADDRESS not found in contracts.json. Listener disabled.");
+/**
+ * Start a WebSocket listener for a single chain's vault.
+ */
+async function startChainListener(chainName: string, chain: ChainConfig) {
+    const tag = `[Listener:${chainName}]`;
+    const { vault, chainSelector } = chain;
+
+    if (!vault) {
+        console.warn(`${tag} No vault address. Skipping.`);
         return;
     }
 
-    const WS_URL = `wss://base-sepolia.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`;
+    const alchemyKey = process.env.ALCHEMY_API_KEY;
+    const wsUrl = alchemyKey ? `${chain.wsUrl}${alchemyKey}` : chain.wsUrl;
 
     try {
-        const provider = new ethers.WebSocketProvider(WS_URL);
-        // Quick check if provider is connected
+        const provider = new ethers.WebSocketProvider(wsUrl);
         await provider.getNetwork();
+        console.log(`${tag} Connected (chainId=${chain.chainId})`);
 
-        const contract = new ethers.Contract(VAULT_ADDRESS, VAULT_ABI, provider);
+        const contract = new ethers.Contract(vault, VAULT_ABI, provider);
 
         // ── Funded Event ──
-        contract.on("Funded", async (rawToken, amount, rawUser, event) => {
+        contract.on("Funded", async (rawToken: string, amount: bigint, rawUser: string, event: any) => {
             const token = rawToken.toLowerCase();
             const user = rawUser.toLowerCase();
-            console.log(`[Listener] Funded: ${user} deposited ${amount.toString()} of ${token}`);
+            console.log(`${tag} Funded: ${user} deposited ${amount.toString()} of ${token}`);
 
             try {
-                // Upsert User
                 await prisma.user.upsert({
                     where: { address: user },
                     update: {},
-                    create: {
-                        address: user,
-                        name: `User ${user.slice(0, 6)}`
-                    }
+                    create: { address: user, name: `User ${user.slice(0, 6)}` }
                 });
 
-                // Auto-create Token + Pair if this is a new token
-                await ensurePairExists(token, provider);
+                const usdcAddr = chain.usdc || "";
+                if (usdcAddr) {
+                    await ensurePairExists(token, chainSelector, usdcAddr, provider);
+                }
 
-                // Get Current Balance
                 const currentRecord = await prisma.tokenBalance.findUnique({
                     where: {
-                        userAddress_token: {
+                        userAddress_token_chainSelector: {
                             userAddress: user,
-                            token: token
+                            token,
+                            chainSelector,
                         }
                     }
                 });
 
-                const currentBalance = currentRecord ? BigInt(currentRecord.balance) : BigInt(0);
+                const currentBalance = currentRecord ? BigInt(currentRecord.balance) : 0n;
                 const newBalance = currentBalance + BigInt(amount);
 
-                // Update Balance
                 await prisma.tokenBalance.upsert({
                     where: {
-                        userAddress_token: {
+                        userAddress_token_chainSelector: {
                             userAddress: user,
-                            token: token
+                            token,
+                            chainSelector,
                         }
                     },
-                    update: {
-                        balance: newBalance.toString()
-                    },
+                    update: { balance: newBalance.toString() },
                     create: {
                         userAddress: user,
-                        token: token,
-                        balance: newBalance.toString()
+                        token,
+                        chainSelector,
+                        balance: newBalance.toString(),
                     }
                 });
 
-                // Record Transaction
                 await prisma.transaction.create({
                     data: {
                         type: "DEPOSIT",
-                        token: token,
+                        token,
                         amount: amount.toString(),
+                        chainSelector,
                         userAddress: user,
-                        txHash: event.log.transactionHash
+                        txHash: event.log.transactionHash,
                     }
                 });
 
-                console.log(`[Listener] Updated balance for ${user}: ${newBalance.toString()}`);
-
+                console.log(`${tag} Balance updated for ${user}: ${newBalance.toString()}`);
             } catch (err) {
-                console.error("[Listener] Error handling Funded event:", err);
+                console.error(`${tag} Error handling Funded:`, err);
             }
         });
 
         // ── WithdrawalRequested Event ──
-        contract.on("WithdrawalRequested", async (rawUser, amount, withdrawalId, timestamp, event) => {
+        contract.on("WithdrawalRequested", async (rawUser: string, amount: bigint, withdrawalId: bigint, _timestamp: bigint, event: any) => {
             const user = rawUser.toLowerCase();
-            console.log(`[Listener] WithdrawalRequested: ID ${withdrawalId} by ${user} for amount ${amount}`);
+            const wId = withdrawalId.toString();
+            console.log(`${tag} WithdrawalRequested: ID ${wId} by ${user} for ${amount}`);
 
             try {
-                const wId = withdrawalId.toString();
-
-                // Skip if already handled by the /api/withdraw endpoint
                 const existing = await prisma.withdrawal.findUnique({
                     where: { withdrawalId: wId },
                 });
-
                 if (existing && (existing.status === "PROCESSING" || existing.status === "COMPLETED")) {
-                    console.log(`[Listener] Withdrawal ${wId} already handled via API (${existing.status}). Skipping.`);
+                    console.log(`${tag} Withdrawal ${wId} already handled (${existing.status}). Skipping.`);
                     return;
                 }
 
                 const request = await contract.withdrawalRequests(withdrawalId);
-                const token = request.token;
-
-                console.log(`[Listener] Withdrawal details: Token ${token}, Amount ${request.amount}`);
+                const token = (request.token as string).toLowerCase();
 
                 const balanceRecord = await prisma.tokenBalance.findUnique({
                     where: {
-                        userAddress_token: {
+                        userAddress_token_chainSelector: {
                             userAddress: user,
-                            token: token
+                            token,
+                            chainSelector,
                         }
                     }
                 });
 
-                const currentBalance = balanceRecord ? BigInt(balanceRecord.balance) : BigInt(0);
+                const currentBalance = balanceRecord ? BigInt(balanceRecord.balance) : 0n;
                 const requestedAmount = BigInt(amount);
 
                 if (currentBalance < requestedAmount) {
-                    console.error(`[Listener] Insufficient balance for withdrawal ${wId}. Has ${currentBalance}, requested ${requestedAmount}.`);
-
-                    // Record as FAILED so the user can see it
+                    console.error(`${tag} Insufficient balance for withdrawal ${wId}. Has ${currentBalance}, requested ${requestedAmount}.`);
                     if (!existing) {
                         await prisma.withdrawal.create({
-                            data: {
-                                withdrawalId: wId,
-                                userAddress: user,
-                                token,
-                                amount: amount.toString(),
-                                status: "FAILED",
-                            },
+                            data: { withdrawalId: wId, userAddress: user, token, amount: amount.toString(), status: "FAILED" },
                         });
                     }
                     return;
@@ -236,13 +207,13 @@ export async function startVaultListener() {
 
                 const newBalance = currentBalance - requestedAmount;
 
-                // Deduct balance + record withdrawal atomically
                 await prisma.$transaction([
                     prisma.tokenBalance.update({
                         where: {
-                            userAddress_token: {
+                            userAddress_token_chainSelector: {
                                 userAddress: user,
-                                token: token
+                                token,
+                                chainSelector,
                             }
                         },
                         data: { balance: newBalance.toString() },
@@ -253,35 +224,30 @@ export async function startVaultListener() {
                             data: { status: "PROCESSING" },
                         })
                         : prisma.withdrawal.create({
-                            data: {
-                                withdrawalId: wId,
-                                userAddress: user,
-                                token,
-                                amount: amount.toString(),
-                                status: "PROCESSING",
-                            },
+                            data: { withdrawalId: wId, userAddress: user, token, amount: amount.toString(), status: "PROCESSING" },
                         }),
                 ]);
 
                 await prisma.transaction.create({
                     data: {
                         type: "WITHDRAWAL",
-                        token: token,
+                        token,
                         amount: amount.toString(),
+                        chainSelector,
                         userAddress: user,
-                        txHash: event.log.transactionHash
+                        txHash: event.log.transactionHash,
                     }
                 });
 
-                console.log(`[Listener] Deducted ${requestedAmount} from ${user}. New Balance: ${newBalance}`);
+                console.log(`${tag} Deducted ${requestedAmount} from ${user}. New Balance: ${newBalance}`);
+                console.log(`${tag} Forwarding withdrawal ${wId} to CRE...`);
 
-                console.log(`[Listener] Forwarding withdrawal ${wId} to CRE...`);
                 const result = await sendToCRE({
                     action: "withdraw",
                     withdrawalId: wId,
                     userAddress: user,
                     amount: amount.toString(),
-                    token: token
+                    token,
                 });
 
                 await prisma.withdrawal.update({
@@ -289,27 +255,46 @@ export async function startVaultListener() {
                     data: { status: "COMPLETED" },
                 });
 
-                console.log(`[Listener] CRE Withdrawal Result:`, result);
-
+                console.log(`${tag} CRE Withdrawal Result:`, result);
             } catch (err) {
-                console.error("[Listener] Error handling WithdrawalRequested:", err);
+                console.error(`${tag} Error handling WithdrawalRequested:`, err);
             }
         });
 
-        console.log("[Listener] Listener attached successfully.");
+        console.log(`${tag} Listener attached for vault ${vault}`);
 
-        // Keep function running to prevent exit, but also handle connection errors
-        await new Promise((resolve, reject) => {
+        await new Promise((_resolve, reject) => {
             provider.on("error", (err) => {
-                console.error("[Listener] Provider Error:", err);
+                console.error(`${tag} Provider Error:`, err);
                 reject(err);
             });
         });
-
     } catch (err) {
-        console.error("[Listener] RPC Error or Connection Dropped:", err);
-        console.log("[Listener] Reconnecting in 5s...");
+        console.error(`${tag} Connection failed:`, err);
+        console.log(`${tag} Reconnecting in 5s...`);
         await new Promise(r => setTimeout(r, 5000));
-        return startVaultListener(); // Recursive restart
+        return startChainListener(chainName, chain);
     }
+}
+
+/**
+ * Start vault listeners for all chains with deployed vaults.
+ */
+export async function startVaultListener() {
+    const activeChains = getActiveChains();
+
+    if (activeChains.length === 0) {
+        console.warn("[Listener] No active chains found in addresses.json. Listener disabled.");
+        return;
+    }
+
+    console.log(`[Listener] Starting listeners for ${activeChains.length} chain(s): ${activeChains.map(([n]) => n).join(", ")}`);
+
+    const listeners = activeChains.map(([name, chain]) =>
+        startChainListener(name, chain).catch((err) => {
+            console.error(`[Listener] Fatal error on ${name}:`, err);
+        })
+    );
+
+    await Promise.all(listeners);
 }

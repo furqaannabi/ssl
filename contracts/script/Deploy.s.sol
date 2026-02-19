@@ -3,40 +3,49 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Script.sol";
 import "../src/core/SSLVault.sol";
-import "../src/mocks/MockBondToken.sol";
-import "../src/mocks/MockUSDC.sol";
+import "../src/core/Config.sol";
 
 /**
  * @title DeployScript
- * @notice Deploys the Stealth Settlement Layer
+ * @notice Deploys StealthSettlementVault to whatever chain the RPC points at.
+ *         Uses SSLChains library defaults and allows env-var overrides.
  *
  *      Usage:
- *        ./deploy.sh
+ *        forge script script/Deploy.s.sol:DeployScript --rpc-url <name> --broadcast
  *
- *      Env vars:
- *        PRIVATE_KEY        - deployer private key
- *        FORWARDER_ADDRESS  - KeystoneForwarder or MockForwarder address
+ *      Env vars (all optional except PRIVATE_KEY):
+ *        PRIVATE_KEY        - deployer private key  (required)
+ *        FORWARDER_ADDRESS  - override forwarder
+ *        CCIP_ROUTER        - override CCIP router
  */
 contract DeployScript is Script {
-    address constant MOCK_FORWARDER =
-        0x82300bd7c3958625581cc2F77bC6464dcEcDF3e5;
-
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
-        address forwarder = vm.envOr("FORWARDER_ADDRESS", MOCK_FORWARDER);
+
+        // Resolve defaults from SSLChains, allow env override
+        address defaultForwarder = SSLChains.forwarder();
+        address defaultRouter    = SSLChains.ccipRouter();
+
+        address forwarder  = vm.envOr("FORWARDER_ADDRESS", defaultForwarder);
+        address ccipRouter = vm.envOr("CCIP_ROUTER", defaultRouter);
+
+        console.log("Chain ID:", block.chainid);
+        console.log("Deployer:", deployer);
+        console.log("Forwarder:", forwarder);
+        console.log("CCIP Router:", ccipRouter);
 
         vm.startBroadcast(deployerPrivateKey);
 
-        // 2. Deploy vault
-        StealthSettlementVault vault = new StealthSettlementVault(forwarder);
-        console.log("StealthSettlementVault:", address(vault));
+        StealthSettlementVault vault = new StealthSettlementVault(
+            forwarder,
+            ccipRouter
+        );
 
         vm.stopBroadcast();
 
         console.log("");
         console.log("=== SSL Deployment Complete ===");
-        console.log("Deployer:", deployer);
-        console.log("Forwarder:", forwarder);
+        console.log("StealthSettlementVault:", address(vault));
     }
 }

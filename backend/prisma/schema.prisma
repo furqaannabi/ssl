@@ -58,14 +58,15 @@ model User {
 }
 
 model TokenBalance {
-  id          String   @id @default(uuid())
-  token       String
-  balance     String
-  updatedAt   DateTime @updatedAt
-  userAddress String
-  user        User     @relation(fields: [userAddress], references: [address])
+  id            String   @id @default(uuid())
+  token         String
+  balance       String
+  chainSelector String   @default("ethereum-testnet-sepolia-base-1")
+  updatedAt     DateTime @updatedAt
+  userAddress   String
+  user          User     @relation(fields: [userAddress], references: [address])
 
-  @@unique([userAddress, token])
+  @@unique([userAddress, token, chainSelector])
 }
 
 model Session {
@@ -90,10 +91,11 @@ model Withdrawal {
 }
 
 model Token {
-  address  String @id
-  name     String
-  symbol   String
-  decimals Int    @default(18)
+  address       String @id
+  name          String
+  symbol        String
+  decimals      Int    @default(18)
+  chainSelector String @default("ethereum-testnet-sepolia-base-1")
 
   basePairs  Pair[] @relation("BaseToken")
   quotePairs Pair[] @relation("QuoteToken")
@@ -112,12 +114,13 @@ model Pair {
 
 
 model Transaction {
-  id          String   @id @default(uuid())
-  type        String   // DEPOSIT, WITHDRAWAL
-  token       String
-  amount      String
-  txHash      String?
-  createdAt   DateTime @default(now())
-  userAddress String
-  user        User     @relation(fields: [userAddress], references: [address])
+  id            String   @id @default(uuid())
+  type          String   // DEPOSIT, WITHDRAWAL
+  token         String
+  amount        String
+  chainSelector String   @default("ethereum-testnet-sepolia-base-1")
+  txHash        String?
+  createdAt     DateTime @default(now())
+  userAddress   String
+  user          User     @relation(fields: [userAddress], references: [address])
 }

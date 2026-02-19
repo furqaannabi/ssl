@@ -37,6 +37,18 @@ interface ISSLVault {
         address stealthBuyer,
         address stealthSeller
     );
+    event CrossChainSettled(
+        bytes32 indexed orderId,
+        uint64 destChainSelector,
+        address recipient,
+        bytes32 ccipMessageId
+    );
+    event TokenReleased(
+        bytes32 indexed orderId,
+        address recipient,
+        address token,
+        uint256 amount
+    );
 
     /// @notice Deposit tokens. Requires CRE-verified nullifier.
     ///         First fund binds nullifier to msg.sender permanently.

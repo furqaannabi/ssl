@@ -4,6 +4,8 @@ pragma solidity ^0.8.24;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@chainlink/contracts-ccip/contracts/interfaces/IRouterClient.sol";
+import "@chainlink/contracts-ccip/contracts/libraries/Client.sol";
 import "../interfaces/ISSLVault.sol";
 import "./ReceiverTemplate.sol";
 
@@ -16,9 +18,11 @@ import "./ReceiverTemplate.sol";
  *   3. CRE matches orders -> report(type=1) -> vault checks balances, settles
  *
  *   Report types:
- *     0 = verify  -- (uint8, address user)
- *     1 = settle  -- (uint8, bytes32 orderId, address stealthBuyer, address stealthSeller, address buyer, address seller, address tokenA, address tokenB, uint256 amountA, uint256 amountB)
- *     2 = withdraw -- (uint8, address user, address token, uint256 amount)
+ *     0 = verify           -- (uint8, address user)
+ *     1 = settle           -- (uint8, bytes32 orderId, address stealthBuyer, address stealthSeller, address tokenA, address tokenB, uint256 amountA, uint256 amountB)
+ *     2 = withdraw         -- (uint8, address user, uint256 withdrawalId)
+ *     3 = crossChainSettle -- (uint8, bytes32 orderId, uint64 destChainSelector, address recipient, address token, uint256 amount) [CCIP bridge]
+ *     4 = releaseToken     -- (uint8, bytes32 orderId, address recipient, address token, uint256 amount)
  *   Security:
  *     - Per-user balance tracking (prevents over-settlement)
  *     - Settlement deducts from balances before transferring (never trust CRE blindly)
@@ -29,6 +33,8 @@ contract StealthSettlementVault is
     ReentrancyGuard
 {
     using SafeERC20 for IERC20;
+
+    IRouterClient public immutable ccipRouter;
 
     /// @notice address => verified
     mapping(address => bool) public override isVerified;
@@ -44,8 +50,18 @@ contract StealthSettlementVault is
     mapping(address => uint256[]) public userWithdrawalIds;
 
     constructor(
-        address _forwarderAddress
-    ) ReceiverTemplate(_forwarderAddress) {}
+        address _forwarderAddress,
+        address _ccipRouter
+    ) ReceiverTemplate(_forwarderAddress) {
+        ccipRouter = IRouterClient(_ccipRouter);
+    }
+
+    receive() external payable {}
+
+    function withdrawFees(address to) external onlyOwner {
+        (bool ok, ) = to.call{value: address(this).balance}("");
+        require(ok, "SSL: fee withdraw failed");
+    }
 
     // ──────────────────────────────────────────────
     //  Fund (requires CRE-verified address)
@@ -132,6 +148,10 @@ contract StealthSettlementVault is
             _processSettle(report);
         } else if (reportType == 2) {
             _claimWithdrawal(report);
+        } else if (reportType == 3) {
+            _processCrossChainSettle(report);
+        } else if (reportType == 4) {
+            _processReleaseToken(report);
         } else {
             revert("SSL: unknown report type");
         }
@@ -191,6 +211,80 @@ contract StealthSettlementVault is
         settledOrders[orderId] = true;
 
         emit Settled(orderId, stealthBuyer, stealthSeller);
+    }
+
+    // ──────────────────────────────────────────────
+    //  Cross-chain settlement (CCIP)
+    // ──────────────────────────────────────────────
+
+    function _processCrossChainSettle(bytes calldata report) private {
+        (
+            ,
+            bytes32 orderId,
+            uint64 destChainSelector,
+            address recipient,
+            address token,
+            uint256 amount
+        ) = abi.decode(
+                report,
+                (uint8, bytes32, uint64, address, address, uint256)
+            );
+
+        require(!settledOrders[orderId], "SSL: settled");
+
+        Client.EVMTokenAmount[] memory tokenAmounts = new Client.EVMTokenAmount[](1);
+        tokenAmounts[0] = Client.EVMTokenAmount({
+            token: token,
+            amount: amount
+        });
+
+        Client.EVM2AnyMessage memory message = Client.EVM2AnyMessage({
+            receiver: abi.encode(recipient),
+            data: "",
+            tokenAmounts: tokenAmounts,
+            extraArgs: Client._argsToBytes(
+                Client.EVMExtraArgsV2({
+                    gasLimit: 0,
+                    allowOutOfOrderExecution: true
+                })
+            ),
+            feeToken: address(0) // pay in native
+        });
+
+        IERC20(token).safeIncreaseAllowance(address(ccipRouter), amount);
+
+        uint256 fee = ccipRouter.getFee(destChainSelector, message);
+        require(address(this).balance >= fee, "SSL: insufficient CCIP fee");
+
+        bytes32 messageId = ccipRouter.ccipSend{value: fee}(
+            destChainSelector,
+            message
+        );
+
+        settledOrders[orderId] = true;
+
+        emit CrossChainSettled(orderId, destChainSelector, recipient, messageId);
+    }
+
+    function _processReleaseToken(bytes calldata report) private {
+        (
+            ,
+            bytes32 orderId,
+            address recipient,
+            address token,
+            uint256 amount
+        ) = abi.decode(
+                report,
+                (uint8, bytes32, address, address, uint256)
+            );
+
+        require(!settledOrders[orderId], "SSL: settled");
+
+        IERC20(token).safeTransfer(recipient, amount);
+
+        settledOrders[orderId] = true;
+
+        emit TokenReleased(orderId, recipient, token, amount);
     }
 
     /// @inheritdoc IERC165

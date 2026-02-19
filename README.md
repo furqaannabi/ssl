@@ -1,13 +1,23 @@
 # SSL - Stealth Settlement Layer
 
-Private, sybil-resistant token settlement using **World ID**, **stealth addresses**, and **Chainlink CRE**.
+Private, sybil-resistant, **cross-chain** token settlement using **World ID**, **stealth addresses**, **Chainlink CRE**, and **Chainlink CCIP**.
 
 ## How It Works
 
 ```
-User ──> Backend (order book + matching) ──> CRE (stealth addresses + settlement) ──> Vault (on-chain)
-         Vault ──> Backend (event listener: balances, auto-create pairs)
+User ──> Backend (order book + matching) ──> CRE (settlement reports) ──> Vault (on-chain, per chain)
+         Vault ──> Backend (multi-chain event listener: balances, auto-create pairs)
+         Vault ──CCIP──> Remote Vault (cross-chain token bridging)
 ```
+
+### Supported Chains
+
+| Chain | Chain ID | CCIP Selector |
+|---|---|---|
+| Base Sepolia | 84532 | `10344971235874465080` |
+| Arbitrum Sepolia | 421614 | `3478487238524512106` |
+
+Chain constants live in `contracts/src/core/Config.sol` (`SSLChains` library) and `backend/addresses.json`.
 
 ### Phase 1: Identity Verification
 
@@ -15,290 +25,186 @@ User ──> Backend (order book + matching) ──> CRE (stealth addresses + se
 User                    Backend                 CRE                     Vault
  │                        │                      │                       │
  │── World ID proof ────> │                      │                       │
- │   (nullifier, proof,   │                      │                       │
- │    merkle_root,        │                      │                       │
- │    userAddress)        │                      │                       │
  │                        │── HTTP {action:       │                       │
  │                        │   "verify",           │                       │
- │                        │   userAddress,        │                       │
- │                        │   proof, ...} ──────> │                       │
- │                        │   (signed JWT)        │                       │
+ │                        │   userAddress} ─────> │                       │
  │                        │                       │── verify proof via    │
  │                        │                       │   World ID cloud API  │
- │                        │                       │                       │
  │                        │                       │── report(type=0) ──> │
  │                        │                       │   encode(uint8=0,    │
  │                        │                       │    address user)     │
  │                        │                       │                      │── isVerified[user]
  │                        │                       │                      │   = true
- │                        │                       │                      │── emit Verified(user)
- │                        │ <── {status:verified} │                       │
  │ <── verified ────────  │                       │                       │
 ```
 
 - Backend receives World ID proof from frontend (authenticated via SIWE session)
-- Backend signs and forwards proof to CRE as JWT-authenticated HTTP payload
 - CRE calls the World ID cloud API to verify the proof
-- CRE encodes `(uint8 reportType=0, address user)` and submits via `runtime.report()`
-- KeystoneForwarder delivers report to vault -> `_processVerify()`
+- CRE sends `report(type=0, address user)` to vault via KeystoneForwarder
 - Vault marks `isVerified[user] = true`
 
-### Phase 2: Funding + Auto Pair Creation
+### Phase 2: Funding + Auto Pair Creation (Multi-Chain)
 
 ```
-User                    Vault                   Backend Listener
+User                    Vault (any chain)       Backend Listener
  │                        │                       │
- │── approve(vault, amt)─>│                       │
  │── fund(token, amount)─>│                       │
- │                        │── require(             │
- │                        │   isVerified[sender]) │
- │                        │── safeTransferFrom(    │
- │                        │   user, vault, amount) │
- │                        │── emit Funded(token,   │
- │                        │   amount, user) ─────────> │
- │                        │                       │── upsert User
- │                        │                       │── if new token:
- │                        │                       │     fetch ERC20 metadata
- │                        │                       │     (name, symbol, decimals)
- │                        │                       │     create Token record
- │                        │                       │     create TOKEN/USDC Pair
- │                        │                       │── update TokenBalance
+ │                        │── emit Funded ───────────> │
+ │                        │                       │── track chainSelector
+ │                        │                       │── upsert TokenBalance
+ │                        │                       │   (per chain)
+ │                        │                       │── auto-create TOKEN/USDC Pair
 ```
 
-- User calls `fund(token, amount)` on the vault directly (no nullifier needed)
-- Vault checks `isVerified[msg.sender]` (set in Phase 1) and pulls tokens
-- Backend listens for `Funded` events on-chain via ethers.js
-- On first deposit of a new token, the listener:
-  - Fetches ERC20 metadata (`name()`, `symbol()`, `decimals()`) from the contract
-  - Creates a `Token` record in the database
-  - Creates a `TOKEN/USDC` trading `Pair` (auto-paired against USDC)
-- Updates the user's `TokenBalance` in the database
-- New pairs immediately appear in the frontend trading pair dropdown via `GET /api/pairs`
+- User calls `fund(token, amount)` on the vault (requires `isVerified[msg.sender]`)
+- Backend runs a **multi-chain listener** -- one WebSocket connection per chain with a deployed vault
+- Each deposit is tracked with a `chainSelector`, so balances are per-user-per-token-per-chain
+- New tokens automatically get a TOKEN/USDC trading pair created
 
-### Phase 3: Order Submission (Two-Step)
+### Phase 3: Order Submission
 
 ```
 User                    Backend
- │                        │
- │── POST /api/order ───> │
- │   {pairId, amount,     │── validate pairId exists
- │    price, side,        │── create Order (PENDING)
- │    stealthPublicKey,   │
- │    userAddress}        │
- │ <── {orderId,          │
- │      messageToSign} ── │
- │                        │
- │── sign(orderId) ─────> │  (EOA wallet signature)
- │                        │
- │── POST /api/order/     │
- │   :id/confirm ───────> │── verify auth cookie
- │   (auth cookie)        │── verify ownership
- │                        │── update status -> OPEN
- │                        │── run matching engine
- │ <── SSE stream ─────── │   (streamed logs)
+ │── POST /api/order ──> │── create Order (PENDING)
+ │ <── {orderId} ─────── │
+ │── POST /confirm ────> │── activate -> OPEN
+ │ <── SSE stream ─────  │── run matching engine
 ```
 
-- **Step 1**: User sends order with `pairId`, amount, price, side, and stealth public key
-  - Backend validates the pair exists and creates a `PENDING` order in PostgreSQL
-  - Returns an `orderId` for the user to sign
-- **Step 2**: User signs the order ID with their EOA and calls confirm (authenticated via SIWE session cookie)
-  - Backend verifies ownership, activates order to `OPEN`
-  - Immediately runs the matching engine and streams progress via SSE
-- Order data (pair, price, amount, side) is stored in the backend database, never on-chain
+- Two-step: create order + confirm with auth cookie
+- Orders include a `stealthAddress` (Ethereum address generated client-side) for private settlement
+- Matching engine runs immediately on confirmation
 
-### Phase 4: Matching + Settlement
+### Phase 4: Settlement (Same-Chain & Cross-Chain)
 
+**Same-chain settlement:**
 ```
-Backend                                         CRE                     Vault
- │                                                │                       │
- │── matchOrders()                                │                       │
- │   find opposite side where:                    │                       │
- │     same pairId                                │                       │
- │     buy.price >= sell.price                    │                       │
- │   (price/time priority)                        │                       │
- │                                                │                       │
- │── update both -> MATCHED                       │                       │
- │── resolve pair -> baseTokenAddress,            │                       │
- │                   quoteTokenAddress             │                       │
- │                                                │                       │
- │── HTTP {action: "settle_match",                │                       │
- │    baseTokenAddress, quoteTokenAddress,         │                       │
- │    buyer: {orderId, stealthPubKey, ...},        │                       │
- │    seller: {orderId, stealthPubKey, ...}} ───> │                       │
- │                                                │                       │
- │                                                │── tradeNonce =        │
- │                                                │   keccak256(buyerId   │
- │                                                │   + sellerId)         │
- │                                                │                       │
- │                                                │── ECDH stealth:       │
- │                                                │   r = keccak256(      │
- │                                                │     nonce+"_buyer")   │
- │                                                │   shared = r * S      │
- │                                                │   stealthPub =        │
- │                                                │     S + hash(shared)*G│
- │                                                │   stealthAddr =       │
- │                                                │     addr(stealthPub)  │
- │                                                │                       │
- │                                                │── orderId = keccak256(│
- │                                                │   nonce + stealth     │
- │                                                │   buyer + seller)     │
- │                                                │                       │
- │                                                │── report(type=1) ──> │
- │                                                │   encode(uint8=1,    │
- │                                                │   orderId,           │── require(!settled
- │                                                │   stealthBuyer,      │   Orders[orderId])
- │                                                │   stealthSeller,     │── safeTransfer(
- │                                                │   baseToken,         │   baseToken ->
- │                                                │   quoteToken,        │   stealthBuyer)
- │                                                │   amountA, amountB)  │── safeTransfer(
- │                                                │                      │   quoteToken ->
- │                                                │                      │   stealthSeller)
- │                                                │                      │── settledOrders
- │                                                │                      │   [orderId] = true
- │ <── settlement result ────────────────────────  │                      │── emit Settled
- │── update both -> SETTLED                       │                       │
+Backend ──> CRE ──> report(type=1) ──> Vault
+                                        │── transfer baseToken -> stealthBuyer
+                                        │── transfer quoteToken -> stealthSeller
 ```
 
-- **Matching** happens in the backend (`matching-engine.ts`), not CRE
-  - Finds opposite-side orders on the same `pairId` with compatible prices
-  - Buy orders: matched with lowest sell price where `sell.price <= buy.price`
-  - Sell orders: matched with highest buy price where `buy.price >= sell.price`
-- On match: backend resolves the pair's `baseTokenAddress` and `quoteTokenAddress` from the database
-- Backend forwards `{action: "settle_match", ...}` to CRE with resolved token addresses and stealth public keys
-- **CRE** handles the cryptographic settlement:
-  - Computes deterministic `tradeNonce` from both order IDs
-  - Derives one-time **stealth addresses** via ECDH (EIP-5564 style, secp256k1) for both buyer and seller
-  - Computes unique `orderId` hash to prevent replay
-  - Encodes `(uint8=1, orderId, stealthBuyer, stealthSeller, baseToken, quoteToken, amountA, amountB)`
-  - Sends signed report via KeystoneForwarder to vault
-- **Vault** executes settlement: transfers `baseToken` to stealth buyer, `quoteToken` to stealth seller
-- Neither party's real wallet appears in the settlement transaction
+**Cross-chain settlement (CCIP):**
+```
+Backend ──> CRE ──> report(type=3) ──> Source Vault ──CCIP──> Seller (remote chain)
+                ──> report(type=4) ──> Dest Vault ──────────> Buyer (local release)
+```
+
+For cross-chain trades (e.g. buy Token X on Arbitrum using USDC on Base):
+- CRE sends **two reports**: one to the source vault (CCIP bridge USDC to seller) and one to the destination vault (release Token X to buyer)
+- Report type 3 (`crossChainSettle`) bridges tokens via CCIP to a recipient on a remote chain
+- Report type 4 (`releaseToken`) releases tokens to a recipient on the local chain
+- CCIP fees are paid in native ETH from the vault's balance
 
 ### Phase 5: Withdrawal
 
 ```
-User                    Vault                   Backend Listener        CRE
- │                        │                       │                      │
- │── requestWithdrawal(   │                       │                      │
- │   token, amount) ────> │                       │                      │
- │                        │── withdrawalId++      │                      │
- │                        │── store request       │                      │
- │                        │── emit Withdrawal     │                      │
- │                        │   Requested(user,     │                      │
- │                        │   amount, id, ts) ──────> │                  │
- │                        │                       │── check balance      │
- │                        │                       │── deduct from        │
- │                        │                       │   TokenBalance       │
- │                        │                       │── sendToCRE({        │
- │                        │                       │   action:"withdraw", │
- │                        │                       │   withdrawalId,      │
- │                        │                       │   userAddress,       │
- │                        │                       │   amount, token}) ────> │
- │                        │                       │                      │── report(type=2)
- │                        │ <───────────────────────────────────────────── │
- │                        │── verify withdrawalId │                      │
- │                        │── mark claimed        │                      │
- │                        │── safeTransfer(        │                      │
- │                        │   token -> user)       │                      │
- │                        │── emit Withdrawal     │                      │
- │                        │   Claimed             │                      │
+User ── requestWithdrawal ──> Vault ── event ──> Backend Listener ──> CRE
+                              Vault <── report(type=2) ── CRE
+                              Vault ── safeTransfer ──> User
 ```
 
-- User calls `requestWithdrawal(token, amount)` on the vault
-- Backend listener catches the `WithdrawalRequested` event
-- Listener verifies the user has sufficient balance in the database and deducts it
-- Forwards the withdrawal to CRE, which sends `report(type=2)` to the vault
-- Vault marks the request as claimed and transfers tokens to the user
+### Report Types
+
+| Type | Name | Encoding |
+|---|---|---|
+| 0 | verify | `(uint8, address user)` |
+| 1 | settle | `(uint8, bytes32 orderId, address stealthBuyer, address stealthSeller, address tokenA, address tokenB, uint256 amountA, uint256 amountB)` |
+| 2 | withdraw | `(uint8, address user, uint256 withdrawalId)` |
+| 3 | crossChainSettle | `(uint8, bytes32 orderId, uint64 destChainSelector, address recipient, address token, uint256 amount)` |
+| 4 | releaseToken | `(uint8, bytes32 orderId, address recipient, address token, uint256 amount)` |
 
 ### What's On-Chain vs Off-Chain
 
 | Data | Location | Visible? |
 |---|---|---|
 | User verified status | On-chain (vault) | Yes |
-| Token deposits | On-chain (vault) | Yes |
+| Token deposits | On-chain (vault, per chain) | Yes |
 | Trading pairs (Token, Pair) | Backend DB | No |
 | Order book (prices, amounts, sides) | Backend DB (PostgreSQL) | No |
 | Match logic | Backend (matching engine) | No |
-| Stealth address derivation | CRE (off-chain) | No |
+| Stealth addresses | Frontend-generated | Not linked to user |
 | Settlement transfers | On-chain (vault) | Stealth addresses only |
-| Link between user wallet and stealth address | Nowhere | No |
-| User balances | Backend DB | No |
-| Withdrawal requests | On-chain (vault) | Yes |
+| Cross-chain bridges | On-chain (CCIP) | Yes, but stealth |
+| User balances | Backend DB (per chain) | No |
 
 ## Architecture
 
 | Component | Description |
 |---|---|
-| **contracts/** | Solidity -- `StealthSettlementVault`, `ReceiverTemplate`, interfaces, mocks |
-| **cre/** | Chainlink CRE workflow -- World ID verification, stealth address generation, on-chain settlement reports |
-| **backend/** | Bun + Hono -- Auth, order book, matching engine, vault event listener, CRE bridge |
+| **contracts/** | Solidity -- `StealthSettlementVault`, `SSLChains` config library, `ReceiverTemplate`, interfaces, mocks |
+| **cre/** | Chainlink CRE workflow -- World ID verification, settlement reports (same-chain + cross-chain) |
+| **backend/** | Bun + Hono -- Auth, order book, matching engine, multi-chain vault listener, CRE bridge |
 | **frontend/** | React + Vite trading terminal with World ID integration |
 
 ### Contracts
 
-- **StealthSettlementVault** -- Holds deposited tokens. Accepts three report types from CRE via `KeystoneForwarder`:
-  - `type 0` (verify) -- Marks a user address as verified: `(uint8, address user)`
-  - `type 1` (settle) -- Transfers tokens to stealth addresses: `(uint8, bytes32 orderId, address stealthBuyer, address stealthSeller, address tokenA, address tokenB, uint256 amountA, uint256 amountB)`
-  - `type 2` (withdraw) -- Claims a pending withdrawal: `(uint8, address user, uint256 withdrawalId)`
+- **StealthSettlementVault** -- Holds deposited tokens. Deployed per chain. Accepts 5 report types from CRE via KeystoneForwarder (see table above). Integrates CCIP router for cross-chain token bridging.
+- **SSLChains** (`Config.sol`) -- Pure helper library with chain constants (CCIP selectors, router addresses, forwarder addresses). No deployment needed -- used by deploy scripts and referenced off-chain.
 - **ReceiverTemplate** -- Abstract base that validates reports come from the trusted forwarder
-- **ISSLVault** -- Vault interface (fund, requestWithdrawal, isVerified, settledOrders, events)
-- **Mocks** -- `MockBondToken`, `MockUSDC` for testing
+- **ISSLVault** -- Vault interface (fund, requestWithdrawal, isVerified, settledOrders, events including `CrossChainSettled` and `TokenReleased`)
 
 ### CRE Workflow (`cre/verify-and-order-workflow/main.ts`)
 
 Single HTTP trigger with three actions:
 
-- `verify` -- Validates World ID proof via cloud API, then writes verify report `(type=0, user)` to vault
-- `settle_match` -- Receives matched order data from backend, derives ECDH stealth addresses (EIP-5564 style via `@noble/curves` secp256k1), writes settlement report `(type=1)` to vault
-- `withdraw` -- Receives withdrawal request from backend, writes withdrawal report `(type=2)` to vault
+- `verify` -- Validates World ID proof via cloud API, writes verify report `(type=0)` to vault
+- `settle_match` -- Receives matched order data from backend, writes settlement report(s) to vault. For cross-chain trades, sends two reports (type=3 + type=4) to different chain vaults.
+- `withdraw` -- Receives withdrawal request, writes withdrawal report `(type=2)` to vault
 
 ### Backend (`backend/`)
 
 Bun + Hono HTTP server with PostgreSQL (Prisma ORM):
 
-- **Auth** (SIWE) -- `GET /api/auth/nonce/:address` + `POST /api/auth/login` -- Sign-in with Ethereum, JWT in HttpOnly cookie
-- **Verify** -- `POST /api/verify` -- Forwards World ID proof to CRE, streams progress via SSE
-- **Orders** -- `POST /api/order` (create PENDING) + `POST /api/order/:id/confirm` (activate + match) + `POST /api/order/:id/cancel` + `GET /api/order/book`
+- **Auth** (SIWE) -- `GET /api/auth/nonce/:address` + `POST /api/auth/login`
+- **Verify** -- `POST /api/verify` -- Forwards World ID proof to CRE, streams via SSE
+- **Orders** -- `POST /api/order` + `POST /api/order/:id/confirm` + `POST /api/order/:id/cancel` + `GET /api/order/book`
 - **Pairs** -- `GET /api/pairs` -- Lists all trading pairs with token metadata
-- **User** -- `GET /api/user/me` (profile + balances) + `GET /api/user/orders` (order history)
-- **Health** -- `GET /api/health` -- Server status and signer address
-- **Vault Listener** -- Watches on-chain events:
-  - `Funded` -- Upserts user, auto-creates Token + TOKEN/USDC Pair on first deposit, updates TokenBalance
-  - `WithdrawalRequested` -- Validates balance, deducts, forwards to CRE for on-chain claim
-- **Matching Engine** -- Price/time priority matching by `pairId`. On match: resolves pair token addresses, sends `settle_match` to CRE
+- **User** -- `GET /api/user/me` (profile + balances per chain) + `GET /api/user/orders`
+- **Withdrawals** -- `POST /api/withdraw` + `GET /api/withdraw`
+- **Multi-Chain Vault Listener** -- Watches on-chain events on **all chains with deployed vaults**:
+  - `Funded` -- Upserts user, auto-creates Token + Pair, updates TokenBalance (chain-aware)
+  - `WithdrawalRequested` -- Validates balance, deducts, forwards to CRE
+- **Matching Engine** -- Price/time priority matching. On match: resolves token addresses and chain selectors, sends to CRE
 
 #### Data Model (Prisma)
 
 ```
-Token (address, name, symbol, decimals)
+Token (address, name, symbol, decimals, chainSelector)
   └── Pair (baseTokenAddress, quoteTokenAddress)
-        └── Order (pairId, amount, price, side, status, stealthPublicKey, userAddress)
+        └── Order (pairId, amount, price, side, status, stealthAddress, userAddress)
 User (address, name, isVerified, nonce)
   ├── Order[]
-  ├── TokenBalance[] (token, balance)
-  └── Session[] (JWT sessions)
+  ├── TokenBalance[] (token, balance, chainSelector)  ← per-chain
+  ├── Withdrawal[] (withdrawalId, token, amount, status)
+  ├── Transaction[] (type, token, amount, chainSelector)
+  └── Session[]
 ```
 
-Order lifecycle: `PENDING` -> `OPEN` -> `MATCHED` -> `SETTLED` (or `CANCELLED`)
+#### Multi-Chain Configuration
 
-### Frontend (`frontend/`)
+All chain addresses are stored in `backend/addresses.json`:
 
-React 19 + Vite + TailwindCSS trading terminal:
+```json
+{
+    "chains": {
+        "baseSepolia": {
+            "chainId": 84532,
+            "chainSelector": "ethereum-testnet-sepolia-base-1",
+            "ccipChainSelector": "10344971235874465080",
+            "vault": "0x...",
+            "usdc": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+            "ccipRouter": "0xD3b06cEbF099CE7DA4AcCf578aaEBFDBd6e88a93",
+            "forwarder": "0x82300bd7c3958625581cc2F77bC6464dcEcDF3e5",
+            "rpcUrl": "https://base-sepolia.g.alchemy.com/v2/",
+            "wsUrl": "wss://base-sepolia.g.alchemy.com/v2/"
+        },
+        "arbitrumSepolia": { ... }
+    }
+}
+```
 
-- **Terminal** -- Order entry (select pair, buy/sell, price/amount, stealth public key)
-- **Portfolio** -- Token balances and positions
-- **Compliance** -- World ID verification status
-- **History** -- Past trades and settlements
-- **FundingModal** -- Deposit tokens into the vault
-
-### Key Properties
-
-- **Sybil-resistant** -- World ID ensures one person = one verified address
-- **Private settlement** -- Stealth addresses prevent linking trades to user wallets
-- **Confidential order book** -- Orders stored in backend database, never on-chain
-- **Dynamic pairs** -- Trading pairs auto-created when new tokens are deposited
-- **Trustless settlement** -- Only CRE (via KeystoneForwarder) can trigger vault transfers
-- **Two-step orders** -- Create + confirm prevents unauthorized order placement
+The deploy script (`contracts/deploy.sh`) auto-populates this file after each deployment.
 
 ## Setup
 
@@ -318,6 +224,23 @@ forge build
 forge test -vv
 ```
 
+### Deploy (Multi-Chain)
+
+```bash
+cd contracts
+./deploy.sh                     # deploy to all chains
+CHAIN=baseSepolia ./deploy.sh   # deploy to Base Sepolia only
+CHAIN=arbitrumSepolia ./deploy.sh  # deploy to Arb Sepolia only
+```
+
+The script:
+1. Reads env from `backend/.env`
+2. Runs `forge script` against each chain's RPC
+3. Extracts deployed addresses from broadcast files
+4. Writes `backend/addresses.json` and updates CRE config
+
+Environment variables: `PRIVATE_KEY` (required), `FORWARDER_ADDRESS` / `CCIP_ROUTER` (optional overrides, auto-resolved from `SSLChains`).
+
 ### Backend
 
 ```bash
@@ -335,26 +258,6 @@ cd cre/verify-and-order-workflow
 bun install
 ```
 
-Configure `cre/verify-and-order-workflow/config.staging.json`:
-
-```json
-{
-  "vaultAddress": "0x...",
-  "chainSelectorName": "ethereum-testnet-sepolia-base-1",
-  "authorizedEVMAddress": "0x...",
-  "gasLimit": "500000",
-  "worldIdVerifyUrl": "https://developer.worldcoin.org/api/v2/verify/...",
-  "worldIdAction": "verify-human"
-}
-```
-
-Set your private key in `cre/.env`:
-
-```
-CRE_ETH_PRIVATE_KEY=<your-private-key>
-CRE_TARGET=staging-settings
-```
-
 Simulate locally:
 
 ```bash
@@ -370,29 +273,18 @@ bun install
 bun run dev
 ```
 
-### Deploy Contracts
-
-```bash
-cd contracts
-forge script script/Deploy.s.sol:DeploySSL --rpc-url $RPC_URL --broadcast
-```
-
-Environment variables:
-- `PRIVATE_KEY` -- Deployer private key
-- `FORWARDER_ADDRESS` -- KeystoneForwarder address (defaults to mock)
-
 ## Tech Stack
 
-- **Solidity** (Foundry) -- Smart contracts (vault, receiver, mocks)
-- **Chainlink CRE** -- Off-chain confidential compute (verification, stealth addresses, settlement reports)
+- **Solidity** (Foundry) -- Smart contracts (vault, config library, receiver, mocks)
+- **Chainlink CRE** -- Off-chain confidential compute (verification, settlement reports)
+- **Chainlink CCIP** -- Cross-chain token bridging for multi-chain settlement
 - **World ID** (`@worldcoin/idkit`) -- Sybil-resistant identity verification
-- **Stealth Addresses** -- ECDH-derived one-time addresses (EIP-5564 style, secp256k1)
+- **Stealth Addresses** -- Frontend-generated one-time addresses for private settlement
 - **Bun + Hono** -- Backend HTTP server
-- **PostgreSQL + Prisma** -- Order book, user data, token balances, trading pairs
-- **ethers.js** -- On-chain event listening (vault deposits, withdrawals)
+- **PostgreSQL + Prisma** -- Order book, user data, per-chain token balances, trading pairs
+- **ethers.js** -- Multi-chain event listening (vault deposits, withdrawals)
 - **viem** -- ABI encoding, keccak256, signature verification
-- **@noble/curves** -- secp256k1 ECDH for stealth address derivation
-- **OpenZeppelin** -- SafeERC20, ReentrancyGuard
+- **OpenZeppelin** -- SafeERC20, ReentrancyGuard, Ownable
 - **React 19 + Vite + TailwindCSS** -- Frontend trading terminal
 
 ## License
