@@ -21,8 +21,7 @@ import "./ReceiverTemplate.sol";
  *     0 = verify           -- (uint8, address user)
  *     1 = settle           -- (uint8, bytes32 orderId, address stealthBuyer, address stealthSeller, address tokenA, address tokenB, uint256 amountA, uint256 amountB)
  *     2 = withdraw         -- (uint8, address user, uint256 withdrawalId)
- *     3 = crossChainSettle -- (uint8, bytes32 orderId, uint64 destChainSelector, address recipient, address token, uint256 amount) [CCIP bridge]
- *     4 = releaseToken     -- (uint8, bytes32 orderId, address recipient, address token, uint256 amount)
+ *     3 = crossChainSettle -- (uint8, bytes32 orderId, uint64 destChainSelector, address destVault, address recipient, address token, uint256 amount) [CCIP bridge with data]
  *   Security:
  *     - Per-user balance tracking (prevents over-settlement)
  *     - Settlement deducts from balances before transferring (never trust CRE blindly)
@@ -36,6 +35,7 @@ contract StealthSettlementVault is
 
     IRouterClient public immutable ccipRouter;
     IERC20 public immutable linkToken;
+    address public ccipReceiver;
 
     /// @notice address => verified
     mapping(address => bool) public override isVerified;
@@ -57,6 +57,16 @@ contract StealthSettlementVault is
     ) ReceiverTemplate(_forwarderAddress) {
         ccipRouter = IRouterClient(_ccipRouter);
         linkToken = IERC20(_linkToken);
+    }
+
+    function setCCIPReceiver(address _receiver) external onlyOwner {
+        ccipReceiver = _receiver;
+    }
+
+    function markSettled(bytes32 orderId) external {
+        require(msg.sender == ccipReceiver, "SSL: only ccip receiver");
+        require(!settledOrders[orderId], "SSL: settled");
+        settledOrders[orderId] = true;
     }
 
     function withdrawFees(address _token, address _to) external onlyOwner {
@@ -150,8 +160,6 @@ contract StealthSettlementVault is
             _claimWithdrawal(report);
         } else if (reportType == 3) {
             _processCrossChainSettle(report);
-        } else if (reportType == 4) {
-            _processReleaseToken(report);
         } else {
             revert("SSL: unknown report type");
         }
@@ -222,12 +230,13 @@ contract StealthSettlementVault is
             ,
             bytes32 orderId,
             uint64 destChainSelector,
+            address destVault,
             address recipient,
             address token,
             uint256 amount
         ) = abi.decode(
                 report,
-                (uint8, bytes32, uint64, address, address, uint256)
+                (uint8, bytes32, uint64, address, address, address, uint256)
             );
 
         require(!settledOrders[orderId], "SSL: settled");
@@ -239,12 +248,12 @@ contract StealthSettlementVault is
         });
 
         Client.EVM2AnyMessage memory message = Client.EVM2AnyMessage({
-            receiver: abi.encode(recipient),
-            data: "",
+            receiver: abi.encode(destVault),
+            data: abi.encode(orderId, recipient),
             tokenAmounts: tokenAmounts,
             extraArgs: Client._argsToBytes(
                 Client.EVMExtraArgsV2({
-                    gasLimit: 0,
+                    gasLimit: 200_000,
                     allowOutOfOrderExecution: true
                 })
             ),
@@ -266,27 +275,6 @@ contract StealthSettlementVault is
         settledOrders[orderId] = true;
 
         emit CrossChainSettled(orderId, destChainSelector, recipient, messageId);
-    }
-
-    function _processReleaseToken(bytes calldata report) private {
-        (
-            ,
-            bytes32 orderId,
-            address recipient,
-            address token,
-            uint256 amount
-        ) = abi.decode(
-                report,
-                (uint8, bytes32, address, address, uint256)
-            );
-
-        require(!settledOrders[orderId], "SSL: settled");
-
-        IERC20(token).safeTransfer(recipient, amount);
-
-        settledOrders[orderId] = true;
-
-        emit TokenReleased(orderId, recipient, token, amount);
     }
 
     /// @inheritdoc IERC165

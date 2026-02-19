@@ -61,6 +61,7 @@ deploy_chain() {
     forge script script/Deploy.s.sol:DeployScript \
         --rpc-url "$RPC_NAME" \
         --broadcast \
+        --verify \
         -vvvv
 
     BROADCAST_FILE="broadcast/Deploy.s.sol/$CHAIN_ID/run-latest.json"
@@ -71,6 +72,7 @@ deploy_chain() {
     fi
 
     local VAULT_ADDR=$(extract_address "StealthSettlementVault" "$BROADCAST_FILE")
+    local RECEIVER_ADDR=$(extract_address "SSLCCIPReceiver" "$BROADCAST_FILE")
 
     if [ -z "$VAULT_ADDR" ]; then
         echo "Failed to extract vault address"
@@ -78,6 +80,7 @@ deploy_chain() {
     fi
 
     echo "Vault: $VAULT_ADDR"
+    echo "CCIP Receiver: $RECEIVER_ADDR"
 
     # Write to addresses.json
     node -e "
@@ -90,6 +93,7 @@ deploy_chain() {
         chainSelector: '$CHAIN_SEL',
         ccipChainSelector: '$CCIP_SEL',
         vault: '$VAULT_ADDR',
+        ccipReceiver: '$RECEIVER_ADDR',
         usdc: '$USDC',
         link: '$LINK',
         ccipRouter: '$CCIP_ROUTER',
@@ -111,6 +115,7 @@ deploy_chain() {
         if (!c.chains) c.chains = {};
         if (!c.chains['$RPC_NAME']) c.chains['$RPC_NAME'] = {};
         c.chains['$RPC_NAME'].vault = '$VAULT_ADDR';
+        c.chains['$RPC_NAME'].ccipReceiver = '$RECEIVER_ADDR';
         c.chains['$RPC_NAME'].chainSelector = '$CHAIN_SEL';
         c.chains['$RPC_NAME'].ccipChainSelector = '$CCIP_SEL';
         c.chains['$RPC_NAME'].usdc = '$USDC';

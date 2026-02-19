@@ -26,6 +26,7 @@ type ChainEntry = {
   chainSelector: string;
   ccipChainSelector: string;
   vault: string;
+  ccipReceiver: string;
   usdc: string;
   ccipRouter: string;
   forwarder: string;
@@ -273,23 +274,25 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
       const destCfg = findChainBySelector(runtime.config, destChain);
 
       if (!sourceCfg || !sourceCfg.vault) throw new Error("Source chain not configured: " + sourceChain);
-      if (!destCfg || !destCfg.vault) throw new Error("Dest chain not configured: " + destChain);
+      if (!destCfg || !destCfg.ccipReceiver) throw new Error("Dest chain ccipReceiver not configured: " + destChain);
 
       const sourceVault = sourceCfg.vault;
-      const destVault = destCfg.vault;
+      const destReceiver = destCfg.ccipReceiver;
 
       const ccipDestSelectorBigInt = BigInt(data.ccipDestSelector);
 
-      // Report 1: crossChainSettle (type=3) on SOURCE vault
-      // Bridges quoteToken (USDC) from source to seller on destination chain
+      // crossChainSettle (type=3) on SOURCE vault
+      // Source vault bridges USDC via CCIP to dest chain's SSLCCIPReceiver
+      // Receiver forwards tokens to recipient and calls vault.markSettled()
       const bridgeReport = encodeAbiParameters(
         parseAbiParameters(
-          "uint8 reportType, bytes32 orderId, uint64 destChainSelector, address recipient, address token, uint256 amount"
+          "uint8 reportType, bytes32 orderId, uint64 destChainSelector, address destReceiver, address recipient, address token, uint256 amount"
         ),
         [
           3,
           orderId as `0x${string}`,
           ccipDestSelectorBigInt,
+          destReceiver as `0x${string}`,
           sellerStealthAddr as `0x${string}`,
           data.quoteTokenAddress as `0x${string}`,
           tradeAmount,
@@ -300,32 +303,12 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
       const bridgeTxHash = sendReportToChain(runtime, bridgeReport, sourceChain, sourceVault);
       runtime.log("Bridge tx: " + bridgeTxHash);
 
-      // Report 2: releaseToken (type=4) on DESTINATION vault
-      // Releases baseToken to buyer on the destination chain
-      const releaseReport = encodeAbiParameters(
-        parseAbiParameters(
-          "uint8 reportType, bytes32 orderId, address recipient, address token, uint256 amount"
-        ),
-        [
-          4,
-          orderId as `0x${string}`,
-          buyerStealthAddr as `0x${string}`,
-          data.baseTokenAddress as `0x${string}`,
-          tradeAmount,
-        ]
-      );
-
-      runtime.log("Sending releaseToken (type=4) to " + destChain + " vault " + destVault);
-      const releaseTxHash = sendReportToChain(runtime, releaseReport, destChain, destVault);
-      runtime.log("Release tx: " + releaseTxHash);
-
       return JSON.stringify({
         status: "settled_cross_chain",
         orderId,
         stealthBuyer: buyerStealthAddr,
         stealthSeller: sellerStealthAddr,
         bridgeTxHash,
-        releaseTxHash,
       });
     }
 

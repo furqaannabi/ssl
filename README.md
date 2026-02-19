@@ -7,7 +7,7 @@ Private, sybil-resistant, **cross-chain** token settlement using **World ID**, *
 ```
 User ──> Backend (order book + matching) ──> CRE (settlement reports) ──> Vault (on-chain, per chain)
          Vault ──> Backend (multi-chain event listener: balances, auto-create pairs)
-         Vault ──CCIP──> Remote Vault (cross-chain token bridging)
+         Vault ──CCIP──> CCIP Receiver (dest chain) ──> Dest Vault (accounting)
 ```
 
 ### Supported Chains
@@ -17,7 +17,7 @@ User ──> Backend (order book + matching) ──> CRE (settlement reports) �
 | Base Sepolia | 84532 | `10344971235874465080` |
 | Arbitrum Sepolia | 421614 | `3478487238524512106` |
 
-Chain constants live in `contracts/src/core/Config.sol` (`SSLChains` library) and `backend/addresses.json`.
+Chain constants (including LINK token addresses) live in `contracts/script/Config.sol` (`SSLChains` library) and `backend/addresses.json`.
 
 ### Phase 1: Identity Verification
 
@@ -84,17 +84,19 @@ Backend ──> CRE ──> report(type=1) ──> Vault
                                         │── transfer quoteToken -> stealthSeller
 ```
 
-**Cross-chain settlement (CCIP):**
+**Cross-chain settlement (CCIP programmable token transfer):**
 ```
-Backend ──> CRE ──> report(type=3) ──> Source Vault ──CCIP──> Seller (remote chain)
-                ──> report(type=4) ──> Dest Vault ──────────> Buyer (local release)
+Backend ──> CRE ──> report(type=3) ──> Source Vault ──CCIP(USDC + orderId/recipient)──> SSLCCIPReceiver (dest chain)
+                                                                                          │
+                                                                                          ├── transfers USDC to seller
+                                                                                          └── calls Dest Vault.markSettled(orderId)
 ```
 
 For cross-chain trades (e.g. buy Token X on Arbitrum using USDC on Base):
-- CRE sends **two reports**: one to the source vault (CCIP bridge USDC to seller) and one to the destination vault (release Token X to buyer)
-- Report type 3 (`crossChainSettle`) bridges tokens via CCIP to a recipient on a remote chain
-- Report type 4 (`releaseToken`) releases tokens to a recipient on the local chain
-- CCIP fees are paid in native ETH from the vault's balance
+- CRE sends **one report** (type=3) to the source vault
+- Source vault sends USDC + encoded `(orderId, recipient)` via CCIP to the **SSLCCIPReceiver** on the destination chain
+- The receiver forwards USDC to the seller and calls the destination vault to mark the order settled
+- CCIP fees are paid in LINK from the vault's balance
 
 ### Phase 5: Withdrawal
 
@@ -111,8 +113,7 @@ User ── requestWithdrawal ──> Vault ── event ──> Backend Listene
 | 0 | verify | `(uint8, address user)` |
 | 1 | settle | `(uint8, bytes32 orderId, address stealthBuyer, address stealthSeller, address tokenA, address tokenB, uint256 amountA, uint256 amountB)` |
 | 2 | withdraw | `(uint8, address user, uint256 withdrawalId)` |
-| 3 | crossChainSettle | `(uint8, bytes32 orderId, uint64 destChainSelector, address recipient, address token, uint256 amount)` |
-| 4 | releaseToken | `(uint8, bytes32 orderId, address recipient, address token, uint256 amount)` |
+| 3 | crossChainSettle | `(uint8, bytes32 orderId, uint64 destChainSelector, address destReceiver, address recipient, address token, uint256 amount)` |
 
 ### What's On-Chain vs Off-Chain
 
@@ -132,14 +133,15 @@ User ── requestWithdrawal ──> Vault ── event ──> Backend Listene
 
 | Component | Description |
 |---|---|
-| **contracts/** | Solidity -- `StealthSettlementVault`, `SSLChains` config library, `ReceiverTemplate`, interfaces, mocks |
+| **contracts/** | Solidity -- `StealthSettlementVault`, `SSLCCIPReceiver`, `SSLChains` config library, `ReceiverTemplate`, interfaces, mocks |
 | **cre/** | Chainlink CRE workflow -- World ID verification, settlement reports (same-chain + cross-chain) |
 | **backend/** | Bun + Hono -- Auth, order book, matching engine, multi-chain vault listener, CRE bridge |
 | **frontend/** | React + Vite trading terminal with World ID integration |
 
 ### Contracts
 
-- **StealthSettlementVault** -- Holds deposited tokens. Deployed per chain. Accepts 5 report types from CRE via KeystoneForwarder (see table above). Integrates CCIP router for cross-chain token bridging.
+- **StealthSettlementVault** -- Holds deposited tokens. Deployed per chain. Accepts 4 report types from CRE via KeystoneForwarder (see table above). For cross-chain trades, initiates CCIP programmable token transfers of USDC + encoded data to the destination chain. CCIP fees paid in LINK.
+- **SSLCCIPReceiver** -- Standalone CCIP receiver deployed per chain. Receives USDC + `(orderId, recipient)` via CCIP, forwards USDC to the seller, and calls the local vault to mark the order settled.
 - **SSLChains** (`Config.sol`) -- Pure helper library with chain constants (CCIP selectors, router addresses, forwarder addresses). No deployment needed -- used by deploy scripts and referenced off-chain.
 - **ReceiverTemplate** -- Abstract base that validates reports come from the trusted forwarder
 - **ISSLVault** -- Vault interface (fund, requestWithdrawal, isVerified, settledOrders, events including `CrossChainSettled` and `TokenReleased`)
@@ -149,7 +151,7 @@ User ── requestWithdrawal ──> Vault ── event ──> Backend Listene
 Single HTTP trigger with three actions:
 
 - `verify` -- Validates World ID proof via cloud API, writes verify report `(type=0)` to vault
-- `settle_match` -- Receives matched order data from backend, writes settlement report(s) to vault. For cross-chain trades, sends two reports (type=3 + type=4) to different chain vaults.
+- `settle_match` -- Receives matched order data from backend, writes settlement report(s) to vault. For cross-chain trades, sends one report (type=3) to the source vault which bridges USDC via CCIP to the destination chain's `SSLCCIPReceiver`.
 - `withdraw` -- Receives withdrawal request, writes withdrawal report `(type=2)` to vault
 
 ### Backend (`backend/`)
@@ -194,6 +196,7 @@ All chain addresses are stored in `backend/addresses.json`:
             "ccipChainSelector": "10344971235874465080",
             "vault": "0x...",
             "usdc": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+            "link": "0xE4aB69C077896252FAFBD49EFD26B5D171A32410",
             "ccipRouter": "0xD3b06cEbF099CE7DA4AcCf578aaEBFDBd6e88a93",
             "forwarder": "0x82300bd7c3958625581cc2F77bC6464dcEcDF3e5",
             "rpcUrl": "https://base-sepolia.g.alchemy.com/v2/",
@@ -239,7 +242,7 @@ The script:
 3. Extracts deployed addresses from broadcast files
 4. Writes `backend/addresses.json` and updates CRE config
 
-Environment variables: `PRIVATE_KEY` (required), `FORWARDER_ADDRESS` / `CCIP_ROUTER` (optional overrides, auto-resolved from `SSLChains`).
+Environment variables: `PRIVATE_KEY` (required), `FORWARDER_ADDRESS` / `CCIP_ROUTER` / `LINK_TOKEN` (optional overrides, auto-resolved from `SSLChains`). `LINK_FUND` controls how much LINK to seed the vault with (default 5 LINK).
 
 ### Backend
 

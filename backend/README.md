@@ -8,16 +8,21 @@ The backend listens for vault events on **all chains with deployed vaults**. Cha
 
 ```json
 {
-    "chains": {
-        "baseSepolia": {
-            "chainId": 84532,
-            "chainSelector": "ethereum-testnet-sepolia-base-1",
-            "vault": "0x...",
-            "usdc": "0x...",
-            "wsUrl": "wss://base-sepolia.g.alchemy.com/v2/"
-        },
-        "arbitrumSepolia": { ... }
-    }
+  "chains": {
+    "baseSepolia": {
+      "chainId": 84532,
+      "chainSelector": "ethereum-testnet-sepolia-base-1",
+      "ccipChainSelector": "10344971235874465080",
+      "vault": "0x...",
+      "ccipReceiver": "0x...",
+      "usdc": "0x...",
+      "link": "0x...",
+      "ccipRouter": "0x...",
+      "forwarder": "0x...",
+      "wsUrl": "wss://base-sepolia.g.alchemy.com/v2/"
+    },
+    "arbitrumSepolia": { ... }
+  }
 }
 ```
 
@@ -223,6 +228,9 @@ The backend runs WebSocket listeners for **every chain with a vault in `addresse
 
 - **`Funded`** -- Auto-creates user, token, and trading pair records; updates internal balances tagged with `chainSelector`; records a `DEPOSIT` transaction.
 - **`WithdrawalRequested`** -- Validates sufficient balance on the correct chain, atomically deducts balance, forwards to CRE. Skips withdrawals already handled by `/api/withdraw`.
+- **`Settled`** -- Records same-chain settlement in the `Settlement` table.
+- **`CrossChainSettled`** -- Records CCIP bridge initiation (status: `BRIDGING`) with the CCIP message ID.
+- **`TokenReleased`** -- Emitted by the destination chain's `SSLCCIPReceiver` when bridged tokens are auto-released to the recipient. Marks settlement as `COMPLETED`.
 
 Each listener reconnects automatically on connection drops (5s backoff).
 
@@ -252,7 +260,7 @@ Withdrawal lifecycle: `PENDING` -> `PROCESSING` -> `COMPLETED` | `FAILED`
 
 ### addresses.json
 
-Multi-chain address registry, auto-populated by `contracts/deploy.sh`. Contains per-chain vault, USDC, CCIP router, forwarder, and RPC/WS URLs.
+Multi-chain address registry, auto-populated by `contracts/deploy.sh`. Contains per-chain vault, CCIP receiver, USDC, LINK, CCIP router, forwarder, and RPC/WS URLs.
 
 ### contracts.json (Legacy)
 

@@ -15,10 +15,15 @@ Main vault contract deployed on each supported chain. Holds deposited tokens and
 | 0 | verify | `(uint8, address user)` |
 | 1 | settle | `(uint8, bytes32 orderId, address stealthBuyer, address stealthSeller, address tokenA, address tokenB, uint256 amountA, uint256 amountB)` |
 | 2 | withdraw | `(uint8, address user, uint256 withdrawalId)` |
-| 3 | crossChainSettle | `(uint8, bytes32 orderId, uint64 destChainSelector, address recipient, address token, uint256 amount)` -- bridges tokens via CCIP |
-| 4 | releaseToken | `(uint8, bytes32 orderId, address recipient, address token, uint256 amount)` -- local transfer on destination chain |
+| 3 | crossChainSettle | `(uint8, bytes32 orderId, uint64 destChainSelector, address destReceiver, address recipient, address token, uint256 amount)` -- programmable token transfer via CCIP |
 
-**CCIP integration:** The vault holds an immutable `IRouterClient ccipRouter` reference. Report type 3 approves the router, builds a `Client.EVM2AnyMessage` with the token amount, and calls `ccipSend` paying fees in native ETH. Fund the vault with ETH via plain transfer for CCIP fees.
+**CCIP integration (two-contract pattern):**
+
+- The **vault** initiates programmable token transfers (USDC + data) on `crossChainSettle` (type=3). It approves the CCIP router and calls `ccipSend`, paying fees in LINK.
+- The **SSLCCIPReceiver** contract on the destination chain is the CCIP receiver. Its `ccipReceive` hook:
+  - Decodes `(orderId, recipient)` from `message.data`
+  - Transfers the received USDC to `recipient`
+  - Calls `vault.markSettled(orderId)` on the local vault to update accounting
 
 ### SSLChains (`src/core/Config.sol`)
 
@@ -31,14 +36,13 @@ library SSLChains {
     address constant BASE_SEPOLIA_CCIP_ROUTER   = 0xD3b06cEbF099CE7DA4AcCf578aaEBFDBd6e88a93;
     address constant BASE_SEPOLIA_FORWARDER     = 0x82300bd7c3958625581cc2F77bC6464dcEcDF3e5;
     address constant BASE_SEPOLIA_USDC          = 0x036CbD53842c5426634e7929541eC2318f3dCF7e;
+    address constant BASE_SEPOLIA_LINK          = 0xE4aB69C077896252FAFBD49EFD26B5D171A32410;
 
-    // Arbitrum Sepolia
-    uint64  constant ARB_SEPOLIA_CCIP_SELECTOR  = 3478487238524512106;
-    address constant ARB_SEPOLIA_CCIP_ROUTER    = 0x2a9C5afB0d0e4BAb2BCdaE109EC4b0c4Be15a165;
-    // ...
+    // Arbitrum Sepolia, Ethereum Sepolia ...
 
     function ccipRouter() internal view returns (address);   // auto-resolve by block.chainid
     function forwarder() internal view returns (address);
+    function linkToken() internal view returns (address);
     function ccipSelector() internal view returns (uint64);
 }
 ```
@@ -52,6 +56,14 @@ Abstract base contract. Validates that `onReport()` calls come from the trusted 
 ### ISSLVault (`src/interfaces/ISSLVault.sol`)
 
 Vault interface with events: `Funded`, `Verified`, `Settled`, `WithdrawalRequested`, `WithdrawalClaimed`, `CrossChainSettled`, `TokenReleased`.
+
+### SSLCCIPReceiver (`src/core/SSLCCIPReceiver.sol`)
+
+Standalone CCIP receiver contract deployed per chain. It:
+
+- Implements `IAny2EVMMessageReceiver` with a router-only `ccipReceive`
+- Forwards bridged USDC to the trade recipient
+- Notifies the local vault via `markSettled(bytes32 orderId)`
 
 ## Build
 
@@ -84,12 +96,14 @@ CHAIN=arbitrumSepolia ./deploy.sh  # Arbitrum Sepolia only
 - `PRIVATE_KEY` -- deployer private key (required)
 - `FORWARDER_ADDRESS` -- override KeystoneForwarder (optional, auto-resolved)
 - `CCIP_ROUTER` -- override CCIP router (optional, auto-resolved)
+- `LINK_TOKEN` -- override LINK token (optional, auto-resolved)
+- `LINK_FUND` -- LINK to seed vault with (optional, default 5 LINK)
 
-**Output:** `backend/addresses.json` with per-chain vault, CCIP router, forwarder, USDC, RPC/WS URLs.
+**Output:** `backend/addresses.json` with per-chain vault, CCIP receiver, CCIP router, forwarder, USDC, LINK, RPC/WS URLs.
 
 ## Adding a New Chain
 
-1. Add constants to `SSLChains` in `src/core/Config.sol` (CCIP selector, router, forwarder)
+1. Add constants to `SSLChains` in `script/Config.sol` (CCIP selector, router, forwarder, LINK)
 2. Add an RPC entry in `foundry.toml` under `[rpc_endpoints]`
 3. Add the chain to the `CHAINS` array in `deploy.sh`
 4. Run `CHAIN=newChain ./deploy.sh`

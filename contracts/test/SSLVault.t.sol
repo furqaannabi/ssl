@@ -7,11 +7,29 @@ import "../src/mocks/MockBondToken.sol";
 import "../src/mocks/MockUSDC.sol";
 import "../src/interfaces/ISSLVault.sol";
 import "../src/interfaces/IReceiver.sol";
+import "@chainlink/contracts-ccip/contracts/interfaces/IRouterClient.sol";
+import "@chainlink/contracts-ccip/contracts/libraries/Client.sol";
+
+// ── Minimal mock router for unit tests ──
+contract MockCCIPRouter is IRouterClient {
+    uint256 public s_fee;
+    bytes32 public s_mockMessageId = keccak256("mockMessageId");
+
+    function setFee(uint256 fee) external { s_fee = fee; }
+    function setMockMessageId(bytes32 id) external { s_mockMessageId = id; }
+    function isChainSupported(uint64) external pure returns (bool) { return true; }
+    function getFee(uint64, Client.EVM2AnyMessage memory) external view returns (uint256) { return s_fee; }
+    function ccipSend(uint64, Client.EVM2AnyMessage calldata) external payable returns (bytes32) {
+        return s_mockMessageId;
+    }
+}
 
 contract SSLVaultTest is Test {
     StealthSettlementVault public vault;
     MockBondToken public bondToken;
     MockUSDC public usdc;
+    MockUSDC public linkToken;
+    MockCCIPRouter public ccipRouter;
 
     address public forwarder = makeAddr("forwarder");
     address public seller = makeAddr("seller");
@@ -21,16 +39,20 @@ contract SSLVaultTest is Test {
 
     uint256 public constant BOND_AMOUNT = 10_000e18;
     uint256 public constant USDC_AMOUNT = 1_005_000e6;
+    uint256 public constant LINK_AMOUNT = 100e18;
 
     function setUp() public {
         bondToken = new MockBondToken();
         usdc = new MockUSDC();
+        linkToken = new MockUSDC();
+        ccipRouter = new MockCCIPRouter();
 
-        vault = new StealthSettlementVault(forwarder);
+        vault = new StealthSettlementVault(forwarder, address(ccipRouter), address(linkToken));
 
         // Mint tokens
-        bondToken.mint(seller, BOND_AMOUNT * 10); // Mint extra for multiple tests
+        bondToken.mint(seller, BOND_AMOUNT * 10);
         usdc.mint(buyer, USDC_AMOUNT * 10);
+        linkToken.mint(address(vault), LINK_AMOUNT); // vault needs LINK to pay CCIP fees
     }
 
     // ── Helpers ──
@@ -93,6 +115,25 @@ contract SSLVaultTest is Test {
         vault.onReport("", report);
     }
 
+    function _encodeCrossChainSettleReport(
+        bytes32 orderId,
+        uint64 destChainSelector,
+        address destVault,
+        address recipient,
+        address token,
+        uint256 amount
+    ) internal pure returns (bytes memory) {
+        return abi.encode(
+            uint8(3),
+            orderId,
+            destChainSelector,
+            destVault,
+            recipient,
+            token,
+            amount
+        );
+    }
+
     function _setupFundedVault() internal {
         // Seller deposits bondToken, buyer deposits USDC
         _fundAfterVerify(seller, address(bondToken), BOND_AMOUNT);
@@ -110,6 +151,16 @@ contract SSLVaultTest is Test {
         vm.expectEmit(true, false, false, false);
         emit ISSLVault.Verified(seller);
         _verifyViaReport(seller);
+    }
+
+    function test_VerifyIdempotent() public {
+        _verifyViaReport(seller);
+        // Second verify on same address should not revert and emit no event
+        vm.recordLogs();
+        _verifyViaReport(seller);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(logs.length, 0);
+        assertTrue(vault.isVerified(seller));
     }
 
     // ── Fund ──
@@ -155,6 +206,7 @@ contract SSLVaultTest is Test {
         vm.prank(seller);
         bondToken.approve(address(vault), BOND_AMOUNT);
 
+        vm.prank(seller);
         vm.expectRevert("SSL: address not verified");
         vault.fund(address(bondToken), BOND_AMOUNT);
     }
@@ -178,7 +230,7 @@ contract SSLVaultTest is Test {
 
         bytes32 orderId = keccak256("order_event");
 
-        vm.expectEmit(true, true, false, true); // orderId is indexed
+        vm.expectEmit(true, true, false, true);
         emit ISSLVault.Settled(orderId, stealthBuyer, stealthSeller);
 
         _settleViaReport(orderId, BOND_AMOUNT, USDC_AMOUNT);
@@ -215,7 +267,6 @@ contract SSLVaultTest is Test {
 
         vm.prank(forwarder);
         vm.expectRevert("settled");
-        // Re-submit same order ID
         vault.onReport(
             "",
             _encodeSettleReport(
@@ -230,30 +281,21 @@ contract SSLVaultTest is Test {
         );
     }
 
-    // Note: Can't test "insufficient balance" on a per-user basis easily because the contract doesn't track it.
-    // However, if the contract itself doesn't have enough tokens, the transfer will fail (revert).
     function test_RevertSettleInsufficientContractBalance() public {
-        // Don't fund the vault fully
-        _fundAfterVerify(seller, address(bondToken), BOND_AMOUNT / 2); // Only half funded
+        _fundAfterVerify(seller, address(bondToken), BOND_AMOUNT / 2);
 
         bytes32 orderId = keccak256("fail_balance");
-
-        // Try to settle for full amount
         bytes memory report = _encodeSettleReport(
             orderId,
             stealthBuyer,
             stealthSeller,
             address(bondToken),
             address(usdc),
-            BOND_AMOUNT, // Requested more than in vault
+            BOND_AMOUNT,
             0
         );
 
         vm.prank(forwarder);
-        // ERC20 transfer failures usually revert with "ERC20: transfer amount exceeds balance" or similar,
-        // depending on the SafeERC20/token implementation.
-        // MockBondToken might just revert underflow or similar.
-        // We expect *some* revert.
         vm.expectRevert();
         vault.onReport("", report);
     }
@@ -265,6 +307,182 @@ contract SSLVaultTest is Test {
         vault.onReport("", report);
     }
 
+    // ── Cross-Chain Settlement (type 3) ──
+
+    function test_CrossChainSettleViaReport() public {
+        bytes32 orderId = keccak256("cc_order_1");
+        uint64 destChainSelector = 12345;
+        address destVault = makeAddr("destVault");
+        address recipient = makeAddr("recipient");
+
+        // Fund vault with USDC to be bridged
+        _fundAfterVerify(buyer, address(usdc), USDC_AMOUNT);
+
+        bytes memory report = _encodeCrossChainSettleReport(
+            orderId,
+            destChainSelector,
+            destVault,
+            recipient,
+            address(usdc),
+            USDC_AMOUNT
+        );
+
+        vm.prank(forwarder);
+        vault.onReport("", report);
+
+        assertTrue(vault.settledOrders(orderId));
+    }
+
+    function test_CrossChainSettleEmitsEvent() public {
+        bytes32 orderId = keccak256("cc_order_event");
+        uint64 destChainSelector = 12345;
+        address destVault = makeAddr("destVault");
+        address recipient = makeAddr("recipient");
+        bytes32 mockMsgId = ccipRouter.s_mockMessageId();
+
+        _fundAfterVerify(buyer, address(usdc), USDC_AMOUNT);
+
+        bytes memory report = _encodeCrossChainSettleReport(
+            orderId,
+            destChainSelector,
+            destVault,
+            recipient,
+            address(usdc),
+            USDC_AMOUNT
+        );
+
+        vm.expectEmit(true, false, false, true);
+        emit ISSLVault.CrossChainSettled(orderId, destChainSelector, recipient, mockMsgId);
+
+        vm.prank(forwarder);
+        vault.onReport("", report);
+    }
+
+    function test_RevertCrossChainSettleAlreadySettled() public {
+        bytes32 orderId = keccak256("cc_dup");
+        uint64 destChainSelector = 12345;
+        address destVault = makeAddr("destVault");
+        address recipient = makeAddr("recipient");
+
+        _fundAfterVerify(buyer, address(usdc), USDC_AMOUNT);
+
+        bytes memory report = _encodeCrossChainSettleReport(
+            orderId, destChainSelector, destVault, recipient, address(usdc), USDC_AMOUNT / 2
+        );
+
+        vm.prank(forwarder);
+        vault.onReport("", report);
+
+        vm.prank(forwarder);
+        vm.expectRevert("SSL: settled");
+        vault.onReport("", report);
+    }
+
+    function test_RevertCrossChainSettleInsufficientLink() public {
+        // Set CCIP fee higher than vault's LINK balance
+        ccipRouter.setFee(LINK_AMOUNT + 1);
+
+        bytes32 orderId = keccak256("cc_no_link");
+        bytes memory report = _encodeCrossChainSettleReport(
+            orderId,
+            12345,
+            makeAddr("destVault"),
+            makeAddr("recipient"),
+            address(usdc),
+            USDC_AMOUNT
+        );
+
+        vm.prank(forwarder);
+        vm.expectRevert("SSL: insufficient LINK for CCIP fee");
+        vault.onReport("", report);
+    }
+
+    // ── setCCIPReceiver ──
+
+    function test_SetCCIPReceiver() public {
+        address receiver = makeAddr("ccipReceiver");
+        vault.setCCIPReceiver(receiver);
+        assertEq(vault.ccipReceiver(), receiver);
+    }
+
+    function test_RevertSetCCIPReceiverNotOwner() public {
+        address attacker = makeAddr("attacker");
+        vm.prank(attacker);
+        vm.expectRevert();
+        vault.setCCIPReceiver(makeAddr("receiver"));
+    }
+
+    // ── markSettled ──
+
+    function test_MarkSettledByCCIPReceiver() public {
+        address receiver = makeAddr("ccipReceiver");
+        vault.setCCIPReceiver(receiver);
+
+        bytes32 orderId = keccak256("ccip_settled");
+        vm.prank(receiver);
+        vault.markSettled(orderId);
+
+        assertTrue(vault.settledOrders(orderId));
+    }
+
+    function test_RevertMarkSettledNotCCIPReceiver() public {
+        vault.setCCIPReceiver(makeAddr("ccipReceiver"));
+
+        address attacker = makeAddr("attacker");
+        vm.prank(attacker);
+        vm.expectRevert("SSL: only ccip receiver");
+        vault.markSettled(keccak256("x"));
+    }
+
+    function test_RevertMarkSettledAlreadySettled() public {
+        address receiver = makeAddr("ccipReceiver");
+        vault.setCCIPReceiver(receiver);
+        bytes32 orderId = keccak256("already_settled");
+
+        vm.prank(receiver);
+        vault.markSettled(orderId);
+
+        vm.prank(receiver);
+        vm.expectRevert("SSL: settled");
+        vault.markSettled(orderId);
+    }
+
+    // ── withdrawFees ──
+
+    function test_WithdrawFees() public {
+        // Fund vault with bond tokens
+        _fundAfterVerify(seller, address(bondToken), BOND_AMOUNT);
+
+        address treasury = makeAddr("treasury");
+        vault.withdrawFees(address(bondToken), treasury);
+
+        assertEq(bondToken.balanceOf(treasury), BOND_AMOUNT);
+        assertEq(bondToken.balanceOf(address(vault)), 0);
+    }
+
+    function test_RevertWithdrawFeesNotOwner() public {
+        _fundAfterVerify(seller, address(bondToken), BOND_AMOUNT);
+
+        address attacker = makeAddr("attacker");
+        vm.prank(attacker);
+        vm.expectRevert();
+        vault.withdrawFees(address(bondToken), attacker);
+    }
+
+    // ── supportsInterface ──
+
+    function test_SupportsInterfaceReceiver() public view {
+        assertTrue(vault.supportsInterface(type(IReceiver).interfaceId));
+    }
+
+    function test_SupportsInterfaceERC165() public view {
+        assertTrue(vault.supportsInterface(type(IERC165).interfaceId));
+    }
+
+    function test_DoesNotSupportRandomInterface() public view {
+        assertFalse(vault.supportsInterface(bytes4(0xdeadbeef)));
+    }
+
     // ── Withdrawal Flow ──
 
     function test_RequestWithdrawal() public {
@@ -272,10 +490,6 @@ contract SSLVaultTest is Test {
 
         vm.prank(seller);
         vm.expectEmit(true, false, false, true);
-        // Check event: WithdrawalRequested(user, amount, id, timestamp)
-        // We can't easily predict the ID if other tests ran, but since this is a fresh test function in Forge (usually), it should be 1.
-        // Let's just check the data we can.
-        // address indexed user, uint256 amount, uint256 withdrawalId, uint256 timestamp
         emit ISSLVault.WithdrawalRequested(
             seller,
             BOND_AMOUNT,
@@ -289,11 +503,16 @@ contract SSLVaultTest is Test {
         assertEq(ids.length, 1);
         assertEq(ids[0], 1);
 
-        (address token, uint256 amount, bool claimed) = vault
-            .withdrawalRequests(1);
+        (address token, uint256 amount, bool claimed) = vault.withdrawalRequests(1);
         assertEq(token, address(bondToken));
         assertEq(amount, BOND_AMOUNT);
         assertEq(claimed, false);
+    }
+
+    function test_RevertRequestWithdrawalZeroAmount() public {
+        vm.prank(seller);
+        vm.expectRevert("SSL: zero amount");
+        vault.requestWithdrawal(address(bondToken), 0);
     }
 
     function test_ClaimWithdrawal() public {
@@ -303,26 +522,23 @@ contract SSLVaultTest is Test {
         // 2. Request
         vm.prank(seller);
         vault.requestWithdrawal(address(bondToken), BOND_AMOUNT);
-        uint256 withdrawalId = vault.withdrawalId();
+        uint256 wId = vault.withdrawalId();
 
         // 3. Claim via Report (Type 2)
-        // Report format: (uint8 type, address user, uint256 withdrawalId)
-        bytes memory report = abi.encode(uint8(2), seller, withdrawalId);
+        bytes memory report = abi.encode(uint8(2), seller, wId);
 
         vm.prank(forwarder);
         vm.expectEmit(true, false, false, true);
-        emit ISSLVault.WithdrawalClaimed(seller, withdrawalId, block.timestamp);
+        emit ISSLVault.WithdrawalClaimed(seller, wId, block.timestamp);
 
         vault.onReport("", report);
 
         // Verify tokens returned to seller
-        // Seller started with mint(seller, BOND_AMOUNT * 10) in setUp
-        // Then funded BOND_AMOUNT. Balance = 9 * BOND_AMOUNT
-        // Claimed BOND_AMOUNT. Balance should be 10 * BOND_AMOUNT again.
+        // Seller started with BOND_AMOUNT * 10, funded BOND_AMOUNT, claimed BOND_AMOUNT -> back to 10 * BOND_AMOUNT
         assertEq(bondToken.balanceOf(seller), BOND_AMOUNT * 10);
 
         // Verify claimed state
-        (, , bool claimed) = vault.withdrawalRequests(withdrawalId);
+        (, , bool claimed) = vault.withdrawalRequests(wId);
         assertTrue(claimed);
     }
 
@@ -330,24 +546,39 @@ contract SSLVaultTest is Test {
         _fundAfterVerify(seller, address(bondToken), BOND_AMOUNT);
         vm.prank(seller);
         vault.requestWithdrawal(address(bondToken), BOND_AMOUNT);
-        uint256 withdrawalId = vault.withdrawalId();
+        uint256 wId = vault.withdrawalId();
 
-        bytes memory report = abi.encode(uint8(2), seller, withdrawalId);
+        bytes memory report = abi.encode(uint8(2), seller, wId);
 
         vm.prank(forwarder);
         vault.onReport("", report);
 
-        // Try again
         vm.prank(forwarder);
         vm.expectRevert("SSL: already claimed");
         vault.onReport("", report);
     }
 
     function test_RevertClaimInvalidId() public {
-        bytes memory report = abi.encode(uint8(2), seller, uint256(999)); // ID doesn't exist
+        bytes memory report = abi.encode(uint8(2), seller, uint256(999));
         vm.prank(forwarder);
         vm.expectRevert("SSL: invalid withdrawal ID");
         vault.onReport("", report);
+    }
+
+    function test_MultipleWithdrawalRequests() public {
+        _fundAfterVerify(seller, address(bondToken), BOND_AMOUNT * 3);
+
+        vm.startPrank(seller);
+        vault.requestWithdrawal(address(bondToken), BOND_AMOUNT);
+        vault.requestWithdrawal(address(bondToken), BOND_AMOUNT);
+        vault.requestWithdrawal(address(bondToken), BOND_AMOUNT);
+        vm.stopPrank();
+
+        uint256[] memory ids = vault.getWithdrawalRequests(seller);
+        assertEq(ids.length, 3);
+        assertEq(ids[0], 1);
+        assertEq(ids[1], 2);
+        assertEq(ids[2], 3);
     }
 
     // ── Full flow ──
@@ -393,7 +624,6 @@ contract SSLVaultTest is Test {
         // 4. Verify final state
         assertEq(bondToken.balanceOf(s1Buyer), 5_000e18);
         assertEq(usdc.balanceOf(s1Seller), 502_500e6);
-        // Contract should be empty
         assertEq(bondToken.balanceOf(address(vault)), 0);
         assertEq(usdc.balanceOf(address(vault)), 0);
     }

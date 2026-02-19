@@ -14,7 +14,9 @@ export interface ChainConfig {
     chainSelector: string;
     ccipChainSelector: string;
     vault: string;
+    ccipReceiver: string;
     usdc: string;
+    link: string;
     ccipRouter: string;
     forwarder: string;
     rpcUrl: string;

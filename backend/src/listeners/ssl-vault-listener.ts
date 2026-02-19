@@ -8,8 +8,11 @@ const VAULT_ABI = [
     "event WithdrawalRequested(address indexed user, uint256 amount, uint256 indexed withdrawalId, uint256 timestamp)",
     "event Settled(bytes32 indexed orderId, address stealthBuyer, address stealthSeller)",
     "event CrossChainSettled(bytes32 indexed orderId, uint64 destChainSelector, address recipient, bytes32 ccipMessageId)",
-    "event TokenReleased(bytes32 indexed orderId, address recipient, address token, uint256 amount)",
     "function withdrawalRequests(uint256) view returns (address token, uint256 amount, bool claimed)"
+];
+
+const CCIP_RECEIVER_ABI = [
+    "event TokenReleased(bytes32 indexed orderId, address recipient, address token, uint256 amount, bytes32 ccipMessageId)"
 ];
 
 const ERC20_ABI = [
@@ -320,34 +323,41 @@ async function startChainListener(chainName: string, chain: ChainConfig) {
             }
         });
 
-        // ── TokenReleased Event ──
-        contract.on("TokenReleased", async (orderId: string, recipient: string, token: string, amount: bigint, event: any) => {
-            console.log(`${tag} TokenReleased: orderId=${orderId} recipient=${recipient} token=${token} amount=${amount}`);
-            try {
-                await prisma.settlement.upsert({
-                    where: { orderId },
-                    update: {
-                        status: "COMPLETED",
-                        stealthBuyer: recipient.toLowerCase(),
-                        token: token.toLowerCase(),
-                        amount: amount.toString(),
-                        releaseTxHash: event.log.transactionHash,
-                    },
-                    create: {
-                        orderId,
-                        type: "CROSS_CHAIN",
-                        status: "COMPLETED",
-                        destChain: chainSelector,
-                        stealthBuyer: recipient.toLowerCase(),
-                        token: token.toLowerCase(),
-                        amount: amount.toString(),
-                        releaseTxHash: event.log.transactionHash,
-                    },
-                });
-            } catch (err) {
-                console.error(`${tag} Error handling TokenReleased:`, err);
-            }
-        });
+        // ── TokenReleased Event (from SSLCCIPReceiver) ──
+        const receiverAddr = (chain as any).ccipReceiver;
+        if (receiverAddr) {
+            const receiverContract = new ethers.Contract(receiverAddr, CCIP_RECEIVER_ABI, provider);
+            receiverContract.on("TokenReleased", async (orderId: string, recipient: string, token: string, amount: bigint, ccipMessageId: string, event: any) => {
+                console.log(`${tag} TokenReleased: orderId=${orderId} recipient=${recipient} token=${token} amount=${amount}`);
+                try {
+                    await prisma.settlement.upsert({
+                        where: { orderId },
+                        update: {
+                            status: "COMPLETED",
+                            stealthBuyer: recipient.toLowerCase(),
+                            token: token.toLowerCase(),
+                            amount: amount.toString(),
+                            ccipMessageId,
+                            releaseTxHash: event.log.transactionHash,
+                        },
+                        create: {
+                            orderId,
+                            type: "CROSS_CHAIN",
+                            status: "COMPLETED",
+                            destChain: chainSelector,
+                            stealthBuyer: recipient.toLowerCase(),
+                            token: token.toLowerCase(),
+                            amount: amount.toString(),
+                            ccipMessageId,
+                            releaseTxHash: event.log.transactionHash,
+                        },
+                    });
+                } catch (err) {
+                    console.error(`${tag} Error handling TokenReleased:`, err);
+                }
+            });
+            console.log(`${tag} Listener attached for ccipReceiver ${receiverAddr}`);
+        }
 
         console.log(`${tag} Listener attached for vault ${vault}`);
 
