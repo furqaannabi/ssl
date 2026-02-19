@@ -50,10 +50,7 @@ withdraw.post("/", async (c) => {
             });
 
             await prisma.$transaction([
-                prisma.tokenBalance.update({
-                    where: { id: balanceRecord!.id },
-                    data: { balance: newBalance.toString() },
-                }),
+                prisma.$executeRaw`UPDATE "TokenBalance" SET "balance" = ${newBalance.toString()} WHERE "id" = ${balanceRecord!.id}`,
                 existing
                     ? prisma.withdrawal.update({
                         where: { withdrawalId: body.withdrawalId },
@@ -101,10 +98,7 @@ withdraw.post("/", async (c) => {
                 console.error("[withdraw] CRE failed, refunding balance:", creError);
 
                 await prisma.$transaction([
-                    prisma.tokenBalance.update({
-                        where: { id: balanceRecord!.id },
-                        data: { balance: currentBalance.toString() },
-                    }),
+                    prisma.$executeRaw`UPDATE "TokenBalance" SET "balance" = ${currentBalance.toString()} WHERE "id" = ${balanceRecord!.id}`,
                     prisma.withdrawal.update({
                         where: { withdrawalId: body.withdrawalId },
                         data: { status: "FAILED" },

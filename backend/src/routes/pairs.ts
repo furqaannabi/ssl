@@ -8,8 +8,8 @@ pairs.get("/", async (c) => {
     try {
         const allPairs = await prisma.pair.findMany({
             include: {
-                baseToken: { select: { symbol: true, name: true, address: true, decimals: true } },
-                quoteToken: { select: { symbol: true, name: true, address: true, decimals: true } },
+                baseToken: { select: { symbol: true, name: true, address: true, decimals: true, chainSelector: true } },
+                quoteToken: { select: { symbol: true, name: true, address: true, decimals: true, chainSelector: true } },
             },
         });
 
