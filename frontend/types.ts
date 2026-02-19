@@ -25,6 +25,7 @@ export interface Asset {
   address?: string;
   rawValue?: number;
   balance?: number;
+  breakdown?: Record<string, number>; // chainSelector -> balance
 }
 
 export interface Order {

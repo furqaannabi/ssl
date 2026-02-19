@@ -39,32 +39,67 @@ export const Portfolio: React.FC = () => {
 
   const fetchBalances = async () => {
     try {
-        const user = await auth.getMe();
+        const [user, oracleRes, pairsRes] = await Promise.all([
+            auth.getMe(),
+            fetch(`${API_URL}/api/oracle/prices`),
+            fetch(`${API_URL}/api/pairs`)
+        ]);
         
-        // Fetch Oracle Prices
+        // Process Prices
         let prices: Record<string, any> = {};
-        try {
-            const oracleRes = await fetch(`${API_URL}/api/oracle/prices`);
-            if (oracleRes.ok) {
-                const data = await oracleRes.json();
-                prices = data.prices;
+        if (oracleRes.ok) {
+            const data = await oracleRes.json();
+            prices = data.prices;
+        }
+
+        // Process Pairs to map Address -> Symbol
+        const addressToSymbol: Record<string, string> = {};
+        if (pairsRes.ok) {
+            const data = await pairsRes.json();
+            if (data.success) {
+                data.pairs.forEach((p: any) => {
+                    if (p.baseToken) addressToSymbol[p.baseToken.address.toLowerCase()] = p.baseToken.symbol;
+                    if (p.quoteToken) addressToSymbol[p.quoteToken.address.toLowerCase()] = p.quoteToken.symbol;
+                });
             }
-        } catch (e) { console.error("Oracle fetch failed", e); }
+        }
+        // Fallback for known static tokens if pairs api fails or empty (e.g. USDC)
+        Object.values(TOKENS).forEach(addr => {
+            // This is a bit weak since TOKENS is single chain, but better than nothing
+            // Ideally we rely on pairs or specific token config
+        });
+
 
         if (user && user.balances) {
-            console.log("Fetched balances:", user.balances);
+            // Aggregate Balances by Symbol
+            const balancesBySymbol: Record<string, { total: number, breakdown: Record<string, number> }> = {};
+
+            user.balances.forEach((b: any) => {
+                const symbol = addressToSymbol[b.token.toLowerCase()] || (Object.entries(TOKENS).find(([k, v]) => v.toLowerCase() === b.token.toLowerCase())?.[0].toUpperCase()) || "UNKNOWN";
+                
+                if (!balancesBySymbol[symbol]) balancesBySymbol[symbol] = { total: 0, breakdown: {} };
+
+                const decimals = TOKEN_DECIMALS[symbol] || 18;
+                const amount = parseFloat(formatUnits(BigInt(b.balance), decimals));
+                
+                balancesBySymbol[symbol].total += amount;
+                
+                const chainSelector = b.chainSelector || "unknown";
+                balancesBySymbol[symbol].breakdown[chainSelector] = (balancesBySymbol[symbol].breakdown[chainSelector] || 0) + amount;
+            });
+
+            console.log("Aggregated Balances:", balancesBySymbol);
 
             const updatedAssets = initialAssets.map(asset => {
-                const balanceRecord = user.balances.find((b: any) => b.token.toLowerCase() === asset.address?.toLowerCase());
+                const agg = balancesBySymbol[asset.symbol];
                 let balance = 0;
                 let value = 0;
                 let change24h = "0.00%";
+                let breakdown = {};
 
-                if (balanceRecord) {
-                     const decimals = TOKEN_DECIMALS[asset.symbol] || 18;
-                     const rawBalance = BigInt(balanceRecord.balance);
-                     const formatted = formatUnits(rawBalance, decimals);
-                     balance = parseFloat(formatted);
+                if (agg) {
+                     balance = agg.total;
+                     breakdown = agg.breakdown;
                 }
 
                 // Get Price from Oracle or fallback
@@ -80,7 +115,8 @@ export const Portfolio: React.FC = () => {
                     rawValue: value,
                     price: price, // Store for reference if needed
                     change24h: change24h,
-                    balance: balance 
+                    balance: balance,
+                    breakdown: breakdown
                 };
             });
 
@@ -234,8 +270,18 @@ export const Portfolio: React.FC = () => {
                         </div>
                       </td>
                       <td className="px-6 py-4 text-right text-slate-200">
-                        <span className="blur-[2px] group-hover:blur-none transition-all cursor-crosshair">{asset.value}</span>
+                        <span className="blur-[2px] group-hover:blur-none transition-all cursor-crosshair block">{asset.value}</span>
                          <div className="text-[9px] text-slate-500 group-hover:text-primary transition-colors">@ ${(asset as any).price?.toFixed(2)}</div>
+                         {/* Chain Breakdown */}
+                         {asset.breakdown && Object.keys(asset.breakdown).length > 0 && (
+                             <div className="mt-1 flex flex-col items-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                 {Object.entries(asset.breakdown).map(([chain, bal]) => (
+                                     <span key={chain} className="text-[8px] font-mono text-slate-400 capitalize">
+                                        {chain.includes('base') ? 'Base' : chain.includes('arbitrum') ? 'Arb' : 'Unknown'}: {(bal as number).toFixed(2)}
+                                     </span>
+                                 ))}
+                             </div>
+                         )}
                       </td>
                     </tr>
                   ))}

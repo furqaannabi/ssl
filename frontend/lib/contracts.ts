@@ -1,16 +1,28 @@
 import { parseUnits, encodeFunctionData, type Address, type Hex } from 'viem';
 import { VAULT_ABI } from './abi/valut_abi';
 
-// Constants (Placeholders - to be filled with actual deployment addresses)
+import { CHAINS } from './chain-config';
+
 // Constants (Placeholders - to be filled with actual deployment addresses)
 export const TOKENS = {
-   
-    "usdc": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-    "bond": "0xa328fe09fd9f42c4cf95785b00876ba0bc82847a",
+    // Default to Base Sepolia for legacy support
+    "usdc": CHAINS["ethereum-testnet-sepolia-base-1"].usdc,
+    "bond": "0xa328fe09fd9f42c4cf95785b00876ba0bc82847a", // Bond is only on Base
 }
 
 export const CONTRACTS = {
-    "vault": "0x987190756d7d9914be98c46fcabb863230ed3267",
+    "vault": CHAINS["ethereum-testnet-sepolia-base-1"].vault,
+}
+
+export const getContracts = (chainId: number) => {
+    const chain = Object.values(CHAINS).find(c => c.chainId === chainId);
+    if (!chain) return null;
+    return {
+        vault: chain.vault,
+        usdc: chain.usdc,
+        // bond is only on base
+        bond: chain.chainId === 84532 ? "0xa328fe09fd9f42c4cf95785b00876ba0bc82847a" : undefined
+    };
 }
 
 export const TOKEN_DECIMALS: Record<string, number> = {

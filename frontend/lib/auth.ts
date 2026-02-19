@@ -9,7 +9,7 @@ export interface User {
   id: string;
   address: string;
   isVerified: boolean;
-  balances: { token: string; balance: string }[];
+  balances: { token: string; balance: string; chainSelector: string }[];
 }
 
 export const auth = {

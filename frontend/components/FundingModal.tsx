@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { Modal, Button, Icon } from './UI';
-import { CONTRACTS, TOKENS, TOKEN_DECIMALS, ERC20_ABI } from '../lib/contracts';
+import { TOKENS, TOKEN_DECIMALS, ERC20_ABI } from '../lib/contracts';
 import { VAULT_ABI } from '../lib/abi/valut_abi';
 import { useConnection, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { simulateContract, writeContract } from '@wagmi/core'
 import { baseSepolia } from 'wagmi/chains';
 import { parseUnits } from 'viem';
 import { config } from '../lib/wagmi';
+import { CHAINS } from '../lib/chain-config';
+import { useSwitchChain } from 'wagmi';
 
 interface FundingModalProps {
     isOpen: boolean;
@@ -23,7 +25,10 @@ export const FundingModal: React.FC<FundingModalProps> = ({
     const [error, setError] = useState<string | null>(null);
     const [txHash, setTxHash] = useState<`0x${string}` | undefined>();
     
+    const [selectedChainId, setSelectedChainId] = useState<number>(84532); // Default Base Sepolia
+
     const { isConnected, address: eoaAddress, chain } = useConnection();
+    const { switchChainAsync } = useSwitchChain();
 
     // Reset state when modal opens/closes
     React.useEffect(() => {
@@ -55,8 +60,33 @@ export const FundingModal: React.FC<FundingModalProps> = ({
         setError(null);
         
         try {
-            const tokenAddress = TOKENS[token];
-            const vaultAddress = CONTRACTS.vault;
+            // Check Chain
+            if (chain?.id !== selectedChainId) {
+                try {
+                    await switchChainAsync({ chainId: selectedChainId });
+                } catch (e) {
+                    setError("Failed to switch network. Please switch manually.");
+                    return;
+                }
+            }
+
+            const activeChainConfig = Object.values(CHAINS).find(c => c.chainId === selectedChainId);
+            if (!activeChainConfig) throw new Error("Invalid chain configuration");
+
+            const vaultAddress = activeChainConfig.vault;
+            let tokenAddress = "";
+
+            if (token.toLowerCase() === 'usdc') {
+                tokenAddress = activeChainConfig.usdc;
+            } else if (token.toLowerCase() === 'bond') {
+                if (selectedChainId !== 84532) throw new Error("BOND is only available on Base Sepolia");
+                tokenAddress = "0xa328fe09fd9f42c4cf95785b00876ba0bc82847a";
+            } else {
+                 throw new Error("Unsupported token");
+            }
+
+            // const tokenAddress = TOKENS[token]; // OLD
+            // const vaultAddress = CONTRACTS.vault; // OLD
             const decimals = TOKEN_DECIMALS[token.toUpperCase()] || 18; // Handle case mismatch if needed
             const amountUnits = parseUnits(amount, decimals);
             
@@ -75,7 +105,7 @@ export const FundingModal: React.FC<FundingModalProps> = ({
                     amountUnits,
                 ],
                 account: eoaAddress as `0x${string}`,
-                chainId: baseSepolia.id,
+                chainId: selectedChainId,
             })
 
             
@@ -108,8 +138,16 @@ export const FundingModal: React.FC<FundingModalProps> = ({
 
                     while (retryCount < maxRetries) {
                         try {
-                            const tokenAddress = TOKENS[token];
-                            const vaultAddress = CONTRACTS.vault;
+                            const activeChainConfig = Object.values(CHAINS).find(c => c.chainId === selectedChainId);
+                            if (!activeChainConfig) throw new Error("Invalid chain config");
+                            
+                            const vaultAddress = activeChainConfig.vault;
+                            let tokenAddress = "";
+                             if (token.toLowerCase() === 'usdc') {
+                                tokenAddress = activeChainConfig.usdc;
+                            } else if (token.toLowerCase() === 'bond') {
+                                tokenAddress = "0xa328fe09fd9f42c4cf95785b00876ba0bc82847a";
+                            }
                             const decimals = TOKEN_DECIMALS[token.toUpperCase()] || 18;
                             const amountUnits = parseUnits(amount, decimals);
                             
@@ -124,7 +162,7 @@ export const FundingModal: React.FC<FundingModalProps> = ({
                                 functionName: 'fund',
                                 args: [tokenAddress as `0x${string}`, amountUnits],
                                 account: eoaAddress as `0x${string}`,
-                                chainId: baseSepolia.id,
+                                chainId: selectedChainId,
                             });
                             const fundHash = await writeContract(config, request)
                             setTxHash(fundHash);
@@ -175,11 +213,37 @@ export const FundingModal: React.FC<FundingModalProps> = ({
                             )}
 
                             <div>
+                                <label className="text-[10px] text-slate-500 uppercase tracking-widest font-mono mb-2 block">Network</label>
+                                <select 
+                                    className="w-full bg-black border border-border-dark text-white text-sm px-3 py-2.5 focus:ring-1 focus:ring-primary font-mono outline-none"
+                                    value={selectedChainId}
+                                    onChange={(e) => {
+                                        const newChainId = Number(e.target.value);
+                                        // Restrict BOND to Base Sepolia
+                                        if (token === 'bond' && newChainId !== 84532) {
+                                            setError("BOND is only available on Base Sepolia");
+                                            return;
+                                        }
+                                        setError(null);
+                                        setSelectedChainId(newChainId);
+                                    }}
+                                >
+                                    {Object.values(CHAINS).map(c => (
+                                        <option key={c.chainId} value={c.chainId}>{c.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div>
                                 <label className="text-[10px] text-slate-500 uppercase tracking-widest font-mono mb-2 block">Asset</label>
                                 <select 
                                     className="w-full bg-black border border-border-dark text-white text-sm px-3 py-2.5 focus:ring-1 focus:ring-primary font-mono outline-none"
                                     value={token}
-                                    onChange={(e) => setToken(e.target.value as any)}
+                                    onChange={(e) => {
+                                        const newToken = e.target.value as any;
+                                        setToken(newToken);
+                                        if (newToken === 'bond') setSelectedChainId(84532);
+                                    }}
                                 >
                                     {Object.keys(TOKENS).map(symbol => (
                                         <option key={symbol} value={symbol}>{symbol}</option>
