@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Script.sol";
 import "../src/core/SSLVault.sol";
-import "../src/core/Config.sol";
+import "./Config.sol";
 
 /**
  * @title DeployScript

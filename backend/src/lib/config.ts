@@ -1,7 +1,6 @@
 // ──────────────────────────────────────────────
 // Typed environment config
 // ──────────────────────────────────────────────
-import contracts from "../../contracts.json";
 import addresses from "../../addresses.json";
 
 function required(name: string): string {
@@ -15,7 +14,6 @@ export interface ChainConfig {
     chainSelector: string;
     ccipChainSelector: string;
     vault: string;
-    config?: string;
     usdc: string;
     ccipRouter: string;
     forwarder: string;
@@ -30,10 +28,6 @@ export const config = {
     nodeEnv: process.env.NODE_ENV || "development",
     evmPrivateKey: required("EVM_PRIVATE_KEY") as `0x${string}`,
     worldAction: process.env.WORLD_ACTION || "verify-human",
-
-    // Legacy single-chain references (backwards compat)
-    vaultAddress: contracts.vault,
-    usdcAddress: contracts.usdc,
 
     /** All chain configs keyed by chain name */
     chains,

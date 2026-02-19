@@ -120,17 +120,6 @@ deploy_chain() {
         "
         echo "Updated CRE config for $RPC_NAME"
     fi
-
-    # Backwards compat: contracts.json (base only)
-    if [ "$RPC_NAME" = "baseSepolia" ]; then
-        cat > "../backend/contracts.json" <<EOF
-{
-    "vault": "$VAULT_ADDR",
-    "bond": "0xa328fe09fd9f42c4cf95785b00876ba0bc82847a",
-    "usdc": "$USDC"
-}
-EOF
-    fi
 }
 
 # ── Main ──

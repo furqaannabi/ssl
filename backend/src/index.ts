@@ -12,6 +12,7 @@ import { order } from "./routes/order";
 import { auth } from "./routes/auth";
 import { user } from "./routes/user";
 import { pairs } from "./routes/pairs";
+import { withdraw } from "./routes/withdraw";
 import { startVaultListener } from "./listeners/ssl-vault-listener";
 
 const app = new Hono();
