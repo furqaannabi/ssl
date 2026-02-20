@@ -1,138 +1,115 @@
 import React, { useState, useEffect } from 'react';
-import { ResponsiveContainer, AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts';
 import { Asset } from '../types';
 import { Icon, Badge, Card, Button } from './UI';
 import { StealthKeyReveal } from './StealthKeyReveal';
 import { FundingModal } from './FundingModal';
 import { WithdrawalModal } from './WithdrawalModal';
 import { auth } from '../lib/auth';
-import { TOKENS, TOKEN_DECIMALS, CONTRACTS } from '../lib/contracts';
+import { TOKEN_DECIMALS, RWA_TOKENS } from '../lib/contracts';
 import { formatUnits } from 'viem';
 
-// ... (keep initialAssets and yieldData as is, but omitting for brevity if not changed, wait - I should keep them if I use replace_file_content safely)
-// Actually I will just insert the import and the modal usage.
-
-// Initial Static Data (to be merged with dynamic balances)
-const initialAssets: Asset[] = [
-  { symbol: 'BOND', name: 'BOND', type: 'Fixed Income', allocation: 0, value: '$0.00', status: 'Active', icon: 'account_balance', colorClass: 'text-blue-400', address: TOKENS.bond }, 
-  { symbol: 'USDC', name: 'USDC', type: 'Stablecoin', allocation: 0, value: '$0.00', status: 'Active', icon: 'account_balance_wallet', colorClass: 'text-slate-400', address: TOKENS.usdc },
-];
-
-const yieldData = [
-  { name: 'Jan', value: 4000 },
-  { name: 'Feb', value: 3000 },
-  { name: 'Mar', value: 5000 },
-  { name: 'Apr', value: 8000 },
-  { name: 'May', value: 6000 },
-  { name: 'Jun', value: 9000 },
-  { name: 'Jul', value: 11000 },
-  { name: 'Aug', value: 13000 },
-];
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+// Icon mapping for token types
+const TYPE_ICONS: Record<string, { icon: string; colorClass: string }> = {
+    STOCK: { icon: 'show_chart', colorClass: 'text-blue-400' },
+    ETF: { icon: 'pie_chart', colorClass: 'text-purple-400' },
+    BOND: { icon: 'account_balance', colorClass: 'text-amber-400' },
+    STABLE: { icon: 'account_balance_wallet', colorClass: 'text-slate-400' },
+    UNKNOWN: { icon: 'token', colorClass: 'text-slate-500' },
+};
 
 export const Portfolio: React.FC = () => {
   const [isFundingOpen, setIsFundingOpen] = useState(false);
   const [isWithdrawalOpen, setIsWithdrawalOpen] = useState(false);
-  const [assets, setAssets] = useState<Asset[]>(initialAssets);
+  const [assets, setAssets] = useState<Asset[]>([]);
   const [totalValue, setTotalValue] = useState<number>(0);
 
   const fetchBalances = async () => {
     try {
-        const [user, oracleRes, pairsRes] = await Promise.all([
+        // Fetch tokens (with prices) and user profile in parallel
+        const [user, tokensRes] = await Promise.all([
             auth.getMe(),
-            fetch(`${API_URL}/api/oracle/prices`),
-            fetch(`${API_URL}/api/pairs`)
+            fetch(`/api/tokens`)
         ]);
-        
-        // Process Prices
-        let prices: Record<string, any> = {};
-        if (oracleRes.ok) {
-            const data = await oracleRes.json();
-            prices = data.prices;
-        }
 
-        // Process Pairs to map Address -> Symbol
-        const addressToSymbol: Record<string, string> = {};
-        if (pairsRes.ok) {
-            const data = await pairsRes.json();
+        // Build symbol->token map from backend /api/tokens
+        const tokenMap: Record<string, any> = {}; // address -> token data
+        const symbolMap: Record<string, any> = {}; // symbol -> token data
+        if (tokensRes.ok) {
+            const data = await tokensRes.json();
             if (data.success) {
-                data.pairs.forEach((p: any) => {
-                    if (p.baseToken) addressToSymbol[p.baseToken.address.toLowerCase()] = p.baseToken.symbol;
-                    if (p.quoteToken) addressToSymbol[p.quoteToken.address.toLowerCase()] = p.quoteToken.symbol;
+                data.tokens.forEach((t: any) => {
+                    tokenMap[t.address.toLowerCase()] = t;
+                    symbolMap[t.symbol] = t;
                 });
             }
         }
-        // Fallback for known static tokens if pairs api fails or empty (e.g. USDC)
-        Object.values(TOKENS).forEach(addr => {
-            // This is a bit weak since TOKENS is single chain, but better than nothing
-            // Ideally we rely on pairs or specific token config
-        });
-
 
         if (user && user.balances) {
-            // Aggregate Balances by Symbol
+            // Aggregate balances by symbol (across chains)
             const balancesBySymbol: Record<string, { total: number, breakdown: Record<string, number> }> = {};
 
             user.balances.forEach((b: any) => {
-                const symbol = addressToSymbol[b.token.toLowerCase()] || (Object.entries(TOKENS).find(([k, v]) => v.toLowerCase() === b.token.toLowerCase())?.[0].toUpperCase()) || "UNKNOWN";
-                
+                const tokenData = tokenMap[b.token.toLowerCase()];
+                const symbol = tokenData?.symbol || 'UNKNOWN';
+
                 if (!balancesBySymbol[symbol]) balancesBySymbol[symbol] = { total: 0, breakdown: {} };
 
-                const decimals = TOKEN_DECIMALS[symbol] || 18;
+                const decimals = tokenData?.decimals || TOKEN_DECIMALS[symbol] || 18;
                 const amount = parseFloat(formatUnits(BigInt(b.balance), decimals));
-                
+
                 balancesBySymbol[symbol].total += amount;
-                
-                const chainSelector = b.chainSelector || "unknown";
+
+                const chainSelector = b.chainSelector || 'unknown';
                 balancesBySymbol[symbol].breakdown[chainSelector] = (balancesBySymbol[symbol].breakdown[chainSelector] || 0) + amount;
             });
 
-            console.log("Aggregated Balances:", balancesBySymbol);
+            // Build asset list from user's actual holdings
+            const updatedAssets: Asset[] = Object.entries(balancesBySymbol)
+                .filter(([_, agg]) => agg.total > 0) // Only show tokens with balance
+                .map(([symbol, agg]) => {
+                    const tokenData = symbolMap[symbol];
+                    const meta = RWA_TOKENS[symbol];
+                    const typeInfo = TYPE_ICONS[tokenData?.tokenType || meta?.type || 'UNKNOWN'] || TYPE_ICONS.UNKNOWN;
 
-            const updatedAssets = initialAssets.map(asset => {
-                const agg = balancesBySymbol[asset.symbol];
-                let balance = 0;
-                let value = 0;
-                let change24h = "0.00%";
-                let breakdown = {};
+                    // Price from backend token data
+                    const price = tokenData?.price?.current || (symbol === 'USDC' || symbol === 'mUSDC' ? 1 : 0);
+                    const changePercent = tokenData?.price?.changePercent;
+                    const value = agg.total * price;
 
-                if (agg) {
-                     balance = agg.total;
-                     breakdown = agg.breakdown;
-                }
-
-                // Get Price from Oracle or fallback
-                const oracleData = prices[asset.symbol];
-                const price = oracleData ? parseFloat(oracleData.price) : (asset.symbol === 'USDC' ? 1 : 100);
-                if (oracleData) change24h = oracleData.change24h;
-
-                value = balance * price;
-
-                return {
-                    ...asset,
-                    value: `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-                    rawValue: value,
-                    price: price, // Store for reference if needed
-                    change24h: change24h,
-                    balance: balance,
-                    breakdown: breakdown
-                };
-            });
+                    return {
+                        symbol,
+                        name: meta?.name || tokenData?.name || symbol,
+                        type: tokenData?.tokenType || meta?.type || 'Unknown',
+                        allocation: 0, // Calculated below
+                        value: `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                        status: 'Active' as const,
+                        icon: typeInfo.icon,
+                        colorClass: typeInfo.colorClass,
+                        address: tokenData?.address,
+                        rawValue: value,
+                        price,
+                        change24h: changePercent != null ? `${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%` : undefined,
+                        balance: agg.total,
+                        breakdown: agg.breakdown,
+                    };
+                });
 
             const total = updatedAssets.reduce((acc, curr) => acc + (curr.rawValue || 0), 0);
             setTotalValue(total);
 
-            // Update allocations
+            // Calculate allocations
             const finalAssets = updatedAssets.map(asset => ({
                 ...asset,
                 allocation: total > 0 ? Math.round(((asset.rawValue || 0) / total) * 100) : 0
             }));
 
             setAssets(finalAssets);
+        } else {
+            setAssets([]);
+            setTotalValue(0);
         }
     } catch (e) {
-        console.error("Failed to fetch balances", e);
+        console.error('Failed to fetch balances', e);
     }
   };
 
@@ -298,18 +275,11 @@ export const Portfolio: React.FC = () => {
         <div className="col-span-12 lg:col-span-3 flex flex-col gap-6">
           <Card className="p-5">
             <h3 className="text-slate-500 text-xs uppercase font-semibold tracking-widest mb-4">Yield Projections</h3>
-            <div className="h-32 mb-4 w-full rounded bg-black/40 border border-border-dark overflow-hidden relative">
-              <ResponsiveContainer width="100%" height="100%">
-                 <AreaChart data={yieldData}>
-                    <defs>
-                      <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#0df259" stopOpacity={0.3}/>
-                        <stop offset="95%" stopColor="#0df259" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
-                    <Area type="monotone" dataKey="value" stroke="#0df259" fillOpacity={1} fill="url(#colorValue)" strokeWidth={2} />
-                 </AreaChart>
-              </ResponsiveContainer>
+            <div className="h-32 mb-4 w-full rounded bg-black/40 border border-border-dark overflow-hidden relative flex items-center justify-center">
+              <div className="text-center">
+                <Icon name="trending_up" className="text-2xl text-slate-700 mb-1" />
+                <p className="text-[10px] text-slate-600 font-mono">Yield data will appear once settlements accrue interest.</p>
+              </div>
             </div>
           </Card>
 

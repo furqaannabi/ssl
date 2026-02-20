@@ -5,14 +5,7 @@ import WorldIdKit from './WorldIdKit';
 import { auth } from '../lib/auth';
 import { useConnection } from 'wagmi';
 
-const logs = [
-  { time: '2023-10-24 14:02:11', event: 'Proof of Solvency Gen', hash: '0x8a...3b12', status: 'VERIFIED', color: 'primary' },
-  { time: '2023-10-24 13:58:45', event: 'AML Screening (Auto)', hash: '0x1c...9f99', status: 'CLEAN', color: 'primary' },
-  { time: '2023-10-24 12:30:00', event: 'TEE Attestation Report', hash: '0x4d...2e10', status: 'SIGNED', color: 'primary' },
-  { time: '2023-10-24 11:15:22', event: 'Regulatory Access Req', hash: '0x9b...11a2', status: 'LOGGED', color: 'yellow' },
-  { time: '2023-10-24 10:00:01', event: 'Daily Snapshot', hash: '0x3f...88c4', status: 'STORED', color: 'primary' },
-  { time: '2023-10-24 09:30:00', event: 'System Init', hash: '0x00...0000', status: 'COMPLETE', color: 'slate' },
-];
+
 
 
 
@@ -30,7 +23,7 @@ export const Compliance: React.FC = () => {
 
             // 2. Fetch Compliance Stats
             try {
-                const res = await fetch(`${import.meta.env.VITE_API_URL}/api/compliance/stats`, {
+                const res = await fetch(`/api/compliance/stats`, {
                     credentials: 'include'
                 });
                 const data = await res.json();

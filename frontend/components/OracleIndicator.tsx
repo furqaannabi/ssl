@@ -15,7 +15,7 @@ export const OracleIndicator: React.FC<{ pairId: string }> = ({ pairId }) => {
   const [jitter, setJitter] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  const API_URL = import.meta.env.VITE_API_URL || "https://arc.furqaannabi.com";
+  const API_URL = ""; // Use Vite proxy for CORS/cookie consistency
 
   useEffect(() => {
     if (!pairId) return;

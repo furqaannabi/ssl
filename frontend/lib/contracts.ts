@@ -3,25 +3,22 @@ import { VAULT_ABI } from './abi/valut_abi';
 
 import { CHAINS } from './chain-config';
 
-// Constants (Placeholders - to be filled with actual deployment addresses)
-export const TOKENS = {
-    // Default to Base Sepolia for legacy support
+// Known token addresses (legacy fallback — tokens are discovered dynamically by vault listener)
+export const TOKENS: Record<string, string> = {
     "usdc": CHAINS["ethereum-testnet-sepolia-base-1"].usdc,
-    "bond": "0xa328fe09fd9f42c4cf95785b00876ba0bc82847a", // Bond is only on Base
 }
 
 export const CONTRACTS = {
     "vault": CHAINS["ethereum-testnet-sepolia-base-1"].vault,
 }
 
+// Per-chain contract lookup
 export const getContracts = (chainId: number) => {
     const chain = Object.values(CHAINS).find(c => c.chainId === chainId);
     if (!chain) return null;
     return {
         vault: chain.vault,
         usdc: chain.usdc,
-        // bond is only on base
-        bond: chain.chainId === 84532 ? "0xa328fe09fd9f42c4cf95785b00876ba0bc82847a" : undefined
     };
 }
 

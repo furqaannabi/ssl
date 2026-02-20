@@ -17,7 +17,7 @@ export const Terminal: React.FC = () => {
   const { address: eoaAddress, isConnected } = useConnection();
   const { mutateAsync: signMessageAsync } = useSignMessage();
 
-  const API_URL = import.meta.env.VITE_API_URL || "https://arc.furqaannabi.com";
+  const API_URL = ""; // Use Vite proxy for CORS/cookie consistency
   // Order State
   const [myOrders, setMyOrders] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'BOOK' | 'MY_ORDERS'>('BOOK');

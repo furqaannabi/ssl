@@ -1,10 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Modal, Button, Icon } from './UI';
-import { TOKENS, TOKEN_DECIMALS, ERC20_ABI, RWA_TOKENS } from '../lib/contracts';
+import { TOKEN_DECIMALS, ERC20_ABI, RWA_TOKENS } from '../lib/contracts';
 import { VAULT_ABI } from '../lib/abi/valut_abi';
-import { useConnection, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useConnection, useWaitForTransactionReceipt } from 'wagmi';
 import { simulateContract, writeContract } from '@wagmi/core'
-import { baseSepolia } from 'wagmi/chains';
 import { parseUnits } from 'viem';
 import { config } from '../lib/wagmi';
 import { CHAINS } from '../lib/chain-config';
@@ -15,28 +14,70 @@ interface FundingModalProps {
     onClose: () => void;
 }
 
+// Token entry from GET /api/tokens (enriched with price data)
+interface TokenEntry {
+    address: string;
+    symbol: string;
+    name: string;
+    decimals: number;
+    chainSelector: string;
+    tokenType?: string;
+    realSymbol?: string;
+    description?: string;
+}
+
 export const FundingModal: React.FC<FundingModalProps> = ({ 
     isOpen, 
     onClose
 }) => {
     const [step, setStep] = useState<'DETAILS' | 'APPROVING' | 'FUNDING' | 'SUCCESS'>('DETAILS');
     const [amount, setAmount] = useState("10");
-    const [token, setToken] = useState<keyof typeof TOKENS>("usdc");
     const [error, setError] = useState<string | null>(null);
     const [txHash, setTxHash] = useState<`0x${string}` | undefined>();
     
     const [selectedChainId, setSelectedChainId] = useState<number>(84532); // Default Base Sepolia
+    const [allTokens, setAllTokens] = useState<TokenEntry[]>([]);
+    const [selectedTokenAddress, setSelectedTokenAddress] = useState<string>("");
 
     const { isConnected, address: eoaAddress, chain } = useConnection();
     const { switchChainAsync } = useSwitchChain();
 
+    // Fetch tokens from backend on mount
+    useEffect(() => {
+        const fetchTokens = async () => {
+            try {
+                const res = await fetch(`/api/tokens`);
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.success && data.tokens.length > 0) {
+                        setAllTokens(data.tokens);
+                    }
+                }
+            } catch (e) { console.error("Failed to fetch tokens", e); }
+        };
+        if (isOpen) fetchTokens();
+    }, [isOpen]);
+
+    // Filter tokens by selected chain
+    const activeChainConfig = Object.values(CHAINS).find(c => c.chainId === selectedChainId);
+    const chainSelector = activeChainConfig?.chainSelector || "";
+    const tokensForChain = allTokens.filter(t => t.chainSelector === chainSelector);
+
+    // Auto-select first token when chain changes or tokens load
+    useEffect(() => {
+        if (tokensForChain.length > 0 && !tokensForChain.find(t => t.address === selectedTokenAddress)) {
+            setSelectedTokenAddress(tokensForChain[0].address);
+        }
+    }, [chainSelector, tokensForChain.length]);
+
+    const selectedToken = allTokens.find(t => t.address === selectedTokenAddress);
+
     // Reset state when modal opens/closes
-    React.useEffect(() => {
+    useEffect(() => {
         if (isOpen) {
             setStep('DETAILS');
             setTxHash(undefined);
             setError(null);
-            // Optionally reset amount too, if desired
         }
     }, [isOpen]);
 
@@ -57,10 +98,15 @@ export const FundingModal: React.FC<FundingModalProps> = ({
             return;
         }
 
+        if (!selectedToken || !activeChainConfig) {
+            setError("Please select a valid token and chain.");
+            return;
+        }
+
         setError(null);
         
         try {
-            // Check Chain
+            // Switch chain if needed
             if (chain?.id !== selectedChainId) {
                 try {
                     await switchChainAsync({ chainId: selectedChainId });
@@ -70,31 +116,14 @@ export const FundingModal: React.FC<FundingModalProps> = ({
                 }
             }
 
-            const activeChainConfig = Object.values(CHAINS).find(c => c.chainId === selectedChainId);
-            if (!activeChainConfig) throw new Error("Invalid chain configuration");
-
             const vaultAddress = activeChainConfig.vault;
-            let tokenAddress = "";
-
-            if (token.toLowerCase() === 'usdc') {
-                tokenAddress = activeChainConfig.usdc;
-            } else if (token.toLowerCase() === 'bond') {
-                if (selectedChainId !== 84532) throw new Error("BOND is only available on Base Sepolia");
-                tokenAddress = "0xa328fe09fd9f42c4cf95785b00876ba0bc82847a";
-            } else {
-                 throw new Error("Unsupported token");
-            }
-
-            // const tokenAddress = TOKENS[token]; // OLD
-            // const vaultAddress = CONTRACTS.vault; // OLD
-            const decimals = TOKEN_DECIMALS[token.toUpperCase()] || 18; // Handle case mismatch if needed
+            const tokenAddress = selectedToken.address;
+            const decimals = selectedToken.decimals || TOKEN_DECIMALS[selectedToken.symbol] || 18;
             const amountUnits = parseUnits(amount, decimals);
             
             // 1. APPROVAL PHASE
             setStep('APPROVING');
-            console.log(`Requesting approval for ${amount} ${token} to ${vaultAddress}...`);
-            
-            
+            console.log(`Requesting approval for ${amount} ${selectedToken.symbol} to ${vaultAddress}...`);
 
             const { request } = await simulateContract(config, {
                 abi: ERC20_ABI,
@@ -108,13 +137,8 @@ export const FundingModal: React.FC<FundingModalProps> = ({
                 chainId: selectedChainId,
             })
 
-            
             const approveHash = await writeContract(config, request)
-            
             setTxHash(approveHash);
-
-
-
 
         } catch (err: any) {
             console.error("Funding failed:", err);
@@ -123,37 +147,30 @@ export const FundingModal: React.FC<FundingModalProps> = ({
         }
     };
 
-    // Sequence controller for the two-step process
-    React.useEffect(() => {
+    // Sequence controller: approval → fund
+    useEffect(() => {
         if (isTxSuccess && txHash) {
             if (step === 'APPROVING') {
-                // Approval confirmed, now start funding
+                // Approval confirmed, now fund
                 const startFunding = async () => {
-                    // Reset hash to clear previous success state
                     setTxHash(undefined);
                     setStep('FUNDING');
                     
+                    if (!selectedToken || !activeChainConfig) return;
+
                     const maxRetries = 5;
                     let retryCount = 0;
 
                     while (retryCount < maxRetries) {
                         try {
-                            const activeChainConfig = Object.values(CHAINS).find(c => c.chainId === selectedChainId);
-                            if (!activeChainConfig) throw new Error("Invalid chain config");
-                            
                             const vaultAddress = activeChainConfig.vault;
-                            let tokenAddress = "";
-                             if (token.toLowerCase() === 'usdc') {
-                                tokenAddress = activeChainConfig.usdc;
-                            } else if (token.toLowerCase() === 'bond') {
-                                tokenAddress = "0xa328fe09fd9f42c4cf95785b00876ba0bc82847a";
-                            }
-                            const decimals = TOKEN_DECIMALS[token.toUpperCase()] || 18;
+                            const tokenAddress = selectedToken.address;
+                            const decimals = selectedToken.decimals || TOKEN_DECIMALS[selectedToken.symbol] || 18;
                             const amountUnits = parseUnits(amount, decimals);
                             
-                            console.log(`Funding vault with ${amount} ${token}... (Attempt ${retryCount + 1})`);
+                            console.log(`Funding vault with ${amount} ${selectedToken.symbol}... (Attempt ${retryCount + 1})`);
                             
-                            // Add a small delay on first attempt too, to allow indexer to catch up
+                            // Allow indexer to catch up
                             if (retryCount === 0) await new Promise(r => setTimeout(r, 2000));
 
                             const { request } = await simulateContract(config, {
@@ -166,28 +183,26 @@ export const FundingModal: React.FC<FundingModalProps> = ({
                             });
                             const fundHash = await writeContract(config, request)
                             setTxHash(fundHash);
-                            return; // Success, exit loop
+                            return;
                         } catch (err: any) {
                             console.warn(`Funding simulation failed (Attempt ${retryCount + 1}):`, err);
                             retryCount++;
                             if (retryCount >= maxRetries) {
                                 setError(err.message || "Funding failed after approval. Please try again.");
-                                setStep('DETAILS'); // Move back to details but keep approval done? ideally we stay in funding or logic to retry? 
-                                // Actually better to go to DETAILS so they can click "Review & Deposit" again (which might re-trigger approval check, but approval is already done so it should skip? No, logic currently forces approval every time. That's fine for now.)
+                                setStep('DETAILS');
                             } else {
-                                await new Promise(r => setTimeout(r, 2000)); // Wait 2s before retry
+                                await new Promise(r => setTimeout(r, 2000));
                             }
                         }
                     }
                 };
                 startFunding();
             } else if (step === 'FUNDING') {
-                // Funding confirmed
                 setStep('SUCCESS');
                 setTxHash(undefined);
             }
         }
-    }, [isTxSuccess, txHash, step, token, amount, writeContract, eoaAddress, chain]);
+    }, [isTxSuccess, txHash, step, selectedToken, amount, eoaAddress, chain]);
 
     return (
         <Modal 
@@ -218,14 +233,8 @@ export const FundingModal: React.FC<FundingModalProps> = ({
                                     className="w-full bg-black border border-border-dark text-white text-sm px-3 py-2.5 focus:ring-1 focus:ring-primary font-mono outline-none"
                                     value={selectedChainId}
                                     onChange={(e) => {
-                                        const newChainId = Number(e.target.value);
-                                        // Restrict BOND to Base Sepolia
-                                        if (token === 'bond' && newChainId !== 84532) {
-                                            setError("BOND is only available on Base Sepolia");
-                                            return;
-                                        }
                                         setError(null);
-                                        setSelectedChainId(newChainId);
+                                        setSelectedChainId(Number(e.target.value));
                                     }}
                                 >
                                     {Object.values(CHAINS).map(c => (
@@ -238,20 +247,22 @@ export const FundingModal: React.FC<FundingModalProps> = ({
                                 <label className="text-[10px] text-slate-500 uppercase tracking-widest font-mono mb-2 block">Asset</label>
                                 <select 
                                     className="w-full bg-black border border-border-dark text-white text-sm px-3 py-2.5 focus:ring-1 focus:ring-primary font-mono outline-none"
-                                    value={token}
-                                    onChange={(e) => {
-                                        const newToken = e.target.value as any;
-                                        setToken(newToken);
-                                        if (newToken === 'bond') setSelectedChainId(84532);
-                                    }}
+                                    value={selectedTokenAddress}
+                                    onChange={(e) => setSelectedTokenAddress(e.target.value)}
                                 >
-                                    {Object.keys(TOKENS).map(symbol => {
-                                        const meta = RWA_TOKENS[symbol.toUpperCase()] || RWA_TOKENS[symbol];
-                                        const typeLabel = meta ? ` [${meta.type}]` : '';
-                                        return (
-                                            <option key={symbol} value={symbol}>{symbol}{typeLabel}</option>
-                                        );
-                                    })}
+                                    {tokensForChain.length > 0 ? (
+                                        tokensForChain.map(t => {
+                                            const meta = RWA_TOKENS[t.symbol];
+                                            const typeLabel = t.tokenType ? ` [${t.tokenType}]` : (meta ? ` [${meta.type}]` : '');
+                                            return (
+                                                <option key={t.address} value={t.address}>
+                                                    {t.symbol}{typeLabel} — {meta?.name || t.name}
+                                                </option>
+                                            );
+                                        })
+                                    ) : (
+                                        <option disabled>Loading tokens...</option>
+                                    )}
                                 </select>
                             </div>
 
@@ -264,7 +275,7 @@ export const FundingModal: React.FC<FundingModalProps> = ({
                                         value={amount}
                                         onChange={(e) => setAmount(e.target.value)}
                                     />
-                                    <span className="absolute right-3 top-2.5 text-slate-500 font-mono text-xs">{token}</span>
+                                    <span className="absolute right-3 top-2.5 text-slate-500 font-mono text-xs">{selectedToken?.symbol || ''}</span>
                                 </div>
                             </div>
                         </div>

@@ -16,8 +16,10 @@ import { withdraw } from "./routes/withdraw";
 import oracle from "./routes/oracle";
 import { chat } from "./routes/chat";
 import { tokens } from "./routes/tokens";
+import { compliance } from "./routes/compliance";
 import { startVaultListener } from "./listeners/ssl-vault-listener";
 import { ArbitrageMonitorService } from "./services/arbitrage-monitor.service";
+import { seedTokens } from "./lib/seed-tokens";
 
 const app = new Hono();
 
@@ -44,6 +46,7 @@ app.route("/api/withdraw", withdraw);
 app.route("/api/oracle", oracle);
 app.route("/api/chat", chat);
 app.route("/api/tokens", tokens);
+app.route("/api/compliance", compliance);
 
 // ── 404 ──
 app.notFound((c) => c.json({ error: "Not found" }, 404));
@@ -62,9 +65,14 @@ console.log(`
 ╚══════════════════════════════════════╝`
 );
 
-// Start Vault Listener
-startVaultListener().catch((err) => {
-    console.error("Failed to start vault listener:", err);
+// Seed RWA tokens from rwa-tokens.json (idempotent)
+seedTokens().then(() => {
+    // Start Vault Listener after tokens are seeded
+    startVaultListener().catch((err) => {
+        console.error("Failed to start vault listener:", err);
+    });
+}).catch((err) => {
+    console.error("Failed to seed tokens:", err);
 });
 
 // Start Arbitrage Monitor

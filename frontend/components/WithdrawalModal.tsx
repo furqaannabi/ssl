@@ -1,16 +1,25 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Modal, Button, Icon } from './UI';
-import { TOKENS, TOKEN_DECIMALS } from '../lib/contracts';
+import { TOKEN_DECIMALS } from '../lib/contracts';
 import { VAULT_ABI } from '../lib/abi/valut_abi';
 import { useConnection, useWaitForTransactionReceipt } from 'wagmi';
 import { simulateContract, writeContract } from '@wagmi/core'
-import { baseSepolia } from 'wagmi/chains';
 import { parseUnits, decodeEventLog } from 'viem';
 import { config } from '../lib/wagmi';
 import { useSwitchChain } from 'wagmi';
 import { CHAINS } from '../lib/chain-config';
 
 import { Asset } from '../types';
+
+// Token entry from GET /api/tokens
+interface TokenEntry {
+    address: string;
+    symbol: string;
+    name: string;
+    decimals: number;
+    chainSelector: string;
+    tokenType?: string;
+}
 
 interface WithdrawalModalProps {
     isOpen: boolean;
@@ -25,19 +34,49 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
 }) => {
     const [step, setStep] = useState<'DETAILS' | 'REQUESTING' | 'PROCESSING' | 'SUCCESS'>('DETAILS');
     const [amount, setAmount] = useState("10");
-    const [token, setToken] = useState<keyof typeof TOKENS>("usdc");
     const [error, setError] = useState<string | null>(null);
     const [txHash, setTxHash] = useState<`0x${string}` | undefined>();
     const [logs, setLogs] = useState<string[]>([]);
     
     const [selectedChainId, setSelectedChainId] = useState<number>(84532); // Default Base Sepolia
+    const [allTokens, setAllTokens] = useState<TokenEntry[]>([]);
+    const [selectedTokenAddress, setSelectedTokenAddress] = useState<string>("");
 
     const { isConnected, address: eoaAddress, chain } = useConnection();
     const { switchChainAsync } = useSwitchChain();
-    const API_URL = import.meta.env.VITE_API_URL || "https://arc.furqaannabi.com";
+
+    // Fetch tokens from backend on modal open
+    useEffect(() => {
+        const fetchTokens = async () => {
+            try {
+                const res = await fetch(`/api/tokens`);
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.success && data.tokens.length > 0) {
+                        setAllTokens(data.tokens);
+                    }
+                }
+            } catch (e) { console.error("Failed to fetch tokens", e); }
+        };
+        if (isOpen) fetchTokens();
+    }, [isOpen]);
+
+    // Filter tokens by selected chain
+    const activeChainConfig = Object.values(CHAINS).find(c => c.chainId === selectedChainId);
+    const chainSelector = activeChainConfig?.chainSelector || "";
+    const tokensForChain = allTokens.filter(t => t.chainSelector === chainSelector);
+
+    // Auto-select first token when chain changes
+    useEffect(() => {
+        if (tokensForChain.length > 0 && !tokensForChain.find(t => t.address === selectedTokenAddress)) {
+            setSelectedTokenAddress(tokensForChain[0].address);
+        }
+    }, [chainSelector, tokensForChain.length]);
+
+    const selectedToken = allTokens.find(t => t.address === selectedTokenAddress);
 
     // Reset state when modal opens/closes
-    React.useEffect(() => {
+    useEffect(() => {
         if (isOpen) {
             setStep('DETAILS');
             setTxHash(undefined);
@@ -51,9 +90,22 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
         hash: txHash,
     });
 
+    // Get available balance for selected token on selected chain
+    const getAvailableBalance = (): number => {
+        if (!selectedToken) return 0;
+        const asset = assets.find(a => a.symbol.toUpperCase() === selectedToken.symbol.toUpperCase());
+        if (!asset?.breakdown || !chainSelector) return 0;
+        return asset.breakdown[chainSelector] || 0;
+    };
+
     const handleWithdraw = async () => {
         if (!isConnected) {
             setError("Authority Wallet (EOA) disconnected.");
+            return;
+        }
+
+        if (!selectedToken || !activeChainConfig) {
+            setError("Please select a valid token and chain.");
             return;
         }
 
@@ -61,30 +113,17 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
         setLogs([]);
         
         try {
-            const activeChainConfig = Object.values(CHAINS).find(c => c.chainId === selectedChainId);
-            if (!activeChainConfig) throw new Error("Invalid chain config");
-
             const vaultAddress = activeChainConfig.vault;
-            let tokenAddress = "";
-
-            if (token.toLowerCase() === 'usdc') {
-                tokenAddress = activeChainConfig.usdc;
-            } else if (token.toLowerCase() === 'bond') {
-                if (selectedChainId !== 84532) throw new Error("BOND is only available on Base Sepolia");
-                tokenAddress = "0xa328fe09fd9f42c4cf95785b00876ba0bc82847a";
-            } else {
-                 throw new Error("Unsupported token");
-            }
-
-            const decimals = TOKEN_DECIMALS[token.toUpperCase()] || 18;
+            const tokenAddress = selectedToken.address;
+            const decimals = selectedToken.decimals || TOKEN_DECIMALS[selectedToken.symbol] || 18;
             const amountUnits = parseUnits(amount, decimals);
             
             // 1. REQUEST ON-CHAIN
             setStep('REQUESTING');
-            console.log(`Requesting withdrawal for ${amount} ${token} on chain ${selectedChainId}...`);
+            console.log(`Requesting withdrawal for ${amount} ${selectedToken.symbol} on chain ${selectedChainId}...`);
             setLogs(prev => [...prev, "Initiating on-chain request..."]);
 
-            // Check Chain
+            // Switch chain if needed
             if (chain?.id !== selectedChainId) {
                  try {
                     await switchChainAsync({ chainId: selectedChainId });
@@ -93,8 +132,6 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
                 }
             }
 
-
-             
             const { request } = await simulateContract(config, {
                 address: vaultAddress as `0x${string}`,
                 abi: VAULT_ABI,
@@ -115,14 +152,14 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
         }
     };
 
-    // Effect to handle backend processing after on-chain success
-    React.useEffect(() => {
+    // Effect: after on-chain tx confirmed, call backend to process settlement
+    useEffect(() => {
         if (isTxSuccess && receipt && step === 'REQUESTING') {
             const processBackend = async () => {
                 setStep('PROCESSING');
                 setLogs(prev => [...prev, "On-chain request confirmed.", "Notifying backend settlement layer..."]);
 
-                // Find WithdrawalId from logs
+                // Extract WithdrawalId from tx logs
                 let withdrawalId = "";
                 try {
                     for (const log of receipt.logs) {
@@ -133,13 +170,11 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
                                 topics: log.topics,
                             });
                             if (event.eventName === 'WithdrawalRequested') {
-                                // args: [user, amount, withdrawalId, timestamp]
-                                // withdrawalId is index 2, but viem returns object with named args if available
                                 console.log("Found Withdrawal Event:", event.args);
                                 withdrawalId = (event.args as any).withdrawalId.toString();
                                 break;
                             }
-                        } catch (e) { continue; } // Not our event
+                        } catch (e) { continue; }
                     }
                 } catch (e) {
                     console.error("Log parsing error:", e);
@@ -147,34 +182,25 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
 
                 if (!withdrawalId) {
                     setError("Failed to retrieve Withdrawal ID from transaction logs.");
-                    // Fallback: The backend listener *should* pick it up anyway, but we can't manually trigger api/withdraw without ID.
-                    // We'll tell user to check history.
                     setLogs(prev => [...prev, "ERROR: Could not parse Withdrawal ID.", "Backend listener will handle it automatically."]);
-                    setStep('SUCCESS'); // Treat as success since on-chain worked
+                    setStep('SUCCESS');
                     return;
                 }
 
                 setLogs(prev => [...prev, `Withdrawal ID: ${withdrawalId}`]);
 
-                // Call Backend
+                // Notify backend
                 try {
-                    const activeChainConfig = Object.values(CHAINS).find(c => c.chainId === selectedChainId);
-                    if (!activeChainConfig) throw new Error("Invalid chain config");
+                    if (!selectedToken) throw new Error("No token selected");
 
-                    let tokenAddress = "";
-                    if (token.toLowerCase() === 'usdc') {
-                        tokenAddress = activeChainConfig.usdc;
-                    } else if (token.toLowerCase() === 'bond') {
-                        tokenAddress = "0xa328fe09fd9f42c4cf95785b00876ba0bc82847a";
-                    } else { throw new Error("Unsupported token"); }
-                    const decimals = TOKEN_DECIMALS[token.toUpperCase()] || 18;
+                    const decimals = selectedToken.decimals || TOKEN_DECIMALS[selectedToken.symbol] || 18;
                     const amountUnits = parseUnits(amount, decimals);
 
-                    const res = await fetch(`${API_URL}/api/withdraw`, {
+                    const res = await fetch(`/api/withdraw`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
-                            token: tokenAddress,
+                            token: selectedToken.address,
                             amount: amountUnits.toString(),
                             withdrawalId: withdrawalId
                         }),
@@ -182,7 +208,7 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
                     });
 
                     if (!res.ok) {
-                       // If 409, it might mean listener already picked it up
+                       // 409 = listener already picked it up
                        if (res.status === 409) {
                            setLogs(prev => [...prev, "Backend already processing request."]);
                            setStep('SUCCESS');
@@ -191,7 +217,7 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
                        throw new Error("Backend handshake failed");
                     }
 
-                    // Stream Logs
+                    // Stream backend logs
                     const reader = res.body?.getReader();
                     const decoder = new TextDecoder();
                     
@@ -218,12 +244,12 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
                 } catch (err: any) {
                     console.error("Backend process failed:", err);
                     setLogs(prev => [...prev, `Backend syncing issue: ${err.message}`, "Check History for status."]);
-                    setStep('SUCCESS'); // On-chain worked, so we treat as success with warning
+                    setStep('SUCCESS'); // On-chain worked, treat as success with warning
                 }
             };
             processBackend();
         }
-    }, [isTxSuccess, receipt, step, token, amount, API_URL]);
+    }, [isTxSuccess, receipt, step, selectedToken, amount]);
 
     return (
         <Modal 
@@ -254,14 +280,8 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
                                     className="w-full bg-black border border-border-dark text-white text-sm px-3 py-2.5 focus:ring-1 focus:ring-primary font-mono outline-none"
                                     value={selectedChainId}
                                     onChange={(e) => {
-                                        const newChainId = Number(e.target.value);
-                                        // Restrict BOND to Base Sepolia
-                                        if (token === 'bond' && newChainId !== 84532) {
-                                            setError("BOND is only available on Base Sepolia");
-                                            return;
-                                        }
                                         setError(null);
-                                        setSelectedChainId(newChainId);
+                                        setSelectedChainId(Number(e.target.value));
                                     }}
                                 >
                                     {Object.values(CHAINS).map(c => (
@@ -274,16 +294,16 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
                                 <label className="text-[10px] text-slate-500 uppercase tracking-widest font-mono mb-2 block">Asset</label>
                                 <select 
                                     className="w-full bg-black border border-border-dark text-white text-sm px-3 py-2.5 focus:ring-1 focus:ring-primary font-mono outline-none"
-                                    value={token}
-                                    onChange={(e) => {
-                                        const newToken = e.target.value as any;
-                                        setToken(newToken);
-                                        if (newToken === 'bond') setSelectedChainId(84532);
-                                    }}
+                                    value={selectedTokenAddress}
+                                    onChange={(e) => setSelectedTokenAddress(e.target.value)}
                                 >
-                                    {Object.keys(TOKENS).map(symbol => (
-                                        <option key={symbol} value={symbol}>{symbol}</option>
-                                    ))}
+                                    {tokensForChain.length > 0 ? (
+                                        tokensForChain.map(t => (
+                                            <option key={t.address} value={t.address}>{t.symbol} — {t.name}</option>
+                                        ))
+                                    ) : (
+                                        <option disabled>Loading tokens...</option>
+                                    )}
                                 </select>
                             </div>
 
@@ -299,32 +319,19 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
                                     <div className="absolute right-3 top-2 flex items-center gap-2">
                                         <button 
                                             onClick={() => {
-                                                const asset = assets.find(a => a.symbol.toUpperCase() === token.toUpperCase());
-                                                // Find balance for selected chain
-                                                const activeChainConfig = Object.values(CHAINS).find(c => c.chainId === selectedChainId);
-                                                const chainSelector = activeChainConfig?.chainSelector;
-                                                const chainBalance = (asset?.breakdown && chainSelector) ? asset.breakdown[chainSelector] : 0;
-                                                
-                                                if (chainBalance) setAmount(chainBalance.toString());
+                                                const bal = getAvailableBalance();
+                                                if (bal > 0) setAmount(bal.toString());
                                             }}
                                             className="text-[10px] text-primary hover:text-white uppercase font-bold tracking-wider border border-primary/30 hover:bg-primary/20 px-1.5 py-0.5 rounded transition-colors"
                                         >
                                             MAX
                                         </button>
-                                        <span className="text-slate-500 font-mono text-xs">{token}</span>
+                                        <span className="text-slate-500 font-mono text-xs">{selectedToken?.symbol || ''}</span>
                                     </div>
                                 </div>
                                 <div className="text-right mt-1">
                                     <span className="text-[10px] text-slate-500 font-mono">
-                                        Available on {Object.values(CHAINS).find(c => c.chainId === selectedChainId)?.name}: <span className="text-slate-300">{
-                                            (() => {
-                                                const asset = assets.find(a => a.symbol.toUpperCase() === token.toUpperCase());
-                                                const activeChainConfig = Object.values(CHAINS).find(c => c.chainId === selectedChainId);
-                                                const chainSelector = activeChainConfig?.chainSelector;
-                                                const chainBalance = (asset?.breakdown && chainSelector) ? asset.breakdown[chainSelector] : 0;
-                                                return chainBalance?.toFixed(4) || "0.00";
-                                            })()
-                                        }</span> {token}
+                                        Available on {activeChainConfig?.name}: <span className="text-slate-300">{getAvailableBalance().toFixed(4)}</span> {selectedToken?.symbol || ''}
                                     </span>
                                 </div>
                             </div>

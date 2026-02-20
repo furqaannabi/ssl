@@ -37,7 +37,7 @@ export const AIChatbot: React.FC = () => {
     const inputRef = useRef<HTMLInputElement>(null);
     const { address: eoaAddress } = useConnection();
 
-    const API_URL = import.meta.env.VITE_API_URL || 'https://arc.furqaannabi.com';
+    const API_URL = ""; // Use Vite proxy for CORS/cookie consistency
 
     // Auto-scroll to bottom
     useEffect(() => {

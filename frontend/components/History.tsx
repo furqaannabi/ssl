@@ -17,7 +17,7 @@ interface HistoryItem {
     createdAt: string;
 }
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
+const API_URL = ""; // Use Vite proxy for CORS/cookie consistency
 
 export const History: React.FC = () => {
   const [history, setHistory] = useState<HistoryItem[]>([]);
