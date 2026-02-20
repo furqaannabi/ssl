@@ -133,18 +133,19 @@ User ── requestWithdrawal ──> Vault ── event ──> Backend Listene
 
 | Component | Description |
 |---|---|
-| **contracts/** | Solidity -- `StealthSettlementVault`, `SSLCCIPReceiver`, `SSLChains` config library, `ReceiverTemplate`, interfaces, mocks |
+| **contracts/** | Solidity -- `StealthSettlementVault` (with token whitelist), `SSLCCIPReceiver`, `SSLChains` config library, `ReceiverTemplate`, `MockRWAToken`, interfaces, mocks |
 | **cre/** | Chainlink CRE workflow -- World ID verification, settlement reports (same-chain + cross-chain) |
-| **backend/** | Bun + Hono -- Auth, order book, matching engine, multi-chain vault listener, CRE bridge |
-| **frontend/** | React + Vite trading terminal with World ID integration |
+| **backend/** | Bun + Hono -- Auth, order book, matching engine, multi-chain vault listener, CRE bridge, **AI financial advisor (OpenAI GPT-4o)**, price feed service, arbitrage monitor |
+| **frontend/** | React + Vite trading terminal with World ID integration and **AI chatbot** |
 
 ### Contracts
 
-- **StealthSettlementVault** -- Holds deposited tokens. Deployed per chain. Accepts 4 report types from CRE via KeystoneForwarder (see table above). For cross-chain trades, initiates CCIP programmable token transfers of USDC + encoded data to the destination chain. CCIP fees paid in LINK.
+- **StealthSettlementVault** -- Holds deposited tokens. Deployed per chain. Accepts 4 report types from CRE via KeystoneForwarder (see table above). For cross-chain trades, initiates CCIP programmable token transfers of USDC + encoded data to the destination chain. CCIP fees paid in LINK. Enforces **token whitelist** -- only owner-approved RWA tokens can be deposited.
 - **SSLCCIPReceiver** -- Standalone CCIP receiver deployed per chain. Receives USDC + `(orderId, recipient)` via CCIP, forwards USDC to the seller, and calls the local vault to mark the order settled.
 - **SSLChains** (`Config.sol`) -- Pure helper library with chain constants (CCIP selectors, router addresses, forwarder addresses). No deployment needed -- used by deploy scripts and referenced off-chain.
 - **ReceiverTemplate** -- Abstract base that validates reports come from the trusted forwarder
-- **ISSLVault** -- Vault interface (fund, requestWithdrawal, isVerified, settledOrders, events including `CrossChainSettled` and `TokenReleased`)
+- **ISSLVault** -- Vault interface (fund, requestWithdrawal, isVerified, settledOrders, events including `CrossChainSettled`, `TokenReleased`, `TokenWhitelisted`, `TokenRemoved`)
+- **MockRWAToken** -- Generic mock ERC-20 for deploying tokenized stocks, ETFs, and bonds (tMETA, tGOOGL, tAAPL, etc.)
 
 ### CRE Workflow (`cre/verify-and-order-workflow/main.ts`)
 
@@ -162,8 +163,10 @@ Bun + Hono HTTP server with PostgreSQL (Prisma ORM):
 - **Verify** -- `POST /api/verify` -- Forwards World ID proof to CRE, streams via SSE
 - **Orders** -- `POST /api/order` + `POST /api/order/:id/confirm` + `POST /api/order/:id/cancel` + `GET /api/order/book`
 - **Pairs** -- `GET /api/pairs` -- Lists all trading pairs with token metadata
+- **Tokens** -- `GET /api/tokens` -- Lists all whitelisted RWA tokens with real-time prices + `GET /api/tokens/:symbol`
 - **User** -- `GET /api/user/me` (profile + balances per chain) + `GET /api/user/orders`
 - **Withdrawals** -- `POST /api/withdraw` + `GET /api/withdraw`
+- **AI Chat** -- `POST /api/chat` (SSE streaming GPT-4o financial advisor) + `GET /api/chat/arbitrage` + `GET /api/chat/prices`
 - **Multi-Chain Vault Listener** -- Watches on-chain events on **all chains with deployed vaults**:
   - `Funded` -- Upserts user, auto-creates Token + Pair, updates TokenBalance (chain-aware)
   - `WithdrawalRequested` -- Validates balance, deducts, forwards to CRE
@@ -181,6 +184,7 @@ User (address, name, isVerified, nonce)
   ├── Withdrawal[] (withdrawalId, token, amount, status)
   ├── Transaction[] (type, token, amount, chainSelector)
   └── Session[]
+Settlement (orderId, type, status, sourceChain, destChain, ccipMessageId, ...)
 ```
 
 #### Multi-Chain Configuration
@@ -236,6 +240,17 @@ CHAIN=baseSepolia ./deploy.sh   # deploy to Base Sepolia only
 CHAIN=arbitrumSepolia ./deploy.sh  # deploy to Arb Sepolia only
 ```
 
+### Deploy RWA Tokens
+
+After deploying the vault, deploy all tokenized RWA assets and whitelist them:
+
+```bash
+cd contracts
+VAULT_ADDRESS=0x... forge script script/DeployRWATokens.s.sol:DeployRWATokens --rpc-url baseSepolia --broadcast
+```
+
+This deploys 9 tokens (tMETA, tGOOGL, tAAPL, tTSLA, tAMZN, tNVDA, tSPY, tQQQ, tBOND), mints initial supply, and whitelists each on the vault. USDC must be whitelisted manually afterward.
+
 The script:
 1. Reads env from `backend/.env`
 2. Runs `forge script` against each chain's RPC
@@ -253,6 +268,16 @@ bun install
 npx prisma migrate dev
 bun run dev
 ```
+
+Additional env vars for AI advisor and price feeds:
+
+| Variable | Description | Required |
+|---|---|---|
+| `OPENAI_API_KEY` | OpenAI API key for GPT-4o chat advisor | Yes (for AI chat) |
+| `AI_MODEL` | OpenAI model (default: `gpt-4o`) | No |
+| `FINNHUB_API_KEY` | Finnhub API key for real-time stock prices | No (mock prices used if absent) |
+| `ARBITRAGE_THRESHOLD_PERCENT` | Min % spread to flag as arbitrage (default: `2.0`) | No |
+| `ARBITRAGE_CHECK_INTERVAL_MS` | Arbitrage scan interval in ms (default: `10000`) | No |
 
 ### CRE Workflow
 
@@ -278,17 +303,46 @@ bun run dev
 
 ## Tech Stack
 
-- **Solidity** (Foundry) -- Smart contracts (vault, config library, receiver, mocks)
+- **Solidity** (Foundry) -- Smart contracts (vault with token whitelist, config library, receiver, RWA token mocks)
 - **Chainlink CRE** -- Off-chain confidential compute (verification, settlement reports)
 - **Chainlink CCIP** -- Cross-chain token bridging for multi-chain settlement
 - **World ID** (`@worldcoin/idkit`) -- Sybil-resistant identity verification
 - **Stealth Addresses** -- Frontend-generated one-time addresses for private settlement
+- **OpenAI GPT-4o** -- AI financial advisor chatbot with streaming responses, portfolio analysis, and arbitrage detection
+- **Finnhub API** -- Real-time stock/ETF price feeds (maps tokenized RWA symbols to real tickers)
 - **Bun + Hono** -- Backend HTTP server
 - **PostgreSQL + Prisma** -- Order book, user data, per-chain token balances, trading pairs
 - **ethers.js** -- Multi-chain event listening (vault deposits, withdrawals)
 - **viem** -- ABI encoding, keccak256, signature verification
 - **OpenZeppelin** -- SafeERC20, ReentrancyGuard, Ownable
-- **React 19 + Vite + TailwindCSS** -- Frontend trading terminal
+- **React 19 + Vite + TailwindCSS** -- Frontend trading terminal with AI chatbot
+
+## Whitelisted RWA Tokens
+
+Only pre-approved Real World Asset tokens can be deposited and traded. The vault enforces this on-chain via a whitelist.
+
+| Symbol | Name | Type | Real Ticker |
+|---|---|---|---|
+| tMETA | Meta Platforms | STOCK | META |
+| tGOOGL | Alphabet Inc. | STOCK | GOOGL |
+| tAAPL | Apple Inc. | STOCK | AAPL |
+| tTSLA | Tesla Inc. | STOCK | TSLA |
+| tAMZN | Amazon.com | STOCK | AMZN |
+| tNVDA | NVIDIA Corp | STOCK | NVDA |
+| tSPY | S&P 500 ETF | ETF | SPY |
+| tQQQ | Nasdaq 100 ETF | ETF | QQQ |
+| tBOND | US Treasury Bond | BOND | TLT |
+| USDC | USD Coin | STABLE | -- |
+
+## AI Financial Advisor
+
+The platform includes an AI-powered financial advisor chatbot (bottom-right floating button) that:
+
+- Analyzes user portfolio holdings with real-time market prices
+- Detects **arbitrage opportunities** when order book prices differ from real market prices (e.g., sell order at $290 when market is $300)
+- Provides actionable trade suggestions with specific prices and profit calculations
+- Streams responses in real-time via SSE (Server-Sent Events)
+- Uses GPT-4o with dynamic context including portfolio, market data, order book, and active arbitrage opportunities
 
 ## License
 

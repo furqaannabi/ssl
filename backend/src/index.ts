@@ -14,7 +14,10 @@ import { user } from "./routes/user";
 import { pairs } from "./routes/pairs";
 import { withdraw } from "./routes/withdraw";
 import oracle from "./routes/oracle";
+import { chat } from "./routes/chat";
+import { tokens } from "./routes/tokens";
 import { startVaultListener } from "./listeners/ssl-vault-listener";
+import { ArbitrageMonitorService } from "./services/arbitrage-monitor.service";
 
 const app = new Hono();
 
@@ -39,6 +42,8 @@ app.route("/api/user", user);
 app.route("/api/pairs", pairs);
 app.route("/api/withdraw", withdraw);
 app.route("/api/oracle", oracle);
+app.route("/api/chat", chat);
+app.route("/api/tokens", tokens);
 
 // ── 404 ──
 app.notFound((c) => c.json({ error: "Not found" }, 404));
@@ -61,6 +66,11 @@ console.log(`
 startVaultListener().catch((err) => {
     console.error("Failed to start vault listener:", err);
 });
+
+// Start Arbitrage Monitor
+ArbitrageMonitorService.startMonitor(
+    parseInt(process.env.ARBITRAGE_CHECK_INTERVAL_MS || "10000")
+);
 
 export default {
     port: config.port,

@@ -49,6 +49,8 @@ interface ISSLVault {
         address token,
         uint256 amount
     );
+    event TokenWhitelisted(address indexed token, string symbol, uint8 tokenType);
+    event TokenRemoved(address indexed token);
 
     /// @notice Deposit tokens. Requires CRE-verified nullifier.
     ///         First fund binds nullifier to msg.sender permanently.
@@ -67,4 +69,8 @@ interface ISSLVault {
     function getWithdrawalRequests(
         address user
     ) external view returns (uint256[] memory);
+
+    function isTokenWhitelisted(address token) external view returns (bool);
+    function whitelistToken(address token, string calldata symbol, string calldata name, uint8 tokenType) external;
+    function removeToken(address token) external;
 }

@@ -8,6 +8,7 @@ import { Compliance } from './components/Compliance';
 import { History } from './components/History';
 import { SettingsModal } from './components/SettingsModal';
 import { ProfileModal } from './components/ProfileModal';
+import { AIChatbot } from './components/AIChatbot';
 
 import { config } from './lib/wagmi';
 
@@ -219,6 +220,9 @@ function AppContent() {
             </Routes>
          </main>
       </div>
+
+      {/* AI Chatbot */}
+      <AIChatbot />
     </div>
   );
 }

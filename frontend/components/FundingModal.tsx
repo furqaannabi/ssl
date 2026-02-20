@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Modal, Button, Icon } from './UI';
-import { TOKENS, TOKEN_DECIMALS, ERC20_ABI } from '../lib/contracts';
+import { TOKENS, TOKEN_DECIMALS, ERC20_ABI, RWA_TOKENS } from '../lib/contracts';
 import { VAULT_ABI } from '../lib/abi/valut_abi';
 import { useConnection, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { simulateContract, writeContract } from '@wagmi/core'
@@ -245,9 +245,13 @@ export const FundingModal: React.FC<FundingModalProps> = ({
                                         if (newToken === 'bond') setSelectedChainId(84532);
                                     }}
                                 >
-                                    {Object.keys(TOKENS).map(symbol => (
-                                        <option key={symbol} value={symbol}>{symbol}</option>
-                                    ))}
+                                    {Object.keys(TOKENS).map(symbol => {
+                                        const meta = RWA_TOKENS[symbol.toUpperCase()] || RWA_TOKENS[symbol];
+                                        const typeLabel = meta ? ` [${meta.type}]` : '';
+                                        return (
+                                            <option key={symbol} value={symbol}>{symbol}{typeLabel}</option>
+                                        );
+                                    })}
                                 </select>
                             </div>
 

@@ -50,6 +50,17 @@ contract StealthSettlementVault is
 
     mapping(address => uint256[]) public userWithdrawalIds;
 
+    struct TokenMetadata {
+        string symbol;
+        string name;
+        uint8 tokenType; // 0=STOCK, 1=ETF, 2=BOND, 3=COMMODITY, 4=STABLE
+        bool active;
+    }
+
+    mapping(address => bool) public whitelistedTokens;
+    mapping(address => TokenMetadata) public tokenMetadata;
+    address[] public whitelistedTokenList;
+
     constructor(
         address _forwarderAddress,
         address _ccipRouter,
@@ -57,6 +68,43 @@ contract StealthSettlementVault is
     ) ReceiverTemplate(_forwarderAddress) {
         ccipRouter = IRouterClient(_ccipRouter);
         linkToken = IERC20(_linkToken);
+    }
+
+    function whitelistToken(
+        address token,
+        string calldata symbol,
+        string calldata name,
+        uint8 tokenType
+    ) external onlyOwner {
+        require(token != address(0), "SSL: zero address");
+        require(!whitelistedTokens[token], "SSL: already whitelisted");
+
+        whitelistedTokens[token] = true;
+        tokenMetadata[token] = TokenMetadata({
+            symbol: symbol,
+            name: name,
+            tokenType: tokenType,
+            active: true
+        });
+        whitelistedTokenList.push(token);
+
+        emit TokenWhitelisted(token, symbol, tokenType);
+    }
+
+    function removeToken(address token) external onlyOwner {
+        require(whitelistedTokens[token], "SSL: not whitelisted");
+        whitelistedTokens[token] = false;
+        tokenMetadata[token].active = false;
+
+        emit TokenRemoved(token);
+    }
+
+    function isTokenWhitelisted(address token) external view returns (bool) {
+        return whitelistedTokens[token];
+    }
+
+    function getWhitelistedTokens() external view returns (address[] memory) {
+        return whitelistedTokenList;
     }
 
     function setCCIPReceiver(address _receiver) external onlyOwner {
@@ -83,6 +131,7 @@ contract StealthSettlementVault is
         uint256 amount
     ) external override nonReentrant {
         require(amount > 0, "SSL: zero amount");
+        require(whitelistedTokens[token], "SSL: token not whitelisted");
         // Verify sender address is whitelisted by CRE
         require(isVerified[msg.sender], "SSL: address not verified");
 

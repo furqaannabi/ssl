@@ -1,6 +1,6 @@
 # SSL Backend API Documentation
 
-Backend service for the Stealth Settlement Layer (SSL). Handles user authentication, World ID verification, order matching, multi-chain vault event listening, withdrawals, and CRE integration.
+Backend service for the Stealth Settlement Layer (SSL). Handles user authentication, World ID verification, order matching, multi-chain vault event listening, withdrawals, CRE integration, **AI financial advisor (OpenAI GPT-4o)**, real-time price feeds, and arbitrage detection.
 
 ## Multi-Chain Architecture
 
@@ -111,6 +111,94 @@ Returns user details and token balances across all chains.
 {"type": "log", "message": "Starting CRE verification..."}
 {"type": "result", "success": true, "status": "VERIFIED"}
 ```
+
+---
+
+## Whitelisted Tokens
+
+### List All Tokens
+**GET** `/api/tokens`
+
+Returns all tokens in the database enriched with RWA metadata and real-time prices (from Finnhub API or mock fallback).
+
+**Response:**
+```json
+{
+  "success": true,
+  "tokens": [
+    {
+      "address": "0x...",
+      "symbol": "tMETA",
+      "name": "SSL Tokenized Meta Platforms",
+      "decimals": 18,
+      "tokenType": "STOCK",
+      "realSymbol": "META",
+      "description": "Meta Platforms Inc.",
+      "price": { "current": 595.20, "change": 3.40, "changePercent": 0.57, "high": 598.10, "low": 591.50 }
+    }
+  ]
+}
+```
+
+### Get Single Token
+**GET** `/api/tokens/:symbol`
+
+---
+
+## AI Financial Advisor
+
+### Chat (Streaming)
+**POST** `/api/chat`
+
+Streams AI-generated financial advice via SSE. The AI has access to the user's portfolio, live market prices, order book state, and active arbitrage opportunities.
+
+**Request:**
+```json
+{
+  "message": "Are there any arbitrage opportunities right now?",
+  "userAddress": "0x123...",
+  "conversationHistory": []
+}
+```
+
+**Response (SSE Stream):**
+```
+data: {"type":"chunk","content":"Looking at the current"}
+data: {"type":"chunk","content":" order book, I found"}
+data: {"type":"chunk","content":" an arbitrage opportunity..."}
+data: {"type":"done","content":"Looking at the current order book, I found an arbitrage opportunity..."}
+```
+
+### Get Arbitrage Opportunities
+**GET** `/api/chat/arbitrage`
+
+Returns active arbitrage opportunities detected by the background monitor (scans every 10s, threshold configurable via `ARBITRAGE_THRESHOLD_PERCENT`).
+
+**Response:**
+```json
+{
+  "success": true,
+  "opportunities": [
+    {
+      "id": "arb-order-uuid",
+      "pairSymbol": "tMETA/USDC",
+      "tokenSymbol": "tMETA",
+      "orderPrice": 290.00,
+      "marketPrice": 300.50,
+      "profitPercent": 3.62,
+      "direction": "BUY",
+      "orderAmount": 10,
+      "potentialProfit": 105.00
+    }
+  ]
+}
+```
+
+### Get All Prices
+**GET** `/api/chat/prices`
+
+### Get Single Price
+**GET** `/api/chat/prices/:symbol`
 
 ---
 
@@ -276,3 +364,8 @@ Single-chain backwards-compat file with `vault`, `bond`, `usdc` for Base Sepolia
 | `DATABASE_URL` | PostgreSQL connection string |
 | `CRE_GATEWAY_URL` | Production CRE gateway (optional) |
 | `CRE_WORKFLOW_ID` | Production CRE workflow ID (optional) |
+| `OPENAI_API_KEY` | OpenAI API key for GPT-4o AI advisor (required for `/api/chat`) |
+| `AI_MODEL` | OpenAI model ID (default: `gpt-4o`) |
+| `FINNHUB_API_KEY` | Finnhub API key for real-time stock/ETF prices (optional, mock prices used if absent) |
+| `ARBITRAGE_THRESHOLD_PERCENT` | Min % spread to flag as arbitrage (default: `2.0`) |
+| `ARBITRAGE_CHECK_INTERVAL_MS` | Arbitrage scan interval in ms (default: `10000`) |

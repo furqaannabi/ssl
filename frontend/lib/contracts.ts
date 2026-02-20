@@ -27,8 +27,34 @@ export const getContracts = (chainId: number) => {
 
 export const TOKEN_DECIMALS: Record<string, number> = {
     USDC: 6,
+    mUSDC: 6,
     BOND: 18,
-    TBILL: 18
+    TBILL: 18,
+    tMETA: 18,
+    tGOOGL: 18,
+    tAAPL: 18,
+    tTSLA: 18,
+    tAMZN: 18,
+    tNVDA: 18,
+    tSPY: 18,
+    tQQQ: 18,
+    tBOND: 18,
+};
+
+// RWA Token metadata for UI display
+export const RWA_TOKENS: Record<string, { name: string; type: 'STOCK' | 'ETF' | 'BOND' | 'STABLE'; realSymbol: string }> = {
+    tMETA: { name: 'Meta Platforms', type: 'STOCK', realSymbol: 'META' },
+    tGOOGL: { name: 'Alphabet Inc.', type: 'STOCK', realSymbol: 'GOOGL' },
+    tAAPL: { name: 'Apple Inc.', type: 'STOCK', realSymbol: 'AAPL' },
+    tTSLA: { name: 'Tesla Inc.', type: 'STOCK', realSymbol: 'TSLA' },
+    tAMZN: { name: 'Amazon.com', type: 'STOCK', realSymbol: 'AMZN' },
+    tNVDA: { name: 'NVIDIA Corp', type: 'STOCK', realSymbol: 'NVDA' },
+    tSPY: { name: 'S&P 500 ETF', type: 'ETF', realSymbol: 'SPY' },
+    tQQQ: { name: 'Nasdaq 100 ETF', type: 'ETF', realSymbol: 'QQQ' },
+    tBOND: { name: 'US Treasury Bond', type: 'BOND', realSymbol: 'TLT' },
+    BOND: { name: 'SSL Tokenized Bond', type: 'BOND', realSymbol: 'TLT' },
+    USDC: { name: 'USD Coin', type: 'STABLE', realSymbol: 'USDC' },
+    mUSDC: { name: 'Mock USDC', type: 'STABLE', realSymbol: 'USDC' },
 };
 
 // ABI fragments

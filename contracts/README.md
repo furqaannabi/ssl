@@ -6,7 +6,7 @@ Solidity smart contracts for the Stealth Settlement Layer. Deployed per chain vi
 
 ### StealthSettlementVault (`src/core/SSLVault.sol`)
 
-Main vault contract deployed on each supported chain. Holds deposited tokens and executes settlement via CRE reports delivered through the KeystoneForwarder.
+Main vault contract deployed on each supported chain. Holds deposited tokens and executes settlement via CRE reports delivered through the KeystoneForwarder. Enforces a **token whitelist** -- only owner-approved RWA tokens (stocks, ETFs, bonds) can be deposited via `fund()`.
 
 **Report types:**
 
@@ -55,7 +55,11 @@ Abstract base contract. Validates that `onReport()` calls come from the trusted 
 
 ### ISSLVault (`src/interfaces/ISSLVault.sol`)
 
-Vault interface with events: `Funded`, `Verified`, `Settled`, `WithdrawalRequested`, `WithdrawalClaimed`, `CrossChainSettled`, `TokenReleased`.
+Vault interface with events: `Funded`, `Verified`, `Settled`, `WithdrawalRequested`, `WithdrawalClaimed`, `CrossChainSettled`, `TokenReleased`, `TokenWhitelisted`, `TokenRemoved`.
+
+### MockRWAToken (`src/mocks/MockRWAToken.sol`)
+
+Generic mock ERC-20 for deploying tokenized Real World Assets. Accepts configurable name, symbol, and decimals. Used to deploy tMETA, tGOOGL, tAAPL, tTSLA, tAMZN, tNVDA, tSPY, tQQQ, tBOND.
 
 ### SSLCCIPReceiver (`src/core/SSLCCIPReceiver.sol`)
 
@@ -64,6 +68,17 @@ Standalone CCIP receiver contract deployed per chain. It:
 - Implements `IAny2EVMMessageReceiver` with a router-only `ccipReceive`
 - Forwards bridged USDC to the trade recipient
 - Notifies the local vault via `markSettled(bytes32 orderId)`
+
+## Token Whitelist
+
+The vault enforces that only whitelisted tokens can be deposited. Owner-only management functions:
+
+- `whitelistToken(address token, string symbol, string name, uint8 tokenType)` -- Add a token (types: 0=STOCK, 1=ETF, 2=BOND, 3=COMMODITY, 4=STABLE)
+- `removeToken(address token)` -- Deactivate a token
+- `isTokenWhitelisted(address token)` -- Check whitelist status
+- `getWhitelistedTokens()` -- List all whitelisted token addresses
+
+The `fund()` function reverts with `"SSL: token not whitelisted"` for non-approved tokens.
 
 ## Build
 
@@ -100,6 +115,26 @@ CHAIN=arbitrumSepolia ./deploy.sh  # Arbitrum Sepolia only
 - `LINK_FUND` -- LINK to seed vault with (optional, default 5 LINK)
 
 **Output:** `backend/addresses.json` with per-chain vault, CCIP receiver, CCIP router, forwarder, USDC, LINK, RPC/WS URLs.
+
+## Deploy RWA Tokens
+
+After deploying the vault, deploy all tokenized RWA assets and whitelist them:
+
+```bash
+VAULT_ADDRESS=0x... forge script script/DeployRWATokens.s.sol:DeployRWATokens --rpc-url baseSepolia --broadcast
+```
+
+**Env vars:**
+- `PRIVATE_KEY` -- deployer (must be vault owner)
+- `VAULT_ADDRESS` -- deployed StealthSettlementVault address
+- `MINT_TO` -- address to receive initial supply (optional, defaults to deployer)
+- `MINT_AMOUNT` -- tokens per asset in whole units (optional, default 1,000,000)
+
+**Deploys 9 tokens:** tMETA, tGOOGL, tAAPL, tTSLA, tAMZN, tNVDA, tSPY, tQQQ, tBOND. Each is minted and whitelisted on the vault in a single transaction. After running, manually whitelist USDC:
+
+```bash
+cast send $VAULT_ADDRESS "whitelistToken(address,string,string,uint8)" $USDC_ADDRESS "USDC" "USD Coin" 4 --private-key $PRIVATE_KEY --rpc-url baseSepolia
+```
 
 ## Adding a New Chain
 
