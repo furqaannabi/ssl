@@ -84,6 +84,109 @@ async function ensurePairExists(
 }
 
 /**
+ * Replay all historical Funded events missed while the listener was offline.
+ * Paginates in 10-block chunks to comply with Alchemy free-tier limits.
+ * Safe to run on every startup — deduplicates by txHash so nothing is double-counted.
+ */
+async function replayMissedEvents(
+    contract: ethers.Contract,
+    provider: ethers.WebSocketProvider,
+    chainSelector: string,
+    usdcAddress: string,
+    tag: string
+): Promise<void> {
+    // Configurable chunk size — Alchemy free tier max is 10
+    const CHUNK_SIZE = 10;
+
+    try {
+        const currentBlock = await provider.getBlockNumber();
+        // Look back at most 2000 blocks (practical for free tier — extends on PAYG)
+        const fromBlock = Math.max(0, currentBlock - 2000);
+
+        console.log(`${tag} Replaying Funded events from block ${fromBlock} to ${currentBlock} (${CHUNK_SIZE}-block chunks)...`);
+
+        // Load already-recorded deposits for deduplication
+        const existingTxHashes = new Set(
+            (await prisma.transaction.findMany({
+                where: { chainSelector, type: "DEPOSIT" },
+                select: { txHash: true, token: true },
+            })).map(t => `${t.txHash}:${t.token}`)
+        );
+
+        // Build in-memory balance accumulator from current DB state
+        const allBalances = await prisma.tokenBalance.findMany({ where: { chainSelector } });
+        const balanceMap = new Map<string, bigint>();
+        for (const b of allBalances) {
+            balanceMap.set(`${b.userAddress}:${b.token}`, BigInt(b.balance));
+        }
+
+        let backfilled = 0;
+
+        // Paginate in CHUNK_SIZE-block windows
+        for (let start = fromBlock; start <= currentBlock; start += CHUNK_SIZE) {
+            const end = Math.min(start + CHUNK_SIZE - 1, currentBlock);
+            try {
+                const filter = contract.filters.Funded();
+                const events = await contract.queryFilter(filter, start, end);
+
+                for (const evt of events) {
+                    const log = evt as ethers.EventLog;
+                    if (!log.args) continue;
+
+                    const token = (log.args[0] as string).toLowerCase();
+                    const amount = BigInt(log.args[1]);
+                    const user = (log.args[2] as string).toLowerCase();
+                    const txHash = log.transactionHash;
+
+                    const dedupKey = `${txHash}:${token}`;
+                    if (existingTxHashes.has(dedupKey)) continue;
+
+                    console.log(`${tag} [Replay] Backfilling: ${user} +${amount} ${token} (tx: ${txHash})`);
+
+                    await prisma.user.upsert({
+                        where: { address: user },
+                        update: {},
+                        create: { address: user, name: `User ${user.slice(0, 6)}` },
+                    });
+
+                    if (usdcAddress) {
+                        await ensurePairExists(token, chainSelector, usdcAddress, provider);
+                    }
+
+                    const balKey = `${user}:${token}`;
+                    const currentBal = balanceMap.get(balKey) || 0n;
+                    const newBal = currentBal + amount;
+                    balanceMap.set(balKey, newBal);
+
+                    await prisma.tokenBalance.upsert({
+                        where: { userAddress_token_chainSelector: { userAddress: user, token, chainSelector } },
+                        update: { balance: newBal.toString() },
+                        create: { userAddress: user, token, chainSelector, balance: newBal.toString() },
+                    });
+
+                    await prisma.transaction.create({
+                        data: { type: "DEPOSIT", token, amount: amount.toString(), chainSelector, userAddress: user, txHash },
+                    });
+
+                    existingTxHashes.add(dedupKey);
+                    backfilled++;
+                }
+            } catch (chunkErr: any) {
+                // Log and skip range — don't abort the whole replay
+                console.warn(`${tag} [Replay] Skipping blocks ${start}-${end}: ${chunkErr.shortMessage || chunkErr.message}`);
+            }
+
+            // Tiny pause to respect rate limits
+            await new Promise(r => setTimeout(r, 50));
+        }
+
+        console.log(`${tag} Replay complete. Backfilled ${backfilled} deposit(s).`);
+    } catch (err) {
+        console.error(`${tag} replayMissedEvents failed:`, err);
+    }
+}
+
+/**
  * Start a WebSocket listener for a single chain's vault.
  */
 async function startChainListener(chainName: string, chain: ChainConfig) {
@@ -104,6 +207,9 @@ async function startChainListener(chainName: string, chain: ChainConfig) {
         console.log(`${tag} Connected (chainId=${chain.chainId})`);
 
         const contract = new ethers.Contract(vault, VAULT_ABI, provider);
+
+        // Replay any deposits that were missed while offline
+        await replayMissedEvents(contract, provider, chainSelector, chain.usdc || "", tag);
 
         // ── Funded Event ──
         contract.on("Funded", async (rawToken: string, amount: bigint, rawUser: string, event: any) => {

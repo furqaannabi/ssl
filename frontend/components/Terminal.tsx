@@ -3,6 +3,7 @@ import { Icon, Card, Button, Badge, useToast } from './UI';
 import { OracleIndicator } from './OracleIndicator';
 import { useConnection, useSignMessage } from 'wagmi';
 import { CHAINS } from '../lib/chain-config';
+import { auth } from '../lib/auth';
 
 export const Terminal: React.FC = () => {
   const { toast } = useToast();
@@ -143,6 +144,13 @@ export const Terminal: React.FC = () => {
   const handlePlaceOrder = async () => {
     if (!isConnected) {
         toast.error("Connect Authority Wallet (EOA) first");
+        return;
+    }
+
+    // Gate: World ID verification required by vault contract
+    const user = await auth.getMe();
+    if (!user?.isVerified) {
+        toast.error("World ID verification required. Go to the Compliance tab to verify.");
         return;
     }
     

@@ -3,11 +3,12 @@ import { Modal, Button, Icon } from './UI';
 import { TOKEN_DECIMALS } from '../lib/contracts';
 import { VAULT_ABI } from '../lib/abi/valut_abi';
 import { useConnection, useWaitForTransactionReceipt } from 'wagmi';
-import { simulateContract, writeContract } from '@wagmi/core'
+import { simulateContract, writeContract, getGasPrice } from '@wagmi/core'
 import { parseUnits, decodeEventLog } from 'viem';
 import { config } from '../lib/wagmi';
 import { useSwitchChain } from 'wagmi';
 import { CHAINS } from '../lib/chain-config';
+import { auth } from '../lib/auth';
 
 import { Asset } from '../types';
 
@@ -104,6 +105,13 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
             return;
         }
 
+        // Gate: contract requires World ID verification on-chain
+        const user = await auth.getMe();
+        if (!user?.isVerified) {
+            setError("World ID verification required before withdrawing. Go to the Compliance tab to verify.");
+            return;
+        }
+
         if (!selectedToken || !activeChainConfig) {
             setError("Please select a valid token and chain.");
             return;
@@ -132,6 +140,9 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
                 }
             }
 
+            const gasPrice = await getGasPrice(config, { chainId: selectedChainId });
+            const gasPriceWithBuffer = (gasPrice * 120n) / 100n;
+
             const { request } = await simulateContract(config, {
                 address: vaultAddress as `0x${string}`,
                 abi: VAULT_ABI,
@@ -139,6 +150,7 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
                 args: [tokenAddress, amountUnits],
                 account: eoaAddress as `0x${string}`,
                 chainId: selectedChainId,
+                gasPrice: gasPriceWithBuffer,
             });
 
             const hash = await writeContract(config, request);
@@ -279,9 +291,18 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
                                 <select 
                                     className="w-full bg-black border border-border-dark text-white text-sm px-3 py-2.5 focus:ring-1 focus:ring-primary font-mono outline-none"
                                     value={selectedChainId}
-                                    onChange={(e) => {
+                                    onChange={async (e) => {
                                         setError(null);
-                                        setSelectedChainId(Number(e.target.value));
+                                        const newChainId = Number(e.target.value);
+                                        setSelectedChainId(newChainId);
+                                        if (chain?.id !== newChainId && isConnected) {
+                                            try {
+                                                await switchChainAsync({ chainId: newChainId });
+                                            } catch (err) {
+                                                console.warn("User rejected or failed to switch chain:", err);
+                                                setError("Please switch your wallet network manually to proceed.");
+                                            }
+                                        }
                                     }}
                                 >
                                     {Object.values(CHAINS).map(c => (

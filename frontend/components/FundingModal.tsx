@@ -3,11 +3,12 @@ import { Modal, Button, Icon } from './UI';
 import { TOKEN_DECIMALS, ERC20_ABI, RWA_TOKENS } from '../lib/contracts';
 import { VAULT_ABI } from '../lib/abi/valut_abi';
 import { useConnection, useWaitForTransactionReceipt } from 'wagmi';
-import { simulateContract, writeContract } from '@wagmi/core'
+import { simulateContract, writeContract, getGasPrice } from '@wagmi/core'
 import { parseUnits } from 'viem';
 import { config } from '../lib/wagmi';
 import { CHAINS } from '../lib/chain-config';
 import { useSwitchChain } from 'wagmi';
+import { auth } from '../lib/auth';
 
 interface FundingModalProps {
     isOpen: boolean;
@@ -92,9 +93,10 @@ export const FundingModal: React.FC<FundingModalProps> = ({
             return;
         }
 
-        const nullifierHash = localStorage.getItem("ssl_nullifier_hash");
-        if (!nullifierHash) {
-            setError("No verified identity found. Please verify with World ID first.");
+        // Gate: contract requires World ID verification on-chain
+        const user = await auth.getMe();
+        if (!user?.isVerified) {
+            setError("World ID verification required before depositing. Go to the Compliance tab to verify.");
             return;
         }
 
@@ -110,8 +112,10 @@ export const FundingModal: React.FC<FundingModalProps> = ({
             if (chain?.id !== selectedChainId) {
                 try {
                     await switchChainAsync({ chainId: selectedChainId });
+                    // Small delay to let the wallet/RPC settle after chain switch
+                    await new Promise(r => setTimeout(r, 500));
                 } catch (e) {
-                    setError("Failed to switch network. Please switch manually.");
+                    setError("Failed to switch network. Please switch manually in your wallet.");
                     return;
                 }
             }
@@ -125,6 +129,10 @@ export const FundingModal: React.FC<FundingModalProps> = ({
             setStep('APPROVING');
             console.log(`Requesting approval for ${amount} ${selectedToken.symbol} to ${vaultAddress}...`);
 
+            // Fetch current gas price and add 20% buffer to handle base fee fluctuations
+            const gasPrice = await getGasPrice(config, { chainId: selectedChainId });
+            const gasPriceWithBuffer = (gasPrice * 120n) / 100n;
+
             const { request } = await simulateContract(config, {
                 abi: ERC20_ABI,
                 address: tokenAddress as `0x${string}`,
@@ -135,6 +143,7 @@ export const FundingModal: React.FC<FundingModalProps> = ({
                 ],
                 account: eoaAddress as `0x${string}`,
                 chainId: selectedChainId,
+                gasPrice: gasPriceWithBuffer,
             })
 
             const approveHash = await writeContract(config, request)
@@ -173,6 +182,9 @@ export const FundingModal: React.FC<FundingModalProps> = ({
                             // Allow indexer to catch up
                             if (retryCount === 0) await new Promise(r => setTimeout(r, 2000));
 
+                            const gasPrice = await getGasPrice(config, { chainId: selectedChainId });
+                            const gasPriceWithBuffer = (gasPrice * 120n) / 100n;
+
                             const { request } = await simulateContract(config, {
                                 address: vaultAddress as `0x${string}`,
                                 abi: VAULT_ABI,
@@ -180,6 +192,7 @@ export const FundingModal: React.FC<FundingModalProps> = ({
                                 args: [tokenAddress as `0x${string}`, amountUnits],
                                 account: eoaAddress as `0x${string}`,
                                 chainId: selectedChainId,
+                                gasPrice: gasPriceWithBuffer,
                             });
                             const fundHash = await writeContract(config, request)
                             setTxHash(fundHash);
@@ -232,9 +245,18 @@ export const FundingModal: React.FC<FundingModalProps> = ({
                                 <select 
                                     className="w-full bg-black border border-border-dark text-white text-sm px-3 py-2.5 focus:ring-1 focus:ring-primary font-mono outline-none"
                                     value={selectedChainId}
-                                    onChange={(e) => {
+                                    onChange={async (e) => {
                                         setError(null);
-                                        setSelectedChainId(Number(e.target.value));
+                                        const newChainId = Number(e.target.value);
+                                        setSelectedChainId(newChainId);
+                                        if (chain?.id !== newChainId && isConnected) {
+                                            try {
+                                                await switchChainAsync({ chainId: newChainId });
+                                            } catch (err) {
+                                                console.warn("User rejected or failed to switch chain:", err);
+                                                setError("Please switch your wallet network manually to proceed.");
+                                            }
+                                        }
                                     }}
                                 >
                                     {Object.values(CHAINS).map(c => (
