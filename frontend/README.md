@@ -13,7 +13,7 @@ React + Vite frontend for the Stealth Settlement Layer. A dark-themed trading te
 - **Portfolio** -- Per-chain token balances across Base Sepolia and Arbitrum Sepolia
 - **Deposit (Funding)** -- Deposit whitelisted RWA tokens with type badges (STOCK/ETF/BOND/STABLE)
 - **Withdrawal** -- Request withdrawal of deposited tokens
-- **AI Financial Advisor** -- Floating chatbot (bottom-right) powered by GPT-4o:
+- **AI Financial Advisor** -- Floating chatbot (bottom-right) powered by Gemini 2.5 Flash:
   - Portfolio analysis with real-time prices
   - Arbitrage opportunity detection and alerts
   - Market overview for all whitelisted tokens

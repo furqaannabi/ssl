@@ -135,7 +135,7 @@ User ── requestWithdrawal ──> Vault ── event ──> Backend Listene
 |---|---|
 | **contracts/** | Solidity -- `StealthSettlementVault` (with token whitelist), `SSLCCIPReceiver`, `SSLChains` config library, `ReceiverTemplate`, `MockRWAToken`, interfaces, mocks |
 | **cre/** | Chainlink CRE workflow -- World ID verification, settlement reports (same-chain + cross-chain) |
-| **backend/** | Bun + Hono -- Auth, order book, matching engine, multi-chain vault listener, CRE bridge, **AI financial advisor (OpenAI GPT-4o)**, price feed service, arbitrage monitor |
+| **backend/** | Bun + Hono -- Auth, order book, matching engine, multi-chain vault listener, CRE bridge, **AI financial advisor (Gemini 2.5 Flash)**, price feed service, arbitrage monitor |
 | **frontend/** | React + Vite trading terminal with World ID integration and **AI chatbot** |
 
 ### Contracts
@@ -163,7 +163,7 @@ Bun + Hono HTTP server with PostgreSQL (Prisma ORM):
 - **Verify** -- `POST /api/verify` -- Forwards World ID proof to CRE, streams via SSE
 - **Orders** -- `POST /api/order` + `POST /api/order/:id/confirm` + `POST /api/order/:id/cancel` + `GET /api/order/book`
 - **Pairs** -- `GET /api/pairs` -- Lists all trading pairs with token metadata
-- **Tokens** -- `GET /api/tokens` -- Lists all whitelisted RWA tokens with real-time prices + `GET /api/tokens/:symbol`
+- **Tokens** -- `GET /api/tokens` -- Lists all whitelisted RWA tokens with real-time prices + `GET /api/tokens/:symbol` + `GET /api/tokens/prices/all` + `GET /api/tokens/prices/:symbol`
 - **User** -- `GET /api/user/me` (profile + balances per chain) + `GET /api/user/orders`
 - **Withdrawals** -- `POST /api/withdraw` + `GET /api/withdraw`
 - **AI Chat** -- `POST /api/chat` (SSE streaming GPT-4o financial advisor) + `GET /api/chat/arbitrage` + `GET /api/chat/prices`
@@ -242,20 +242,28 @@ CHAIN=arbitrumSepolia ./deploy.sh  # deploy to Arb Sepolia only
 
 ### Deploy RWA Tokens
 
-After deploying the vault, deploy all tokenized RWA assets and whitelist them:
+After deploying the vault, deploy all tokenized RWA assets and whitelist them (including USDC):
 
 ```bash
 cd contracts
+./deploy-rwa.sh                          # deploy to all chains
+CHAIN=baseSepolia ./deploy-rwa.sh        # single chain
+```
+
+Or manually via forge:
+
+```bash
 VAULT_ADDRESS=0x... forge script script/DeployRWATokens.s.sol:DeployRWATokens --rpc-url baseSepolia --broadcast
 ```
 
-This deploys 9 tokens (tMETA, tGOOGL, tAAPL, tTSLA, tAMZN, tNVDA, tSPY, tQQQ, tBOND), mints initial supply, and whitelists each on the vault. USDC must be whitelisted manually afterward.
+This deploys 9 tokens (tMETA, tGOOGL, tAAPL, tTSLA, tAMZN, tNVDA, tSPY, tQQQ, tBOND), mints initial supply, whitelists each on the vault, and auto-whitelists USDC (resolved per-chain from `SSLChains`).
 
-The script:
+The `deploy-rwa.sh` script:
 1. Reads env from `backend/.env`
-2. Runs `forge script` against each chain's RPC
-3. Extracts deployed addresses from broadcast files
-4. Writes `backend/addresses.json` and updates CRE config
+2. Reads vault address from `backend/addresses.json`
+3. Runs `forge script` against each chain's RPC
+4. Extracts deployed addresses from broadcast files
+5. Writes `backend/rwa-tokens.json` with per-chain token addresses
 
 Environment variables: `PRIVATE_KEY` (required), `FORWARDER_ADDRESS` / `CCIP_ROUTER` / `LINK_TOKEN` (optional overrides, auto-resolved from `SSLChains`). `LINK_FUND` controls how much LINK to seed the vault with (default 1 LINK).
 
@@ -273,8 +281,8 @@ Additional env vars for AI advisor and price feeds:
 
 | Variable | Description | Required |
 |---|---|---|
-| `OPENAI_API_KEY` | OpenAI API key for GPT-4o chat advisor | Yes (for AI chat) |
-| `AI_MODEL` | OpenAI model (default: `gpt-4o`) | No |
+| `OPENAI_API_KEY` | API key for AI chat advisor (Google Gemini via OpenAI-compatible endpoint) | Yes (for AI chat) |
+| `AI_MODEL` | AI model ID (default: `gemini-2.5-flash`) | No |
 | `FINNHUB_API_KEY` | Finnhub API key for real-time stock prices | No (mock prices used if absent) |
 | `ARBITRAGE_THRESHOLD_PERCENT` | Min % spread to flag as arbitrage (default: `2.0`) | No |
 | `ARBITRAGE_CHECK_INTERVAL_MS` | Arbitrage scan interval in ms (default: `10000`) | No |
@@ -308,7 +316,7 @@ bun run dev
 - **Chainlink CCIP** -- Cross-chain token bridging for multi-chain settlement
 - **World ID** (`@worldcoin/idkit`) -- Sybil-resistant identity verification
 - **Stealth Addresses** -- Frontend-generated one-time addresses for private settlement
-- **OpenAI GPT-4o** -- AI financial advisor chatbot with streaming responses, portfolio analysis, and arbitrage detection
+- **Google Gemini 2.5 Flash** -- AI financial advisor chatbot (via OpenAI-compatible SDK) with streaming responses, portfolio analysis, and arbitrage detection
 - **Finnhub API** -- Real-time stock/ETF price feeds (maps tokenized RWA symbols to real tickers)
 - **Bun + Hono** -- Backend HTTP server
 - **PostgreSQL + Prisma** -- Order book, user data, per-chain token balances, trading pairs
@@ -342,7 +350,7 @@ The platform includes an AI-powered financial advisor chatbot (bottom-right floa
 - Detects **arbitrage opportunities** when order book prices differ from real market prices (e.g., sell order at $290 when market is $300)
 - Provides actionable trade suggestions with specific prices and profit calculations
 - Streams responses in real-time via SSE (Server-Sent Events)
-- Uses GPT-4o with dynamic context including portfolio, market data, order book, and active arbitrage opportunities
+- Uses Gemini 2.5 Flash with dynamic context including portfolio, market data, order book, and active arbitrage opportunities
 
 ## License
 

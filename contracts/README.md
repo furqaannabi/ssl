@@ -112,13 +112,24 @@ CHAIN=arbitrumSepolia ./deploy.sh  # Arbitrum Sepolia only
 - `FORWARDER_ADDRESS` -- override KeystoneForwarder (optional, auto-resolved)
 - `CCIP_ROUTER` -- override CCIP router (optional, auto-resolved)
 - `LINK_TOKEN` -- override LINK token (optional, auto-resolved)
-- `LINK_FUND` -- LINK to seed vault with (optional, default 5 LINK)
+- `LINK_FUND` -- LINK to seed vault with (optional, default 1 LINK)
 
 **Output:** `backend/addresses.json` with per-chain vault, CCIP receiver, CCIP router, forwarder, USDC, LINK, RPC/WS URLs.
 
 ## Deploy RWA Tokens
 
-After deploying the vault, deploy all tokenized RWA assets and whitelist them:
+After deploying the vault, deploy all tokenized RWA assets and whitelist them (including USDC):
+
+**Using the shell script (recommended):**
+
+```bash
+./deploy-rwa.sh                          # deploy to all chains
+CHAIN=baseSepolia ./deploy-rwa.sh        # single chain
+```
+
+The script reads vault addresses from `backend/addresses.json`, deploys tokens, extracts addresses from broadcast files, writes `backend/rwa-tokens.json`, and auto-whitelists USDC via `cast send`.
+
+**Or manually via forge:**
 
 ```bash
 VAULT_ADDRESS=0x... forge script script/DeployRWATokens.s.sol:DeployRWATokens --rpc-url baseSepolia --broadcast
@@ -129,12 +140,9 @@ VAULT_ADDRESS=0x... forge script script/DeployRWATokens.s.sol:DeployRWATokens --
 - `VAULT_ADDRESS` -- deployed StealthSettlementVault address
 - `MINT_TO` -- address to receive initial supply (optional, defaults to deployer)
 - `MINT_AMOUNT` -- tokens per asset in whole units (optional, default 1,000,000)
+- `USDC_ADDRESS` -- override USDC address (optional, auto-resolved per chain from `SSLChains`)
 
-**Deploys 9 tokens:** tMETA, tGOOGL, tAAPL, tTSLA, tAMZN, tNVDA, tSPY, tQQQ, tBOND. Each is minted and whitelisted on the vault in a single transaction. After running, manually whitelist USDC:
-
-```bash
-cast send $VAULT_ADDRESS "whitelistToken(address,string,string,uint8)" $USDC_ADDRESS "USDC" "USD Coin" 4 --private-key $PRIVATE_KEY --rpc-url baseSepolia
-```
+**Deploys 9 tokens:** tMETA, tGOOGL, tAAPL, tTSLA, tAMZN, tNVDA, tSPY, tQQQ, tBOND. Each is minted and whitelisted on the vault in a single transaction. USDC is auto-whitelisted using the chain-specific address from `SSLChains` (or `USDC_ADDRESS` env override).
 
 ## Adding a New Chain
 

@@ -1,6 +1,8 @@
 /**
  * Token Routes
  * GET /api/tokens — List all whitelisted tokens with prices
+ * GET /api/tokens/prices/all — Get all RWA prices (no DB)
+ * GET /api/tokens/prices/:symbol — Get single RWA price (no DB)
  * GET /api/tokens/:symbol — Get single token with price
  */
 
@@ -57,7 +59,65 @@ tokens.get('/', async (c) => {
     }
 });
 
-// GET /api/tokens/:symbol — Get single token with price
+// GET /api/tokens/prices/all — Get all RWA prices (no DB dependency)
+// Must be registered BEFORE /:symbol to avoid "prices" matching as a symbol
+tokens.get('/prices/all', async (c) => {
+    try {
+        const prices = await PriceFeedService.getAllPricesOrMock();
+        const result = Object.entries(prices).map(([symbol, p]) => {
+            const meta = RWA_TOKEN_META[symbol];
+            return {
+                symbol,
+                realSymbol: meta?.realSymbol || symbol,
+                name: meta?.description || symbol,
+                type: meta?.type || 'UNKNOWN',
+                price: p.price,
+                change: p.change,
+                changePercent: p.changePercent,
+                high: p.high,
+                low: p.low,
+                open: p.open,
+                previousClose: p.previousClose,
+                timestamp: p.timestamp,
+            };
+        });
+        return c.json({ success: true, prices: result });
+    } catch (err) {
+        console.error('[tokens] Prices fetch failed:', err);
+        return c.json({ error: 'Failed to fetch prices' }, 500);
+    }
+});
+
+// GET /api/tokens/prices/:symbol — Get single RWA price (no DB dependency)
+tokens.get('/prices/:symbol', async (c) => {
+    const symbol = c.req.param('symbol');
+    try {
+        const p = await PriceFeedService.getPriceOrMock(symbol);
+        const meta = RWA_TOKEN_META[symbol];
+        return c.json({
+            success: true,
+            price: {
+                symbol,
+                realSymbol: meta?.realSymbol || symbol,
+                name: meta?.description || symbol,
+                type: meta?.type || 'UNKNOWN',
+                price: p.price,
+                change: p.change,
+                changePercent: p.changePercent,
+                high: p.high,
+                low: p.low,
+                open: p.open,
+                previousClose: p.previousClose,
+                timestamp: p.timestamp,
+            },
+        });
+    } catch (err) {
+        console.error('[tokens] Price fetch failed:', err);
+        return c.json({ error: 'Failed to fetch price' }, 500);
+    }
+});
+
+// GET /api/tokens/:symbol — Get single token with price (DB lookup)
 tokens.get('/:symbol', async (c) => {
     const symbol = c.req.param('symbol');
     try {

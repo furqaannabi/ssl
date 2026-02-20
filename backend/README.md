@@ -1,6 +1,6 @@
 # SSL Backend API Documentation
 
-Backend service for the Stealth Settlement Layer (SSL). Handles user authentication, World ID verification, order matching, multi-chain vault event listening, withdrawals, CRE integration, **AI financial advisor (OpenAI GPT-4o)**, real-time price feeds, and arbitrage detection.
+Backend service for the Stealth Settlement Layer (SSL). Handles user authentication, World ID verification, order matching, multi-chain vault event listening, withdrawals, CRE integration, **AI financial advisor (Gemini 2.5 Flash via OpenAI-compatible SDK)**, real-time price feeds, and arbitrage detection.
 
 ## Multi-Chain Architecture
 
@@ -194,11 +194,50 @@ Returns active arbitrage opportunities detected by the background monitor (scans
 }
 ```
 
-### Get All Prices
+### Get All Prices (via chat route)
 **GET** `/api/chat/prices`
 
-### Get Single Price
+### Get Single Price (via chat route)
 **GET** `/api/chat/prices/:symbol`
+
+---
+
+## RWA Token Prices (standalone)
+
+Dedicated price endpoints that don't require a database connection -- useful for frontends and external consumers.
+
+### Get All RWA Prices
+**GET** `/api/tokens/prices/all`
+
+Returns all whitelisted RWA token prices with metadata.
+
+**Response:**
+```json
+{
+  "success": true,
+  "prices": [
+    {
+      "symbol": "tMETA",
+      "realSymbol": "META",
+      "name": "Meta Platforms Inc.",
+      "type": "STOCK",
+      "price": 595.20,
+      "change": 3.40,
+      "changePercent": 0.57,
+      "high": 598.10,
+      "low": 591.50,
+      "open": 591.80,
+      "previousClose": 591.80,
+      "timestamp": 1708444800000
+    }
+  ]
+}
+```
+
+### Get Single RWA Price
+**GET** `/api/tokens/prices/:symbol`
+
+Returns price data for a single RWA token by symbol (e.g., `tMETA`, `tAAPL`).
 
 ---
 
@@ -364,8 +403,8 @@ Single-chain backwards-compat file with `vault`, `bond`, `usdc` for Base Sepolia
 | `DATABASE_URL` | PostgreSQL connection string |
 | `CRE_GATEWAY_URL` | Production CRE gateway (optional) |
 | `CRE_WORKFLOW_ID` | Production CRE workflow ID (optional) |
-| `OPENAI_API_KEY` | OpenAI API key for GPT-4o AI advisor (required for `/api/chat`) |
-| `AI_MODEL` | OpenAI model ID (default: `gpt-4o`) |
+| `OPENAI_API_KEY` | API key for AI advisor -- uses Google Gemini via OpenAI-compatible endpoint (required for `/api/chat`) |
+| `AI_MODEL` | AI model ID (default: `gemini-2.5-flash`) |
 | `FINNHUB_API_KEY` | Finnhub API key for real-time stock/ETF prices (optional, mock prices used if absent) |
 | `ARBITRAGE_THRESHOLD_PERCENT` | Min % spread to flag as arbitrage (default: `2.0`) |
 | `ARBITRAGE_CHECK_INTERVAL_MS` | Arbitrage scan interval in ms (default: `10000`) |
