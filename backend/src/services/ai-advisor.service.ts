@@ -4,14 +4,9 @@
  * Uses streaming for real-time responses
  */
 
-import OpenAI from 'openai';
+import type OpenAI from 'openai';
+import openai, { AI_MODEL } from '../clients/openai';
 import { AIContextService } from './ai-context.service';
-
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY || '',
-});
-
-const AI_MODEL = process.env.AI_MODEL || 'gpt-4o';
 
 const SYSTEM_PROMPT = `You are the SSL Financial Advisor — an AI assistant embedded in the Stealth Settlement Layer (SSL) platform, a private cross-chain trading platform for tokenized Real World Assets (RWA).
 

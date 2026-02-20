@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import "forge-std/Script.sol";
 import "../src/mocks/MockRWAToken.sol";
 import "../src/core/SSLVault.sol";
+import "./Config.sol";
 
 /**
  * @title DeployRWATokens
@@ -24,6 +25,13 @@ contract DeployRWATokens is Script {
         string symbol;
         uint8 decimals;
         uint8 tokenType; // 0=STOCK, 1=ETF, 2=BOND
+    }
+
+    function _getChainUsdc() internal view returns (address) {
+        if (block.chainid == SSLChains.BASE_SEPOLIA_CHAIN_ID) return SSLChains.BASE_SEPOLIA_USDC;
+        if (block.chainid == SSLChains.ARB_SEPOLIA_CHAIN_ID) return SSLChains.ARB_SEPOLIA_USDC;
+        if (block.chainid == SSLChains.ETH_SEPOLIA_CHAIN_ID) return SSLChains.ETH_SEPOLIA_USDC;
+        return address(0);
     }
 
     function run() external {
@@ -85,15 +93,16 @@ contract DeployRWATokens is Script {
             ));
         }
 
-        // Also whitelist existing USDC on the vault if not already whitelisted
-        // This is safe to call — will revert if already whitelisted
-        // Users should manually whitelist USDC after deployment if needed
+        // Whitelist USDC (resolved per-chain from SSLChains)
+        address usdc = vm.envOr("USDC_ADDRESS", _getChainUsdc());
+        if (usdc != address(0)) {
+            vault.whitelistToken(usdc, "USDC", "USD Coin", 4);
+            console.log(string.concat("USDC: ", vm.toString(usdc), " (type=4)"));
+        }
 
         vm.stopBroadcast();
 
         console.log("");
         console.log("=== All RWA tokens deployed and whitelisted ===");
-        console.log("Don't forget to whitelist USDC manually:");
-        console.log("  vault.whitelistToken(USDC_ADDRESS, 'USDC', 'USD Coin', 4)");
     }
 }
