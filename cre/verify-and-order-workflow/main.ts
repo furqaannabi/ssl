@@ -225,21 +225,31 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
       });
     }
 
-    runtime.log("Proof Verified. Proceeding to on-chain report for address: " + data.userAddress);
+    runtime.log("Proof Verified. Broadcasting on-chain report to all chains for address: " + data.userAddress);
 
     const reportData = encodeAbiParameters(
       parseAbiParameters("uint8 reportType, address user"),
       [0, data.userAddress as `0x${string}`]
     );
 
-    const txHash = sendReport(runtime, reportData);
-    runtime.log("Verify tx: " + txHash);
+    // Broadcast verification to every configured chain vault
+    const chainResults: Record<string, string> = {};
+    for (const [chainName, chainCfg] of Object.entries(runtime.config.chains)) {
+      try {
+        const txHash = sendReportToChain(runtime, reportData, chainCfg.chainSelector, chainCfg.vault);
+        chainResults[chainName] = txHash;
+        runtime.log(`Verify tx on ${chainName}: ${txHash}`);
+      } catch (err: any) {
+        runtime.log(`Verify tx FAILED on ${chainName}: ${err.message}`);
+        chainResults[chainName] = "FAILED: " + (err.message || "unknown");
+      }
+    }
 
     return JSON.stringify({
       status: "verified",
       nullifierHash: data.nullifierHash,
       userAddress: data.userAddress,
-      txHash,
+      chains: chainResults,
     });
   }
 
