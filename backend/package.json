@@ -9,7 +9,7 @@
         "db:generate": "prisma generate",
         "db:migrate": "prisma migrate dev",
         "db:push": "prisma db push",
-        "db:studio": "prisma db studio"
+        "db:studio": "prisma studio"
     },
     "dependencies": {
         "@prisma/adapter-pg": "^7.4.0",

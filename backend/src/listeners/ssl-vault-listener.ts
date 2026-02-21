@@ -199,7 +199,9 @@ async function startChainListener(chainName: string, chain: ChainConfig) {
     }
 
     const alchemyKey = process.env.ALCHEMY_API_KEY;
-    const wsUrl = alchemyKey ? `${chain.wsUrl}${alchemyKey}` : chain.wsUrl;
+    const wsUrl = (alchemyKey && chain.wsUrl.includes("alchemy.com"))
+        ? `${chain.wsUrl}${alchemyKey}`
+        : chain.wsUrl;
 
     try {
         const provider = new ethers.WebSocketProvider(wsUrl);
