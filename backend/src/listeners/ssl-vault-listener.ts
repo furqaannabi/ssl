@@ -70,11 +70,18 @@ async function ensurePairExists(
     await prisma.token.upsert({
         where: { address: usdc },
         update: {},
-        create: { address: usdc, name: "USD Coin", symbol: "USDC", decimals: 6, chainSelector: "ethereum-testnet-sepolia-base-1" },
+        create: { address: usdc, name: "USD Coin", symbol: "USDC", decimals: 6, chainSelector },
     });
 
-    await prisma.pair.create({
-        data: {
+    await prisma.pair.upsert({
+        where: {
+            baseTokenAddress_quoteTokenAddress: {
+                baseTokenAddress: address,
+                quoteTokenAddress: usdc,
+            }
+        },
+        update: {},
+        create: {
             baseTokenAddress: address,
             quoteTokenAddress: usdc,
         },
