@@ -58,16 +58,14 @@ console.log(pairs)
   };
 
   /**
-   * Get total available balance for a token across ALL chains.
-   * Matches by address first, then falls back to symbol matching
-   * (handles cross-chain tokens like USDC with different addresses).
+   * Get available balance for a specific token by exact address.
+   * The pair definition already encodes which chain's token is involved,
+   * so we always match by exact address — no cross-chain aggregation.
    */
-  const getAvailableBalance = (tokenAddress: string, decimals: number, symbol?: string): number => {
+  const getAvailableBalance = (tokenAddress: string, decimals: number): number => {
       let total = 0;
       for (const b of balances) {
-          const isMatch = b.token === tokenAddress.toLowerCase() ||
-              (symbol && tokenLookup[b.token]?.symbol === symbol);
-          if (isMatch) {
+          if (b.token === tokenAddress.toLowerCase()) {
               total += Number(b.balance) / (10 ** decimals);
           }
       }
@@ -209,19 +207,21 @@ console.log(pairs)
         return;
     }
 
-    // CHECK BALANCES — aggregate across all chains for cross-chain support
+    // CHECK BALANCES
     if (side === 'BUY') {
-        const decimals = pair.quoteToken.decimals || 18;
-        const available = getAvailableBalance(pair.quoteToken.address, decimals, pair.quoteToken.symbol);
+        // BUY: all USDC across all chains counts (cross-chain deposit supported)
+        const decimals = pair.quoteToken.decimals || 6;
+        const available = getAvailableBalance(pair.quoteToken.address, decimals);
         if (totalValue > available) {
-            toast.error(`Insufficient ${pair.quoteToken.symbol} balance. Need: ${totalValue.toFixed(2)}, Have: ${available.toFixed(2)} (across all chains)`);
+            toast.error(`Insufficient ${pair.quoteToken.symbol}. Need: ${totalValue.toFixed(2)}, Have: ${available.toFixed(2)} (across all chains)`);
             return;
         }
     } else {
+        // SELL: only the exact token on this pair's chain (vault-specific)
         const decimals = pair.baseToken.decimals || 18;
-        const available = getAvailableBalance(pair.baseToken.address, decimals, pair.baseToken.symbol);
+        const available = getAvailableBalance(pair.baseToken.address, decimals);
         if (Number(amount) > available) {
-            toast.error(`Insufficient ${pair.baseToken.symbol} balance. Need: ${amount}, Have: ${available.toFixed(4)} (across all chains)`);
+            toast.error(`Insufficient ${pair.baseToken.symbol} on this chain. Have: ${available.toFixed(4)}`);
             return;
         }
     }
@@ -470,13 +470,15 @@ console.log(pairs)
                             if (!pair) return;
                             
                             if (side === 'BUY') {
-                                const decimals = pair.quoteToken.decimals || 18;
-                                const bal = getAvailableBalance(pair.quoteToken.address, decimals, pair.quoteToken.symbol);
+                                // BUY: aggregate USDC across all chains
+                                const decimals = pair.quoteToken.decimals || 6;
+                                const bal = getAvailableBalance(pair.quoteToken.address, decimals);
                                 const p = Number(price);
-                                if (p > 0) setAmount((bal/p).toFixed(4));
+                                if (p > 0) setAmount((bal / p).toFixed(4));
                             } else {
+                                // SELL: only this pair's chain vault balance
                                 const decimals = pair.baseToken.decimals || 18;
-                                const bal = getAvailableBalance(pair.baseToken.address, decimals, pair.baseToken.symbol);
+                                const bal = getAvailableBalance(pair.baseToken.address, decimals);
                                 setAmount(bal.toFixed(4));
                             }
                         }}>Max</span>
@@ -486,13 +488,14 @@ console.log(pairs)
                             const pair = pairs.find(p => p.id === selectedPairId);
                             if (!pair) return "--";
                             if (side === 'BUY') {
-                                const decimals = pair.quoteToken.decimals || 18;
-                                const bal = getAvailableBalance(pair.quoteToken.address, decimals, pair.quoteToken.symbol);
-                                return `${bal.toFixed(2)} ${pair.quoteToken.symbol} (all chains)`;
+                                const decimals = pair.quoteToken.decimals || 6;
+                                const bal = getAvailableBalance(pair.quoteToken.address, decimals);
+                                const chainLabel = Object.values(CHAINS).find(c => c.chainSelector === pair.quoteToken.chainSelector)?.name?.replace(' Sepolia','') || 'chain';
+                                return `${bal.toFixed(2)} ${pair.quoteToken.symbol} on ${chainLabel}`;
                             } else {
                                 const decimals = pair.baseToken.decimals || 18;
-                                const bal = getAvailableBalance(pair.baseToken.address, decimals, pair.baseToken.symbol);
-                                return `${bal.toFixed(4)} ${pair.baseToken.symbol} (all chains)`;
+                                const bal = getAvailableBalance(pair.baseToken.address, decimals);
+                                return `${bal.toFixed(4)} ${pair.baseToken.symbol} (this chain)`;
                             }
                         })()}
                      </div>
@@ -541,12 +544,12 @@ console.log(pairs)
                                   if (!pair) return "text-white";
                                   
                                   if (side === 'BUY') {
-                                      const decimals = pair.quoteToken.decimals || 18;
-                                      const available = getAvailableBalance(pair.quoteToken.address, decimals, pair.quoteToken.symbol);
+                                      const decimals = pair.quoteToken.decimals || 6;
+                                      const available = getAvailableBalance(pair.quoteToken.address, decimals);
                                       return totalVal > available ? "text-red-500" : "text-primary";
                                   } else {
                                       const decimals = pair.baseToken.decimals || 18;
-                                      const available = getAvailableBalance(pair.baseToken.address, decimals, pair.baseToken.symbol);
+                                      const available = getAvailableBalance(pair.baseToken.address, decimals);
                                       return Number(amount) > available ? "text-red-500" : "text-white";
                                   }
                               })()
@@ -561,19 +564,24 @@ console.log(pairs)
                                   
                                   let available = 0;
                                   let isInsufficient = false;
-                                  
+                                   
                                   if (side === 'BUY') {
-                                      const decimals = pair.quoteToken.decimals || 18;
-                                      available = getAvailableBalance(pair.quoteToken.address, decimals, pair.quoteToken.symbol);
+                                      const decimals = pair.quoteToken.decimals || 6;
+                                       available = getAvailableBalance(pair.quoteToken.address, decimals);
                                       if (totalVal > available) isInsufficient = true;
                                   } else {
                                       const decimals = pair.baseToken.decimals || 18;
-                                      available = getAvailableBalance(pair.baseToken.address, decimals, pair.baseToken.symbol);
+                                      available = getAvailableBalance(pair.baseToken.address, decimals);
                                       if (Number(amount) > available) isInsufficient = true;
                                   }
 
                                   if (isInsufficient) {
-                                      return <span className="text-[9px] text-red-500 font-mono">INSUFFICIENT BALANCE (Max: {available.toFixed(4)} across all chains)</span>;
+                                      return <span className="text-[9px] text-red-500 font-mono">
+                                          INSUFFICIENT BALANCE — Max: {side === 'BUY'
+                                              ? `${available.toFixed(2)} ${pair.quoteToken.symbol} on ${Object.values(CHAINS).find(c => c.chainSelector === pair.quoteToken.chainSelector)?.name?.replace(' Sepolia','') || 'chain'}`
+                                              : `${available.toFixed(4)} ${pair.baseToken.symbol} on ${Object.values(CHAINS).find(c => c.chainSelector === pair.baseToken.chainSelector)?.name?.replace(' Sepolia','') || 'chain'}`
+                                          }
+                                      </span>;
                                   }
                                   return null;
                               })()}
