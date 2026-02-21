@@ -70,7 +70,8 @@ interface MatchPayload {
   action: "settle_match";
   baseTokenAddress: string;
   quoteTokenAddress: string;
-  tradeAmount: string;
+  tradeAmount: string;   // base token amount in wei (buyer receives)
+  quoteAmount: string;   // quote token amount in wei (seller receives)
   crossChain?: boolean;
   sourceChainSelector?: string;
   destChainSelector?: string;
@@ -328,7 +329,8 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
   if (data.action === "settle_match") {
     runtime.log("Settlement request for " + data.buyer.orderId + " <-> " + data.seller.orderId);
 
-    const tradeAmount = BigInt(data.tradeAmount);
+    const tradeAmount = BigInt(data.tradeAmount);   // base token in wei
+    const quoteAmount = BigInt(data.quoteAmount);   // quote token in wei
 
     const buyerStealthAddr = data.buyer.stealthAddress;
     const sellerStealthAddr = data.seller.stealthAddress;
@@ -376,7 +378,7 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
           destReceiver as `0x${string}`,
           sellerStealthAddr as `0x${string}`,
           data.quoteTokenAddress as `0x${string}`,
-          tradeAmount,
+          quoteAmount,   // USDC amount in wei (quote token) → seller receives on dest chain
         ]
       );
 
@@ -405,8 +407,8 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
         sellerStealthAddr as `0x${string}`,
         data.baseTokenAddress as `0x${string}`,
         data.quoteTokenAddress as `0x${string}`,
-        tradeAmount,
-        tradeAmount,
+        tradeAmount,   // amountA: base token in wei → buyer receives
+        quoteAmount,   // amountB: quote token in wei → seller receives
       ]
     );
 
