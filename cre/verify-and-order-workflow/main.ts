@@ -15,7 +15,7 @@ import {
   consensusIdenticalAggregation,
   ok,
 } from "@chainlink/cre-sdk";
-import { keccak256, encodePacked, encodeAbiParameters, parseAbiParameters } from "viem";
+import { keccak256, encodePacked, encodeAbiParameters, parseAbiParameters, encodeFunctionData, decodeAbiParameters } from "viem";
 
 // ──────────────────────────────────────────────
 // Types
@@ -58,6 +58,7 @@ interface VerifyPayload {
   verification_level: string;
   signal: string;
   userAddress: string;
+  selectedChains?: string[]; // chain names to verify on; if omitted, all chains are used
 }
 
 type VerificationResponse = {
@@ -151,6 +152,50 @@ function sendReport(runtime: Runtime<Config>, reportData: `0x${string}`) {
 }
 
 // ──────────────────────────────────────────────
+// On-chain isVerified check
+// ──────────────────────────────────────────────
+
+const IS_VERIFIED_ABI = [{
+  name: "isVerified",
+  type: "function",
+  inputs: [{ name: "", type: "address" }],
+  outputs: [{ name: "", type: "bool" }],
+  stateMutability: "view",
+}] as const;
+
+function checkIsVerified(runtime: Runtime<Config>, chainCfg: ChainEntry, userAddress: string): boolean {
+  const network = getNetwork({
+    chainFamily: "evm",
+    chainSelectorName: chainCfg.chainSelector,
+    isTestnet: true,
+  });
+
+  if (!network) {
+    runtime.log("Network not found for isVerified check on " + chainCfg.chainSelector + ", assuming not verified");
+    return false;
+  }
+
+  const evmClient = new EVMClient(network.chainSelector.selector);
+
+  const callData = encodeFunctionData({
+    abi: IS_VERIFIED_ABI,
+    functionName: "isVerified",
+    args: [userAddress as `0x${string}`],
+  });
+
+  const reply = evmClient.callContract(runtime, {
+    call: {
+      to: hexToBase64(chainCfg.vault as `0x${string}`),
+      data: hexToBase64(callData),
+    },
+  }).result();
+
+  const hexData = ("0x" + Buffer.from(reply.data).toString("hex")) as `0x${string}`;
+  const [verified] = decodeAbiParameters([{ type: "bool" }], hexData);
+  return verified;
+}
+
+// ──────────────────────────────────────────────
 // Verification helper
 // ──────────────────────────────────────────────
 
@@ -225,17 +270,32 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
       });
     }
 
-    runtime.log("Proof Verified. Broadcasting on-chain report to all chains for address: " + data.userAddress);
+    runtime.log("Proof Verified. Broadcasting on-chain report for address: " + data.userAddress);
 
     const reportData = encodeAbiParameters(
       parseAbiParameters("uint8 reportType, address user"),
       [0, data.userAddress as `0x${string}`]
     );
 
-    // Broadcast verification to every configured chain vault
+    // If selectedChains is provided, only verify on those chains; otherwise verify on all chains
+    const allChains = Object.entries(runtime.config.chains);
+    const targetChains = data.selectedChains && data.selectedChains.length > 0
+      ? allChains.filter(([chainName]) => data.selectedChains!.includes(chainName))
+      : allChains;
+
+    if (targetChains.length === 0) {
+      runtime.log("No matching chains found for selectedChains: " + JSON.stringify(data.selectedChains));
+    }
+
     const chainResults: Record<string, string> = {};
-    for (const [chainName, chainCfg] of Object.entries(runtime.config.chains)) {
+    for (const [chainName, chainCfg] of targetChains) {
       try {
+        const alreadyVerified = checkIsVerified(runtime, chainCfg, data.userAddress);
+        if (alreadyVerified) {
+          runtime.log(`User already verified on ${chainName}, skipping`);
+          chainResults[chainName] = "already_verified";
+          continue;
+        }
         const txHash = sendReportToChain(runtime, reportData, chainCfg.chainSelector, chainCfg.vault);
         chainResults[chainName] = txHash;
         runtime.log(`Verify tx on ${chainName}: ${txHash}`);
