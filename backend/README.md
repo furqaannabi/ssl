@@ -246,7 +246,7 @@ Returns price data for a single RWA token by symbol (e.g., `tMETA`, `tAAPL`).
 ### List Pairs
 **GET** `/api/pairs`
 
-Returns all trading pairs. Pairs are auto-created when new tokens are deposited into any vault.
+Returns all trading pairs. One pair per RWA symbol (chain-agnostic). Each pair includes available base token addresses per chain so the frontend can let users select which chain to trade on.
 
 **Response:**
 ```json
@@ -255,8 +255,12 @@ Returns all trading pairs. Pairs are auto-created when new tokens are deposited 
   "pairs": [
     {
       "id": "pair-uuid",
-      "baseToken": { "symbol": "TBILL", "address": "0x...", "decimals": 18, "chainSelector": "ethereum-testnet-sepolia-base-1" },
-      "quoteToken": { "symbol": "USDC", "address": "0x...", "decimals": 6, "chainSelector": "ethereum-testnet-sepolia-base-1" }
+      "baseSymbol": "tMETA",
+      "quoteSymbol": "USDC",
+      "tokens": [
+        { "address": "0x...", "chainSelector": "ethereum-testnet-sepolia-base-1", "decimals": 18 },
+        { "address": "0x...", "chainSelector": "ethereum-testnet-sepolia-arbitrum-1", "decimals": 18 }
+      ]
     }
   ]
 }
@@ -280,9 +284,15 @@ Returns all trading pairs. Pairs are auto-created when new tokens are deposited 
   "price": "50",
   "side": "BUY",
   "stealthAddress": "0x1234567890abcdef1234567890abcdef12345678",
-  "userAddress": "0x123..."
+  "userAddress": "0x123...",
+  "baseChainSelector": "ethereum-testnet-sepolia-arbitrum-1",
+  "quoteChainSelector": "ethereum-testnet-sepolia-base-1"
 }
 ```
+
+- `baseChainSelector` -- chain where the RWA token is deposited (used to find vault and resolve base token address)
+- `quoteChainSelector` -- chain where the buyer's USDC is held (may differ from `baseChainSelector` for cross-chain trades)
+- If `quoteChainSelector != baseChainSelector`, the matching engine will initiate a cross-chain CCIP settlement
 
 **Response (SSE Stream):**
 ```json
@@ -353,7 +363,7 @@ Returns system-wide compliance metrics: verified user count, ZKP proof stats, an
 
 The backend runs WebSocket listeners for **every chain with a vault in `addresses.json`**:
 
-- **`Funded`** -- Auto-creates user, token, and trading pair records; updates internal balances tagged with `chainSelector`; records a `DEPOSIT` transaction.
+- **`Funded`** -- Upserts user and `Token` record (address + chainSelector); updates `TokenBalance` tagged with `chainSelector`; records a `DEPOSIT` transaction. Trading pairs are **not** auto-created here -- they are seeded at startup by symbol via `seed-tokens.ts`.
 - **`WithdrawalRequested`** -- Validates sufficient balance on the correct chain, atomically deducts balance, forwards to CRE. Skips withdrawals already handled by `/api/withdraw`.
 - **`Settled`** -- Records same-chain settlement in the `Settlement` table.
 - **`CrossChainSettled`** -- Records CCIP bridge initiation (status: `BRIDGING`) with the CCIP message ID.
@@ -361,18 +371,25 @@ The backend runs WebSocket listeners for **every chain with a vault in `addresse
 
 Each listener reconnects automatically on connection drops (5s backoff).
 
+**Startup sequence:** `seedTokens()` (registers known RWA tokens in DB and upserts one `Pair` per symbol) → `startVaultListener()` (WebSocket event listeners per chain).
+
 ---
 
 ## Data Model (Prisma)
 
 ```
-Token (address, name, symbol, decimals, chainSelector)
-  └── Pair (baseTokenAddress, quoteTokenAddress)
-        └── Order (pairId, amount, price, side, status, stealthAddress, userAddress)
+Token (address, name, symbol, decimals, chainSelector)    ← @@unique([address, chainSelector])
+                                                          ← one row per token per chain
+
+Pair (baseSymbol @unique)                                 ← one row per RWA symbol (chain-agnostic)
+  └── Order (pairId, amount, price, side, status,
+             stealthAddress, userAddress,
+             baseChainSelector,                           ← chain where RWA is deposited
+             quoteChainSelector)                          ← chain where buyer's USDC is held
 
 User (address, name, isVerified, nonce)
   ├── Order[]
-  ├── TokenBalance[] (token, balance, chainSelector)   ← @@unique([userAddress, token, chainSelector])
+  ├── TokenBalance[] (token, balance, chainSelector)      ← @@unique([userAddress, token, chainSelector])
   ├── Withdrawal[] (withdrawalId, token, amount, status)
   ├── Transaction[] (type, token, amount, chainSelector, txHash)
   └── Session[]
@@ -380,6 +397,8 @@ User (address, name, isVerified, nonce)
 
 Order lifecycle: `PENDING` -> `OPEN` -> `MATCHED` -> `SETTLED` (or `CANCELLED`)
 Withdrawal lifecycle: `PENDING` -> `PROCESSING` -> `COMPLETED` | `FAILED`
+
+**Cross-chain detection**: if `quoteChainSelector != baseChainSelector`, the matching engine sends a cross-chain settlement (type=3) via CCIP instead of a same-chain settle (type=1). Token addresses for the base and quote tokens are resolved from the `Token` table by symbol + chainSelector at match time.
 
 ---
 
@@ -398,7 +417,7 @@ Single-chain backwards-compat file with `vault`, `bond`, `usdc` for Base Sepolia
 | Variable | Description |
 |---|---|
 | `EVM_PRIVATE_KEY` | Backend signer private key |
-| `ALCHEMY_API_KEY` | Alchemy API key (used for all chain WS URLs) |
+| `ALCHEMY_API_KEY` | Alchemy API key (appended to WS URLs that contain `alchemy.com`) |
 | `JWT_SECRET` | Secret for SIWE session tokens |
 | `DATABASE_URL` | PostgreSQL connection string |
 | `CRE_GATEWAY_URL` | Production CRE gateway (optional) |

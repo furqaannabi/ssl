@@ -30,7 +30,11 @@ User                    Backend                 CRE                     Vault
  │                        │   userAddress} ─────> │                       │
  │                        │                       │── verify proof via    │
  │                        │                       │   World ID cloud API  │
- │                        │                       │── report(type=0) ──> │
+ │                        │                       │── for each chain:     │
+ │                        │                       │   read isVerified()   │
+ │                        │                       │   (callContract)      │
+ │                        │                       │── if not verified:    │
+ │                        │                       │   report(type=0) ──> │
  │                        │                       │   encode(uint8=0,    │
  │                        │                       │    address user)     │
  │                        │                       │                      │── isVerified[user]
@@ -40,10 +44,12 @@ User                    Backend                 CRE                     Vault
 
 - Backend receives World ID proof from frontend (authenticated via SIWE session)
 - CRE calls the World ID cloud API to verify the proof
-- CRE sends `report(type=0, address user)` to vault via KeystoneForwarder
+- CRE reads `isVerified(userAddress)` on-chain for each target chain via `EVMClient.callContract`
+- Skips chains where the user is already verified; only sends `report(type=0)` to unverified chains
 - Vault marks `isVerified[user] = true`
+- Optional `selectedChains` array in the request limits verification to specific chains
 
-### Phase 2: Funding + Auto Pair Creation (Multi-Chain)
+### Phase 2: Funding (Multi-Chain)
 
 ```
 User                    Vault (any chain)       Backend Listener
@@ -51,21 +57,23 @@ User                    Vault (any chain)       Backend Listener
  │── fund(token, amount)─>│                       │
  │                        │── emit Funded ───────────> │
  │                        │                       │── track chainSelector
- │                        │                       │── upsert TokenBalance
- │                        │                       │   (per chain)
- │                        │                       │── auto-create TOKEN/USDC Pair
+ │                        │                       │── upsert Token (address, chain)
+ │                        │                       │── upsert TokenBalance (per chain)
 ```
 
 - User calls `fund(token, amount)` on the vault (requires `isVerified[msg.sender]`)
 - Backend runs a **multi-chain listener** -- one WebSocket connection per chain with a deployed vault
 - Each deposit is tracked with a `chainSelector`, so balances are per-user-per-token-per-chain
-- New tokens automatically get a TOKEN/USDC trading pair created
+- Trading pairs (one per RWA symbol) are seeded at startup by `seed-tokens.ts`, not auto-created on deposit
 
 ### Phase 3: Order Submission
 
 ```
 User                    Backend
  │── POST /api/order ──> │── create Order (PENDING)
+ │  {pairId, side,       │   with baseChainSelector
+ │   baseChainSelector,  │   + quoteChainSelector
+ │   quoteChainSelector} │
  │ <── {orderId} ─────── │
  │── POST /confirm ────> │── activate -> OPEN
  │ <── SSE stream ─────  │── run matching engine
@@ -73,29 +81,32 @@ User                    Backend
 
 - Two-step: create order + confirm with auth cookie
 - Orders include a `stealthAddress` (Ethereum address generated client-side) for private settlement
-- Matching engine runs immediately on confirmation
+- `baseChainSelector` -- the chain where the RWA token is deposited (vault to call for settlement)
+- `quoteChainSelector` -- the chain where the buyer's USDC is held (may differ for cross-chain trades)
+- Matching engine runs immediately on confirmation; matches require the same `baseChainSelector` and `pairId`
 
 ### Phase 4: Settlement (Same-Chain & Cross-Chain)
 
-**Same-chain settlement:**
+**Same-chain settlement** (`quoteChainSelector == baseChainSelector`):
 ```
-Backend ──> CRE ──> report(type=1) ──> Vault
-                                        │── transfer baseToken -> stealthBuyer
-                                        │── transfer quoteToken -> stealthSeller
+Backend ──> CRE ──> report(type=1) ──> Vault (baseChain)
+                    tradeAmount (base wei)              │── transfer baseToken → stealthBuyer  (amountA)
+                    quoteAmount (USDC wei)              └── transfer quoteToken → stealthSeller (amountB)
 ```
 
-**Cross-chain settlement (CCIP programmable token transfer):**
+**Cross-chain settlement** (`quoteChainSelector != baseChainSelector`) via CCIP:
 ```
-Backend ──> CRE ──> report(type=3) ──> Source Vault ──CCIP(USDC + orderId/recipient)──> SSLCCIPReceiver (dest chain)
-                                                                                          │
-                                                                                          ├── transfers USDC to seller
-                                                                                          └── calls Dest Vault.markSettled(orderId)
+Backend ──> CRE ──> report(type=3) ──> Source Vault (quoteChain) ──CCIP(quoteAmount USDC + orderId/recipient)──> SSLCCIPReceiver (destChain)
+                                                                                                                   │
+                                                                                                                   ├── transfers USDC to seller (stealthSeller)
+                                                                                                                   └── calls Dest Vault.markSettled(orderId)
 ```
 
 For cross-chain trades (e.g. buy Token X on Arbitrum using USDC on Base):
-- CRE sends **one report** (type=3) to the source vault
-- Source vault sends USDC + encoded `(orderId, recipient)` via CCIP to the **SSLCCIPReceiver** on the destination chain
-- The receiver forwards USDC to the seller and calls the destination vault to mark the order settled
+- CRE sends **one report** (type=3) to the source vault (where buyer's USDC is held)
+- Source vault sends `quoteAmount` USDC + encoded `(orderId, recipient)` via CCIP to the **SSLCCIPReceiver** on the destination chain
+- The receiver forwards USDC to the seller's stealth address and calls the destination vault to mark the order settled
+- `tradeAmount` (base token) and `quoteAmount` (USDC) are separate wei values with correct decimal precision
 - CCIP fees are paid in LINK from the vault's balance
 
 ### Phase 5: Withdrawal
@@ -151,8 +162,8 @@ User ── requestWithdrawal ──> Vault ── event ──> Backend Listene
 
 Single HTTP trigger with three actions:
 
-- `verify` -- Validates World ID proof via cloud API, writes verify report `(type=0)` to vault
-- `settle_match` -- Receives matched order data from backend, writes settlement report(s) to vault. For cross-chain trades, sends one report (type=3) to the source vault which bridges USDC via CCIP to the destination chain's `SSLCCIPReceiver`.
+- `verify` -- Validates World ID proof via cloud API, then reads `isVerified(userAddress)` on each target chain via `EVMClient.callContract`. Only writes `report(type=0)` on chains where the user is not yet verified. Supports optional `selectedChains` to restrict which chains are checked.
+- `settle_match` -- Receives matched order data from backend (including separate `tradeAmount` for the base token and `quoteAmount` for USDC, plus `baseChainSelector`). Routes settlement to the vault on `baseChainSelector` via `report(type=1)`. For cross-chain trades, sends `report(type=3)` to the source vault which bridges `quoteAmount` USDC via CCIP to the destination chain's `SSLCCIPReceiver`.
 - `withdraw` -- Receives withdrawal request, writes withdrawal report `(type=2)` to vault
 
 ### Backend (`backend/`)
@@ -168,19 +179,23 @@ Bun + Hono HTTP server with PostgreSQL (Prisma ORM):
 - **Withdrawals** -- `POST /api/withdraw` + `GET /api/withdraw`
 - **AI Chat** -- `POST /api/chat` (SSE streaming GPT-4o financial advisor) + `GET /api/chat/arbitrage` + `GET /api/chat/prices`
 - **Multi-Chain Vault Listener** -- Watches on-chain events on **all chains with deployed vaults**:
-  - `Funded` -- Upserts user, auto-creates Token + Pair, updates TokenBalance (chain-aware)
+  - `Funded` -- Upserts user + Token record (by address + chainSelector), updates TokenBalance (chain-aware); trading pairs are NOT auto-created here -- they are seeded once at startup by symbol
   - `WithdrawalRequested` -- Validates balance, deducts, forwards to CRE
-- **Matching Engine** -- Price/time priority matching. On match: resolves token addresses and chain selectors, sends to CRE
+- **Matching Engine** -- Price/time priority matching. On match: resolves token addresses from DB by symbol + chainSelector, computes `tradeAmount` (base token wei) and `quoteAmount` (USDC wei) independently with correct decimals, sends both to CRE
 
 #### Data Model (Prisma)
 
 ```
-Token (address, name, symbol, decimals, chainSelector)
-  └── Pair (baseTokenAddress, quoteTokenAddress)
-        └── Order (pairId, amount, price, side, status, stealthAddress, userAddress)
+Token (address, name, symbol, decimals, chainSelector)   ← one row per token per chain
+
+Pair (baseSymbol @unique)                                 ← one row per RWA symbol (chain-agnostic)
+  └── Order (pairId, amount, price, side, status,
+             stealthAddress, userAddress,
+             baseChainSelector, quoteChainSelector)       ← per-order chain context
+
 User (address, name, isVerified, nonce)
   ├── Order[]
-  ├── TokenBalance[] (token, balance, chainSelector)  ← per-chain
+  ├── TokenBalance[] (token, balance, chainSelector)      ← per-chain
   ├── Withdrawal[] (withdrawalId, token, amount, status)
   ├── Transaction[] (type, token, amount, chainSelector)
   └── Session[]

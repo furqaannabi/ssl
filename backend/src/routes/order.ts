@@ -26,6 +26,8 @@ interface OrderInitPayload {
     side: "BUY" | "SELL";
     stealthAddress: string;
     userAddress: string;
+    baseChainSelector: string;   // chain where RWA token is (both sides must agree)
+    quoteChainSelector: string;  // chain where USDC is — buyer chooses
 }
 
 interface OrderConfirmPayload {
@@ -44,6 +46,8 @@ order.post("/", authMiddleware, async (c) => {
         "price",
         "side",
         "stealthAddress",
+        "baseChainSelector",
+        "quoteChainSelector",
     ] as const;
 
     for (const field of required) {
@@ -93,8 +97,10 @@ order.post("/", authMiddleware, async (c) => {
                 price: body.price,
                 side: body.side as OrderSide,
                 stealthAddress: body.stealthAddress,
-                status: OrderStatus.PENDING, // Wait for signature
+                status: OrderStatus.PENDING,
                 userAddress: userAddress,
+                baseChainSelector: body.baseChainSelector,
+                quoteChainSelector: body.quoteChainSelector,
             },
         });
 

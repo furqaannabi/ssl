@@ -22,30 +22,18 @@ const ERC20_ABI = [
 ];
 
 /**
- * Ensure Token and Pair records exist for a deposited token on a given chain.
+ * Ensure Token record exists for a deposited token on a given chain.
+ * Pairs are seeded by symbol at startup — no dynamic pair creation needed.
  */
-async function ensurePairExists(
+async function ensureTokenExists(
     tokenAddress: string,
     chainSelector: string,
-    usdcAddress: string,
     provider: ethers.WebSocketProvider
 ) {
     const address = tokenAddress.toLowerCase();
-    const usdc = usdcAddress.toLowerCase();
 
-    if (address === usdc) return;
-
-    const existingPair = await prisma.pair.findUnique({
-        where: {
-            baseTokenAddress_quoteTokenAddress: {
-                baseTokenAddress: address,
-                quoteTokenAddress: usdc,
-            }
-        }
-    });
-    if (existingPair) return;
-
-    console.log(`[Listener:${chainSelector}] New token detected: ${address}. Creating pair...`);
+    const existing = await prisma.token.findUnique({ where: { address } });
+    if (existing) return;
 
     const erc20 = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
     let name = "Unknown";
@@ -67,27 +55,7 @@ async function ensurePairExists(
         create: { address, name, symbol, decimals, chainSelector },
     });
 
-    await prisma.token.upsert({
-        where: { address: usdc },
-        update: {},
-        create: { address: usdc, name: "USD Coin", symbol: "USDC", decimals: 6, chainSelector },
-    });
-
-    await prisma.pair.upsert({
-        where: {
-            baseTokenAddress_quoteTokenAddress: {
-                baseTokenAddress: address,
-                quoteTokenAddress: usdc,
-            }
-        },
-        update: {},
-        create: {
-            baseTokenAddress: address,
-            quoteTokenAddress: usdc,
-        },
-    });
-
-    console.log(`[Listener:${chainSelector}] Created pair ${symbol}/USDC for token ${address}`);
+    console.log(`[Listener:${chainSelector}] Token registered: ${symbol} (${address})`);
 }
 
 /**
@@ -99,7 +67,6 @@ async function replayMissedEvents(
     contract: ethers.Contract,
     provider: ethers.WebSocketProvider,
     chainSelector: string,
-    usdcAddress: string,
     tag: string
 ): Promise<void> {
     // Configurable chunk size — Alchemy free tier max is 10
@@ -156,9 +123,7 @@ async function replayMissedEvents(
                         create: { address: user, name: `User ${user.slice(0, 6)}` },
                     });
 
-                    if (usdcAddress) {
-                        await ensurePairExists(token, chainSelector, usdcAddress, provider);
-                    }
+                    await ensureTokenExists(token, chainSelector, provider);
 
                     const balKey = `${user}:${token}`;
                     const currentBal = balanceMap.get(balKey) || 0n;
@@ -218,7 +183,7 @@ async function startChainListener(chainName: string, chain: ChainConfig) {
         const contract = new ethers.Contract(vault, VAULT_ABI, provider);
 
         // Replay any deposits that were missed while offline
-        await replayMissedEvents(contract, provider, chainSelector, chain.usdc || "", tag);
+        await replayMissedEvents(contract, provider, chainSelector, tag);
 
         // ── Funded Event ──
         contract.on("Funded", async (rawToken: string, amount: bigint, rawUser: string, event: any) => {
@@ -233,10 +198,7 @@ async function startChainListener(chainName: string, chain: ChainConfig) {
                     create: { address: user, name: `User ${user.slice(0, 6)}` }
                 });
 
-                const usdcAddr = chain.usdc || "";
-                if (usdcAddr) {
-                    await ensurePairExists(token, chainSelector, usdcAddr, provider);
-                }
+                await ensureTokenExists(token, chainSelector, provider);
 
                 const currentRecord = await prisma.tokenBalance.findUnique({
                     where: {

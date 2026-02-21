@@ -94,7 +94,17 @@ export async function seedTokens(): Promise<void> {
             console.warn('[seed] Could not seed USDC from addresses.json:', e);
         }
 
-        console.log(`[seed] ✓ Upserted ${count} tokens across ${Object.keys(rwaTokens.chains).length} chains`);
+        // Seed one pair per unique RWA symbol (chain-agnostic)
+        const symbols = Object.keys(TOKEN_META);
+        for (const symbol of symbols) {
+            await prisma.pair.upsert({
+                where: { baseSymbol: symbol },
+                update: {},
+                create: { baseSymbol: symbol },
+            });
+        }
+
+        console.log(`[seed] ✓ Upserted ${count} tokens + ${symbols.length} pairs across ${Object.keys(rwaTokens.chains).length} chains`);
     } catch (err) {
         console.error('[seed] Failed to seed tokens:', err);
     }

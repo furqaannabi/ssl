@@ -28,8 +28,9 @@ export interface MatchPayload {
     action: "settle_match";
     baseTokenAddress: string;
     quoteTokenAddress: string;
-    tradeAmount: string;  // base token amount in wei
-    quoteAmount: string;  // quote token amount in wei (what seller receives)
+    tradeAmount: string;        // base token amount in wei (buyer receives)
+    quoteAmount: string;        // quote token amount in wei (seller receives)
+    baseChainSelector: string;  // chain where RWA lives — vault to call for type=1
     crossChain?: boolean;
     sourceChainSelector?: string;
     destChainSelector?: string;

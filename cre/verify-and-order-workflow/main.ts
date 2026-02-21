@@ -70,8 +70,9 @@ interface MatchPayload {
   action: "settle_match";
   baseTokenAddress: string;
   quoteTokenAddress: string;
-  tradeAmount: string;   // base token amount in wei (buyer receives)
-  quoteAmount: string;   // quote token amount in wei (seller receives)
+  tradeAmount: string;        // base token amount in wei (buyer receives)
+  quoteAmount: string;        // quote token amount in wei (seller receives)
+  baseChainSelector: string;  // chain where RWA lives → vault for type=1 report
   crossChain?: boolean;
   sourceChainSelector?: string;
   destChainSelector?: string;
@@ -412,7 +413,10 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
       ]
     );
 
-    const txHash = sendReport(runtime, reportData);
+    // Send to the vault on the base chain (where RWA tokens are held)
+    const baseCfg = findChainBySelector(runtime.config, data.baseChainSelector);
+    if (!baseCfg) throw new Error("Base chain not configured: " + data.baseChainSelector);
+    const txHash = sendReportToChain(runtime, reportData, baseCfg.chainSelector, baseCfg.vault);
     runtime.log("Settlement tx: " + txHash);
 
     return JSON.stringify({
