@@ -124,7 +124,8 @@ export async function matchOrders(newOrderId: string, onLog?: (log: string) => v
             action: "settle_match",
             baseTokenAddress,
             quoteTokenAddress,
-            tradeAmount: tradeAmount.toString(),
+            tradeAmount: baseAmountWei.toString(),   // base token in wei → buyer receives this
+            quoteAmount: quoteAmountWei.toString(),  // quote token in wei → seller receives this
             buyer: {
                 orderId: buyer.id,
                 stealthAddress: buyer.stealthAddress,
