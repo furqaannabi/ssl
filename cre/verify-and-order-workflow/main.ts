@@ -289,13 +289,24 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
 
     const chainResults: Record<string, string> = {};
     for (const [chainName, chainCfg] of targetChains) {
+      // Step 1: read isVerified on-chain
+      let alreadyVerified = false;
       try {
-        const alreadyVerified = checkIsVerified(runtime, chainCfg, data.userAddress);
-        if (alreadyVerified) {
-          runtime.log(`User already verified on ${chainName}, skipping`);
-          chainResults[chainName] = "already_verified";
-          continue;
-        }
+        alreadyVerified = checkIsVerified(runtime, chainCfg, data.userAddress);
+      } catch (err: any) {
+        runtime.log(`isVerified check FAILED on ${chainName}: ${err.message}`);
+        chainResults[chainName] = "CHECK_FAILED: " + (err.message || "unknown");
+        continue;
+      }
+
+      if (alreadyVerified) {
+        runtime.log(`User already verified on ${chainName}, skipping`);
+        chainResults[chainName] = "already_verified";
+        continue;
+      }
+
+      // Step 2: send verification report
+      try {
         const txHash = sendReportToChain(runtime, reportData, chainCfg.chainSelector, chainCfg.vault);
         chainResults[chainName] = txHash;
         runtime.log(`Verify tx on ${chainName}: ${txHash}`);
