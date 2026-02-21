@@ -37,14 +37,7 @@ export class ArbitrageMonitorService {
             // Get all open orders with their pair info
             const openOrders = await prisma.order.findMany({
                 where: { status: 'OPEN' },
-                include: {
-                    pair: {
-                        include: {
-                            baseToken: true,
-                            quoteToken: true,
-                        }
-                    }
-                }
+                include: { pair: true },
             });
 
             if (openOrders.length === 0) {
@@ -57,7 +50,7 @@ export class ArbitrageMonitorService {
             // Group orders by base token symbol
             const ordersByToken = new Map<string, typeof openOrders>();
             for (const order of openOrders) {
-                const sym = order.pair.baseToken.symbol;
+                const sym = order.pair.baseSymbol;
                 if (!ordersByToken.has(sym)) ordersByToken.set(sym, []);
                 ordersByToken.get(sym)!.push(order);
             }
@@ -90,7 +83,7 @@ export class ArbitrageMonitorService {
                         const potentialProfit = Math.abs(marketPrice - orderPrice) * orderAmount;
                         opportunities.push({
                             id: `arb-${order.id}`,
-                            pairSymbol: `${order.pair.baseToken.symbol}/${order.pair.quoteToken.symbol}`,
+                            pairSymbol: `${order.pair.baseSymbol}/USDC`,
                             tokenSymbol,
                             orderPrice,
                             marketPrice,
