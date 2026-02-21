@@ -40,8 +40,11 @@ contract StealthSettlementVault is
     /// @notice address => verified
     mapping(address => bool) public override isVerified;
 
-    /// @notice orderId => settled
+    /// @notice orderId => settled (same-chain or CCIP USDC bridge side)
     mapping(bytes32 => bool) public override settledOrders;
+
+    /// @notice orderId => RWA settled for buyer (cross-chain dest side)
+    mapping(bytes32 => bool) public rwaSettledOrders;
 
     uint256 public withdrawalId;
 
@@ -209,6 +212,8 @@ contract StealthSettlementVault is
             _claimWithdrawal(report);
         } else if (reportType == 3) {
             _processCrossChainSettle(report);
+        } else if (reportType == 4) {
+            _processRWASettle(report);
         } else {
             revert("SSL: unknown report type");
         }
@@ -301,9 +306,8 @@ contract StealthSettlementVault is
             data: abi.encode(orderId, recipient),
             tokenAmounts: tokenAmounts,
             extraArgs: Client._argsToBytes(
-                Client.EVMExtraArgsV2({
-                    gasLimit: 200_000,
-                    allowOutOfOrderExecution: true
+                Client.EVMExtraArgsV1({
+                    gasLimit: 200_000
                 })
             ),
             feeToken: address(linkToken)
@@ -324,6 +328,32 @@ contract StealthSettlementVault is
         settledOrders[orderId] = true;
 
         emit CrossChainSettled(orderId, destChainSelector, recipient, messageId);
+    }
+
+    // ──────────────────────────────────────────────
+    //  Cross-chain RWA settle for buyer (type=4)
+    //  Sent by CRE to DEST vault after type=3 bridges USDC to seller.
+    //  Transfers the base (RWA) token to the buyer's stealth address.
+    //  Uses a separate rwaSettledOrders map so it doesn't conflict with
+    //  the markSettled() call that arrives later via the CCIP receiver.
+    // ──────────────────────────────────────────────
+
+    function _processRWASettle(bytes calldata report) private {
+        (
+            ,
+            bytes32 orderId,
+            address recipient,
+            address token,
+            uint256 amount
+        ) = abi.decode(report, (uint8, bytes32, address, address, uint256));
+
+        require(!rwaSettledOrders[orderId], "SSL: rwa settled");
+
+        IERC20(token).safeTransfer(recipient, amount);
+
+        rwaSettledOrders[orderId] = true;
+
+        emit Settled(orderId, recipient, address(0));
     }
 
     /// @inheritdoc IERC165

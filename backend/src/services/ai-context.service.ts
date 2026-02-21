@@ -91,11 +91,7 @@ export class AIContextService {
         try {
             const recentOrders = await prisma.order.findMany({
                 where: { status: 'OPEN' },
-                include: {
-                    pair: {
-                        include: { baseToken: true, quoteToken: true }
-                    }
-                },
+                include: { pair: true },
                 take: 10,
                 orderBy: { createdAt: 'desc' },
             });
@@ -103,7 +99,7 @@ export class AIContextService {
             if (recentOrders.length > 0) {
                 const bookLines = recentOrders.map(o => {
                     const remaining = parseFloat(o.amount) - parseFloat(o.filledAmount);
-                    return `  - ${o.side} ${remaining.toFixed(2)} ${o.pair.baseToken.symbol} @ $${parseFloat(o.price).toFixed(2)}`;
+                    return `  - ${o.side} ${remaining.toFixed(2)} ${o.pair.baseSymbol} @ $${parseFloat(o.price).toFixed(2)}`;
                 });
                 sections.push(`ORDER BOOK (top ${recentOrders.length} open):\n${bookLines.join('\n')}`);
             }

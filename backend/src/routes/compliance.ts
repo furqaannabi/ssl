@@ -32,7 +32,7 @@ compliance.get("/stats", async (c) => {
         const recentOrders = await prisma.order.findMany({
             take: 10,
             orderBy: { createdAt: "desc" },
-            include: { pair: { include: { baseToken: true, quoteToken: true } } }
+            include: { pair: true }
         });
 
         const recentTx = await prisma.transaction.findMany({
@@ -44,7 +44,7 @@ compliance.get("/stats", async (c) => {
         const logs = [
             ...recentOrders.map(o => ({
                 time: o.createdAt,
-                event: `Order ${o.side} ${o.pair.baseToken.symbol}`,
+                event: `Order ${o.side} ${o.pair.baseSymbol}`,
                 hash: o.stealthAddress ? `${o.stealthAddress.slice(0,6)}...` : "N/A",
                 status: o.status === 'OPEN' ? 'LOGGED' : o.status,
                 color: o.status === 'OPEN' ? 'yellow' : 'primary'

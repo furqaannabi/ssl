@@ -19,7 +19,7 @@ history.get("/", authMiddleware, async (c) => {
             where: { userAddress: address },
             orderBy: { createdAt: "desc" },
             take: 50, // Limit for now
-            include: { pair: { include: { baseToken: true, quoteToken: true } } }
+            include: { pair: true }
         });
 
         // 2. Fetch Transactions (Deposits/Withdrawals)
@@ -36,7 +36,7 @@ history.get("/", authMiddleware, async (c) => {
                 type: "ORDER",
                 side: o.side,
                 status: o.status,
-                asset: `${o.pair.baseToken.symbol}/${o.pair.quoteToken.symbol}`, // e.g., BOND/USDC
+                asset: `${o.pair.baseSymbol}/USDC`,
                 amount: o.amount,
                 price: o.price,
                 filled: o.filledAmount,

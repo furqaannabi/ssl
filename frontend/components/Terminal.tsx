@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Icon, Card, Button, Badge, useToast } from './UI';
 import { OracleIndicator } from './OracleIndicator';
-import { useConnection, useSignMessage } from 'wagmi';
+import { useConnection } from 'wagmi';
 import { CHAINS } from '../lib/chain-config';
 import { auth } from '../lib/auth';
 
@@ -10,14 +10,13 @@ export const Terminal: React.FC = () => {
   const [side, setSide] = useState<'BUY' | 'SELL'>('BUY');
   const [privacyLevel, setPrivacyLevel] = useState(3);
   const [stealthAddress, setStealthAddress] = useState<string>('');
-  const [status, setStatus] = useState<'IDLE' | 'SIGNING' | 'SENDING' | 'ENCRYPTING' | 'MATCHING' | 'SETTLED'>('IDLE');
+  const [status, setStatus] = useState<'IDLE' | 'SENDING' | 'MATCHING' | 'SETTLED'>('IDLE');
   const [selectedPairId, setSelectedPairId] = useState<string>('');
   const [amount, setAmount] = useState('10');
   const [price, setPrice] = useState('100.00');
   const logEndRef = useRef<HTMLDivElement>(null);
   
   const { address: eoaAddress, isConnected } = useConnection();
-  const { mutateAsync: signMessageAsync } = useSignMessage();
 
   const API_URL = ""; // Use Vite proxy for CORS/cookie consistency
   // Order State
@@ -26,9 +25,10 @@ export const Terminal: React.FC = () => {
   const [logs, setLogs] = useState<string[]>([]);
   const [orderBook, setOrderBook] = useState<{bids: any[], asks: any[]}>({ bids: [], asks: [] });
   const [pairs, setPairs] = useState<any[]>([]);
+  const [baseChainSelector, setBaseChainSelector] = useState<string>('');
+  const [quoteChainSelector, setQuoteChainSelector] = useState<string>('');
   const [balances, setBalances] = useState<Array<{ token: string; chainSelector: string; balance: string }>>([]); // Raw balance entries from backend
   const [tokenLookup, setTokenLookup] = useState<Record<string, any>>({}); // address -> token metadata (symbol, decimals)
-console.log(pairs)
   // Fetch Data
   const fetchBalances = async () => {
       try {
@@ -57,19 +57,28 @@ console.log(pairs)
       } catch (e) { console.error("Failed to fetch balances", e); }
   };
 
-  /**
-   * Get available balance for a specific token by exact address.
-   * The pair definition already encodes which chain's token is involved,
-   * so we always match by exact address — no cross-chain aggregation.
-   */
-  const getAvailableBalance = (tokenAddress: string, decimals: number): number => {
+  /** Get available balance filtered by token address and optionally by chain. */
+  const getAvailableBalance = (tokenAddress: string, decimals: number, chainSel?: string): number => {
       let total = 0;
       for (const b of balances) {
-          if (b.token === tokenAddress.toLowerCase()) {
+          if (b.token === tokenAddress.toLowerCase() && (!chainSel || b.chainSelector === chainSel)) {
               total += Number(b.balance) / (10 ** decimals);
           }
       }
       return total;
+  };
+
+  /** Find base token entry (address+decimals) for the currently selected base chain. */
+  const getBaseToken = (pairArg?: any): { address: string; decimals: number; chainSelector: string } | undefined => {
+      const pair = pairArg ?? pairs.find(p => p.id === selectedPairId);
+      return pair?.tokens?.find((t: any) => t.chainSelector === baseChainSelector);
+  };
+
+  /** Find USDC token entry for the currently selected quote chain. */
+  const getQuoteToken = (): { address: string; decimals: number; symbol: string } | undefined => {
+      return Object.values(tokenLookup).find(
+          (t: any) => t.symbol === 'USDC' && t.chainSelector === quoteChainSelector
+      ) as any;
   };
   const fetchPairs = async () => {
     try {
@@ -78,8 +87,13 @@ console.log(pairs)
             const data = await res.json();
             if (data.success && data.pairs.length > 0) {
                 setPairs(data.pairs);
-                // Default to first pair if none selected
-                if (!selectedPairId) setSelectedPairId(data.pairs[0].id);
+                if (!selectedPairId) {
+                    const first = data.pairs[0];
+                    setSelectedPairId(first.id);
+                    const firstChain = first.tokens?.[0]?.chainSelector || '';
+                    setBaseChainSelector(firstChain);
+                    setQuoteChainSelector(firstChain);
+                }
             }
         }
     } catch (e) { console.error("Failed to fetch pairs", e); }
@@ -153,6 +167,16 @@ console.log(pairs)
       return () => clearInterval(interval);
   }, [isConnected, activeTab, selectedPairId]);
 
+  // Reset chain selectors when selected pair changes
+  useEffect(() => {
+    const pair = pairs.find(p => p.id === selectedPairId);
+    if (pair?.tokens?.length > 0) {
+      const firstChain = pair.tokens[0].chainSelector;
+      setBaseChainSelector(firstChain);
+      setQuoteChainSelector(firstChain);
+    }
+  }, [selectedPairId]);
+
   // Auto-scroll logs to bottom whenever logs change
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -209,86 +233,62 @@ console.log(pairs)
 
     // CHECK BALANCES
     if (side === 'BUY') {
-        // BUY: all USDC across all chains counts (cross-chain deposit supported)
-        const decimals = pair.quoteToken.decimals || 6;
-        const available = getAvailableBalance(pair.quoteToken.address, decimals);
+        const qt = getQuoteToken();
+        if (!qt) { toast.error("USDC not found for selected chain"); return; }
+        const available = getAvailableBalance(qt.address, qt.decimals || 6, quoteChainSelector);
         if (totalValue > available) {
-            toast.error(`Insufficient ${pair.quoteToken.symbol}. Need: ${totalValue.toFixed(2)}, Have: ${available.toFixed(2)} (across all chains)`);
+            toast.error(`Insufficient USDC. Need: ${totalValue.toFixed(2)}, Have: ${available.toFixed(2)}`);
             return;
         }
     } else {
-        // SELL: only the exact token on this pair's chain (vault-specific)
-        const decimals = pair.baseToken.decimals || 18;
-        const available = getAvailableBalance(pair.baseToken.address, decimals);
+        const bt = getBaseToken();
+        if (!bt) { toast.error(`${pair.baseSymbol} not found for selected chain`); return; }
+        const available = getAvailableBalance(bt.address, bt.decimals || 18, baseChainSelector);
         if (Number(amount) > available) {
-            toast.error(`Insufficient ${pair.baseToken.symbol} on this chain. Have: ${available.toFixed(4)}`);
+            toast.error(`Insufficient ${pair.baseSymbol}. Have: ${available.toFixed(4)}`);
             return;
         }
     }
 
     try {
         setLogs([]); // Clear previous logs
-        setStatus('SIGNING'); 
-        
-        // 1. Initialize Order
-        // backend/src/routes/order.ts expects strings for amount/price
-        const initPayload = {
+        setStatus('SENDING');
+
+        const payload = {
             pairId: pair.id,
-            amount: String(amount), 
+            amount: String(amount),
             price: String(price),
             side,
-            stealthAddress, 
-            userAddress: eoaAddress 
+            stealthAddress,
+            userAddress: eoaAddress,
+            baseChainSelector,
+            quoteChainSelector,
         };
 
-        console.log("Sending Order Init with Pair:", initPayload);
+        console.log("Placing order:", payload);
 
-        const initResponse = await fetch(`${API_URL}/api/order`, {
+        const response = await fetch(`${API_URL}/api/order`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(initPayload),
+            body: JSON.stringify(payload),
             credentials: "include"
         });
 
-        if (!initResponse.ok) {
-           if (initResponse.status === 401) {
+        if (!response.ok) {
+           if (response.status === 401) {
                toast.error("Session expired. Logging out...");
                setTimeout(() => {
                    import('../lib/auth').then(({ auth }) => auth.logout());
                }, 1000);
                return;
            }
-           const err = await initResponse.json();
-           throw new Error(err.error || "Order initialization failed");
+           const err = await response.json();
+           throw new Error(err.error || "Order placement failed");
         }
 
-        const { orderId, messageToSign } = await initResponse.json();
-        setLogs(prev => [...prev, `Order Initialized: ${orderId.slice(0,8)}...`]);
-        
-        // 2. Sign Authorization Message with EOA
-        const signature = await signMessageAsync({ 
-            message: messageToSign, 
-            account: eoaAddress as `0x${string}` 
-        });
-        setLogs(prev => [...prev, `Authorization Signed`]);
-
-        // 3. Confirm Order with Signature & Stream Logs
-        setStatus('SENDING');
-        const confirmResponse = await fetch(`${API_URL}/api/order/${orderId}/confirm`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ signature }),
-            credentials: "include"
-        });
-
-        if (!confirmResponse.ok) {
-            const err = await confirmResponse.json();
-            throw new Error(err.error || "Order confirmation failed");
-        }
-
-        // Handle SSE Stream
+        // Stream matching engine logs directly from the response
         setStatus('MATCHING');
-        const reader = confirmResponse.body?.getReader();
+        const reader = response.body?.getReader();
         const decoder = new TextDecoder();
         
         if (reader) {
@@ -409,25 +409,17 @@ console.log(pairs)
                <div className="space-y-2 relative bg-surface-dark/95 p-4 border border-border-dark backdrop-blur-sm">
                   <label className="text-[10px] text-primary font-mono uppercase tracking-wider block mb-1">Asset Class</label>
                   <div className="relative">
-                     <select 
+                     <select
                         className="w-full bg-black border border-border-dark text-white text-sm px-3 py-2.5 focus:ring-1 focus:ring-primary focus:border-primary appearance-none font-mono rounded-none"
                         value={selectedPairId}
                         onChange={(e) => setSelectedPairId(e.target.value)}
                      >
                         {pairs.length > 0 ? (
-                            pairs.map(pair => {
-                                const isCrossChain = pair.baseToken.chainSelector !== pair.quoteToken.chainSelector;
-                                const toShort = (name: string) => name.replace(' Sepolia', '').replace('Arbitrum', 'Arb');
-                                const baseName = toShort(Object.values(CHAINS).find(c => c.chainSelector === pair.baseToken.chainSelector)?.name || "?");
-                                const quoteName = toShort(Object.values(CHAINS).find(c => c.chainSelector === pair.quoteToken.chainSelector)?.name || "?");
-                                const label = isCrossChain
-                                    ? `${pair.baseToken.symbol}[${baseName}] / ${pair.quoteToken.symbol}[${quoteName}] ⚡ CCIP`
-                                    : `${pair.baseToken.symbol}/${pair.quoteToken.symbol} — ${baseName}`;
-                                return (
+                            pairs.map(pair => (
                                 <option key={pair.id} value={pair.id}>
-                                    {label}
+                                    {pair.baseSymbol}/{pair.quoteSymbol}
                                 </option>
-                            )})
+                            ))
                         ) : (
                             <option disabled>Loading markets...</option>
                         )}
@@ -435,6 +427,7 @@ console.log(pairs)
                      <Icon name="expand_more" className="absolute right-3 top-2.5 text-primary pointer-events-none text-lg" />
                   </div>
                </div>
+
 
                <div className="grid grid-cols-2 gap-3 bg-surface-dark/95 p-4 border border-border-dark backdrop-blur-sm">
                   <div className="space-y-1">
@@ -465,40 +458,105 @@ console.log(pairs)
                       <div className="flex justify-between">
                         <label className="text-[10px] text-slate-500 font-mono uppercase">Volume</label>
                         <span className="text-[10px] text-primary font-mono cursor-pointer underline decoration-primary/50" onClick={() => {
-                            // Max Logic — aggregate across all chains
-                            const pair = pairs.find(p => p.id === selectedPairId);
-                            if (!pair) return;
-                            
                             if (side === 'BUY') {
-                                // BUY: aggregate USDC across all chains
-                                const decimals = pair.quoteToken.decimals || 6;
-                                const bal = getAvailableBalance(pair.quoteToken.address, decimals);
+                                const qt = getQuoteToken();
+                                if (!qt) return;
+                                const bal = getAvailableBalance(qt.address, qt.decimals || 6, quoteChainSelector);
                                 const p = Number(price);
                                 if (p > 0) setAmount((bal / p).toFixed(4));
                             } else {
-                                // SELL: only this pair's chain vault balance
-                                const decimals = pair.baseToken.decimals || 18;
-                                const bal = getAvailableBalance(pair.baseToken.address, decimals);
+                                const bt = getBaseToken();
+                                if (!bt) return;
+                                const bal = getAvailableBalance(bt.address, bt.decimals || 18, baseChainSelector);
                                 setAmount(bal.toFixed(4));
                             }
                         }}>Max</span>
                      </div>
-                     <div className="text-[9px] text-right text-slate-500 font-mono mb-1">
-                        Available: {(() => {
-                            const pair = pairs.find(p => p.id === selectedPairId);
-                            if (!pair) return "--";
-                            if (side === 'BUY') {
-                                const decimals = pair.quoteToken.decimals || 6;
-                                const bal = getAvailableBalance(pair.quoteToken.address, decimals);
-                                const chainLabel = Object.values(CHAINS).find(c => c.chainSelector === pair.quoteToken.chainSelector)?.name?.replace(' Sepolia','') || 'chain';
-                                return `${bal.toFixed(2)} ${pair.quoteToken.symbol} on ${chainLabel}`;
-                            } else {
-                                const decimals = pair.baseToken.decimals || 18;
-                                const bal = getAvailableBalance(pair.baseToken.address, decimals);
-                                return `${bal.toFixed(4)} ${pair.baseToken.symbol} (this chain)`;
-                            }
-                        })()}
-                     </div>
+                     {/* Chain + balance rows */}
+                     {side === 'BUY' ? (
+                         <div className="space-y-1 mb-1">
+                             {/* RWA receive chain — all supported chains */}
+                             {(() => {
+                                 const selectedPair = pairs.find(p => p.id === selectedPairId);
+                                 if (!selectedPair) return null;
+                                 const toShort = (name: string) => name.replace(' Sepolia','').replace('Arbitrum','Arb');
+                                 return (
+                                     <div className="flex items-center justify-between">
+                                         <div className="flex items-center gap-1 text-[8px] text-slate-500 font-mono uppercase">
+                                             <span>Receive {selectedPair.baseSymbol} on</span>
+                                             <select
+                                                 className="bg-black border border-border-dark text-primary text-[8px] px-1 py-0.5 font-mono rounded-none appearance-none"
+                                                 value={baseChainSelector}
+                                                 onChange={e => setBaseChainSelector(e.target.value)}
+                                             >
+                                                 {Object.values(CHAINS).map(c => (
+                                                     <option key={c.chainSelector} value={c.chainSelector}>
+                                                         {toShort(c.name)}
+                                                     </option>
+                                                 ))}
+                                             </select>
+                                         </div>
+                                     </div>
+                                 );
+                             })()}
+                             {/* USDC pay chain */}
+                             <div className="flex items-center justify-between">
+                                 <div className="flex items-center gap-1 text-[8px] text-slate-500 font-mono uppercase">
+                                     <span>Pay USDC on</span>
+                                     <select
+                                         className="bg-black border border-border-dark text-primary text-[8px] px-1 py-0.5 font-mono rounded-none appearance-none"
+                                         value={quoteChainSelector}
+                                         onChange={e => setQuoteChainSelector(e.target.value)}
+                                     >
+                                         {Object.values(CHAINS).map(c => (
+                                             <option key={c.chainSelector} value={c.chainSelector}>
+                                                 {c.name.replace(' Sepolia','')}
+                                             </option>
+                                         ))}
+                                     </select>
+                                     {quoteChainSelector !== baseChainSelector && <span className="text-yellow-400">⚡</span>}
+                                 </div>
+                                 <span className="text-[9px] text-slate-500 font-mono">
+                                     {(() => {
+                                         const qt = getQuoteToken();
+                                         if (!qt) return "-- USDC";
+                                         const bal = getAvailableBalance(qt.address, qt.decimals || 6, quoteChainSelector);
+                                         return `${bal.toFixed(2)} USDC`;
+                                     })()}
+                                 </span>
+                             </div>
+                         </div>
+                     ) : (
+                         /* SELL: chain selector + balance */
+                         <div className="flex items-center justify-between mb-1">
+                             {(() => {
+                                 const selectedPair = pairs.find(p => p.id === selectedPairId);
+                                 if (!selectedPair?.tokens?.length) return null;
+                                 const toShort = (name: string) => name.replace(' Sepolia','').replace('Arbitrum','Arb');
+                                 const bt = getBaseToken();
+                                 const bal = bt ? getAvailableBalance(bt.address, bt.decimals || 18, baseChainSelector) : 0;
+                                 return (
+                                     <>
+                                         <div className="flex items-center gap-1 text-[8px] text-slate-500 font-mono uppercase">
+                                             <span>{selectedPair.baseSymbol} on</span>
+                                             <select
+                                                 className="bg-black border border-border-dark text-primary text-[8px] px-1 py-0.5 font-mono rounded-none appearance-none"
+                                                 value={baseChainSelector}
+                                                 onChange={e => { setBaseChainSelector(e.target.value); setQuoteChainSelector(e.target.value); }}
+                                             >
+                                                 {selectedPair.tokens.map((t: any) => (
+                                                     <option key={t.chainSelector} value={t.chainSelector}>
+                                                         {toShort(CHAINS[t.chainSelector]?.name || t.chainSelector)}
+                                                     </option>
+                                                 ))}
+                                             </select>
+                                         </div>
+                                         <span className="text-[9px] text-slate-500 font-mono">{bal.toFixed(4)} {selectedPair.baseSymbol}</span>
+                                     </>
+                                 );
+                             })()}
+                         </div>
+                     )}
                      <div className="relative">
                         <input 
                             className="w-full bg-black border border-border-dark text-white font-mono text-sm px-3 py-2.5 focus:ring-1 focus:ring-primary focus:border-primary text-right rounded-none" 
@@ -540,16 +598,15 @@ console.log(pairs)
                           <span className={`font-mono text-sm font-bold ${
                               (() => {
                                   const totalVal = Number(amount) * Number(price);
-                                  const pair = pairs.find(p => p.id === selectedPairId);
-                                  if (!pair) return "text-white";
-                                  
                                   if (side === 'BUY') {
-                                      const decimals = pair.quoteToken.decimals || 6;
-                                      const available = getAvailableBalance(pair.quoteToken.address, decimals);
+                                      const qt = getQuoteToken();
+                                      if (!qt) return "text-white";
+                                      const available = getAvailableBalance(qt.address, qt.decimals || 6, quoteChainSelector);
                                       return totalVal > available ? "text-red-500" : "text-primary";
                                   } else {
-                                      const decimals = pair.baseToken.decimals || 18;
-                                      const available = getAvailableBalance(pair.baseToken.address, decimals);
+                                      const bt = getBaseToken();
+                                      if (!bt) return "text-white";
+                                      const available = getAvailableBalance(bt.address, bt.decimals || 18, baseChainSelector);
                                       return Number(amount) > available ? "text-red-500" : "text-white";
                                   }
                               })()
@@ -557,34 +614,35 @@ console.log(pairs)
                               {(Number(amount) * Number(price)).toFixed(2)} USDC
                           </span>
                           {/* Insufficient Funds Warning */}
-                           {(() => {
-                                  const totalVal = Number(amount) * Number(price);
-                                  const pair = pairs.find(p => p.id === selectedPairId);
-                                  if (!pair) return null;
-                                  
-                                  let available = 0;
-                                  let isInsufficient = false;
-                                   
-                                  if (side === 'BUY') {
-                                      const decimals = pair.quoteToken.decimals || 6;
-                                       available = getAvailableBalance(pair.quoteToken.address, decimals);
-                                      if (totalVal > available) isInsufficient = true;
-                                  } else {
-                                      const decimals = pair.baseToken.decimals || 18;
-                                      available = getAvailableBalance(pair.baseToken.address, decimals);
-                                      if (Number(amount) > available) isInsufficient = true;
-                                  }
-
-                                  if (isInsufficient) {
-                                      return <span className="text-[9px] text-red-500 font-mono">
-                                          INSUFFICIENT BALANCE — Max: {side === 'BUY'
-                                              ? `${available.toFixed(2)} ${pair.quoteToken.symbol} on ${Object.values(CHAINS).find(c => c.chainSelector === pair.quoteToken.chainSelector)?.name?.replace(' Sepolia','') || 'chain'}`
-                                              : `${available.toFixed(4)} ${pair.baseToken.symbol} on ${Object.values(CHAINS).find(c => c.chainSelector === pair.baseToken.chainSelector)?.name?.replace(' Sepolia','') || 'chain'}`
-                                          }
-                                      </span>;
-                                  }
-                                  return null;
-                              })()}
+                          {(() => {
+                              const totalVal = Number(amount) * Number(price);
+                              const pair = pairs.find(p => p.id === selectedPairId);
+                              if (!pair) return null;
+                              let available = 0;
+                              let isInsufficient = false;
+                              if (side === 'BUY') {
+                                  const qt = getQuoteToken();
+                                  if (!qt) return null;
+                                  available = getAvailableBalance(qt.address, qt.decimals || 6, quoteChainSelector);
+                                  if (totalVal > available) isInsufficient = true;
+                              } else {
+                                  const bt = getBaseToken();
+                                  if (!bt) return null;
+                                  available = getAvailableBalance(bt.address, bt.decimals || 18, baseChainSelector);
+                                  if (Number(amount) > available) isInsufficient = true;
+                              }
+                              if (isInsufficient) {
+                                  const chainLabel = side === 'BUY'
+                                      ? CHAINS[quoteChainSelector]?.name?.replace(' Sepolia','') || 'chain'
+                                      : CHAINS[baseChainSelector]?.name?.replace(' Sepolia','') || 'chain';
+                                  return <span className="text-[9px] text-red-500 font-mono">
+                                      INSUFFICIENT BALANCE — Max: {side === 'BUY'
+                                          ? `${available.toFixed(2)} USDC on ${chainLabel}`
+                                          : `${available.toFixed(4)} ${pair.baseSymbol} on ${chainLabel}`}
+                                  </span>;
+                              }
+                              return null;
+                          })()}
                       </div>
                   </div>
                </div>
@@ -596,13 +654,11 @@ console.log(pairs)
                  onClick={handlePlaceOrder}
                  disabled={status !== 'IDLE' || (Number(amount) * Number(price)) < 5}
                 >
-                 {status === 'SIGNING' ? "Requesting Signature..." :
-                  status === 'SENDING' ? "Sending to Enclave..." :
-                  status === 'ENCRYPTING' ? "Encrypting Order..." :
+                 {status === 'SENDING' ? "Placing Order..." :
                   status === 'MATCHING' ? "Matching Engine..." :
                   status === 'SETTLED' ? "Order Settled!" :
                   (Number(amount) * Number(price)) < 5 ? "Min Order Value: 5 USDC" :
-                  stealthAddress ? "Encrypt & Place Order" : "Enter Stealth Address"}
+                  stealthAddress ? "Place Order" : "Enter Stealth Address"}
                 </Button>
                <div className="text-[9px] text-slate-600 text-center font-mono uppercase tracking-wide mt-2">
                   TEE Verification: <span className="text-slate-400">{stealthAddress ? "READY" : "WAITING FOR ADDRESS"}</span>
@@ -635,10 +691,10 @@ console.log(pairs)
               <div className="flex-1 relative z-10 p-6 flex flex-col justify-between bg-black/50 backdrop-blur-sm">
                  {/* Steps */}
                  {[
-                   { id: '01', title: 'Authority Sign', desc: 'EOA signing order authorization.', active: status === 'SIGNING' },
-                   { id: '02', title: 'Enclave Submission', desc: 'Secure transit to CRE.', active: status === 'SENDING' },
-                   { id: '03', title: 'Matching', desc: 'Dark pool liquidity search.', active: status === 'MATCHING' },
-                   { id: '04', title: 'Settlement', desc: 'Report submitted to Vault.', active: status === 'SETTLED' }
+                   { id: '01', title: 'Order Placement', desc: 'Submitting order to secure enclave.', active: status === 'SENDING' },
+                   { id: '02', title: 'Dark Pool Match', desc: 'Searching for counterparty liquidity.', active: status === 'MATCHING' },
+                   { id: '03', title: 'Settlement Report', desc: 'CRE submitting on-chain report to Vault.', active: status === 'SETTLED' },
+                   { id: '04', title: 'Confirmed', desc: 'Assets routed to stealth address.', active: status === 'SETTLED' }
                  ].map((step, i) => (
                     <div key={i} className={`flex items-center gap-4 group transition-all duration-500 ${step.active ? 'scale-105' : 'opacity-40'}`}>
                        <div className={`w-8 h-8 border flex items-center justify-center text-xs font-mono font-bold transition-all ${step.active ? 'bg-primary/10 border-primary text-primary shadow-glow' : 'bg-black border-border-dark text-slate-500'}`}>
@@ -723,15 +779,16 @@ console.log(pairs)
                                   </div>
                               )}
                               {myOrders.map((order) => {
-                                  // Look up Pair info if needed (assuming order.pair exists or we can find it)
                                   const pair = pairs.find(p => p.id === order.pairId);
-                                  const chainName = pair ? (Object.values(CHAINS).find(c => c.chainSelector === pair.baseToken.chainSelector)?.name || "UNK") : "";
-                                  const pairSymbol = pair ? `${pair.baseToken.symbol}/${pair.quoteToken.symbol}` : "UNK/USDC";
+                                  const chainName = order.baseChainSelector
+                                      ? (CHAINS[order.baseChainSelector]?.name?.replace(' Sepolia','') || order.baseChainSelector)
+                                      : (pair ? (CHAINS[pair.tokens?.[0]?.chainSelector]?.name?.replace(' Sepolia','') || '') : '');
+                                  const pairSymbol = pair ? `${pair.baseSymbol}/USDC` : "UNK/USDC";
 
                                   return (
                                   <div key={order.id} className="grid grid-cols-5 px-4 py-3 border-b border-white/5 items-center hover:bg-white/5 transition-colors">
                                       <div className="flex flex-col">
-                                          <span className="text-white font-bold">{order.asset || pair?.baseToken.symbol || "UNK"}</span>
+                                          <span className="text-white font-bold">{pair?.baseSymbol || order.asset || "UNK"}</span>
                                           <span className="text-[9px] text-slate-500">{(Number(order.amount)).toFixed(2)} @ {Number(order.price).toFixed(2)}</span>
                                       </div>
                                       <div className="flex flex-col">

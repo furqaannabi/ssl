@@ -51,34 +51,38 @@ const StealthGenerator: React.FC = () => {
                 </div>
             </div>
 
+            {/* Wallet Address — paste this into the order form */}
             <div className="space-y-2">
-                <label className="text-[9px] text-slate-500 uppercase tracking-widest font-bold">Stealth Public Key (paste into orders)</label>
-                <div className="p-2.5 bg-black border border-border-dark font-mono text-[10px] text-white break-all select-all flex justify-between items-center group rounded">
-                    <span>{keys.publicKey}</span>
-                    <Icon name="content_copy" className="text-slate-600 cursor-pointer hover:text-primary transition-colors" onClick={() => {
-                        navigator.clipboard.writeText(keys.publicKey);
-                        toast.success("Public Key Copied");
+                <label className="text-[9px] text-primary uppercase tracking-widest font-bold flex items-center gap-1">
+                    <Icon name="account_balance_wallet" className="text-xs" />
+                    Stealth Wallet Address <span className="text-slate-500 normal-case font-normal">(paste into Stealth Address field)</span>
+                </label>
+                <div className="p-2.5 bg-primary/5 border border-primary/30 font-mono text-[11px] text-primary break-all select-all flex justify-between items-center group rounded">
+                    <span>{keys.address}</span>
+                    <Icon name="content_copy" className="text-primary/50 cursor-pointer hover:text-primary transition-colors shrink-0 ml-2" onClick={() => {
+                        navigator.clipboard.writeText(keys.address);
+                        toast.success("Wallet Address Copied");
                     }} />
                 </div>
             </div>
 
             <div className="space-y-2">
                 <label className="text-[9px] text-slate-500 uppercase tracking-widest font-bold flex justify-between">
-                    <span>Private Key (Secret)</span>
+                    <span>Private Key (Secret — import into MetaMask)</span>
                     <span className="text-[8px] text-primary cursor-pointer hover:underline" onClick={() => setIsRevealed(!isRevealed)}>
-                        {isRevealed ? "HIDE SECRET" : "REVEAL SECRET"}
+                        {isRevealed ? "HIDE" : "REVEAL"}
                     </span>
                 </label>
                 <div className={`p-2.5 bg-black border border-border-dark font-mono text-[10px] break-all relative rounded overflow-hidden ${isRevealed ? 'text-red-400' : 'text-slate-700'}`}>
-                     {isRevealed ? keys.privateKey : "****************************************************************"}
+                     {isRevealed ? keys.privateKey : "••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••"}
                      <div className="absolute top-2 right-2">
-                          <Icon 
-                             name="content_copy" 
-                             className="text-slate-600 cursor-pointer hover:text-white transition-colors" 
+                          <Icon
+                             name="content_copy"
+                             className="text-slate-600 cursor-pointer hover:text-white transition-colors"
                              onClick={() => {
                                  navigator.clipboard.writeText(keys.privateKey);
-                                 toast.success("Private Key Copied to Clipboard");
-                             }} 
+                                 toast.success("Private Key Copied");
+                             }}
                          />
                      </div>
                 </div>
@@ -99,21 +103,21 @@ const StealthGenerator: React.FC = () => {
                 </h5>
                 <div className="bg-surface-lighter p-3 rounded border border-border-dark space-y-2">
                     <div className="flex gap-3 items-start">
-                        <span className="w-5 h-5 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center text-[10px] font-bold border border-slate-700 shrink-0">1</span>
-                        <p className="text-[10px] text-slate-400">
-                            <strong className="text-white">Copy Private Key</strong> from the section above (reveal it first).
+                        <span className="w-5 h-5 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[10px] font-bold border border-primary/50 shrink-0">1</span>
+                        <p className="text-[10px] text-slate-300">
+                            <strong className="text-primary">Copy the Wallet Address</strong> above and paste it into the <strong className="text-white">Stealth Address</strong> field when placing an order.
                         </p>
                     </div>
                     <div className="flex gap-3 items-start">
                         <span className="w-5 h-5 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center text-[10px] font-bold border border-slate-700 shrink-0">2</span>
                         <p className="text-[10px] text-slate-400">
-                            Open your Wallet (e.g., MetaMask) and select <strong className="text-white">"Add Account"</strong> or <strong className="text-white">"Import Account"</strong>.
+                            Reveal and copy the <strong className="text-white">Private Key</strong>, then import it into MetaMask via <strong className="text-white">"Import Account"</strong>.
                         </p>
                     </div>
                     <div className="flex gap-3 items-start">
-                        <span className="w-5 h-5 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[10px] font-bold border border-primary/50 shrink-0 shadow-glow">3</span>
-                        <p className="text-[10px] text-slate-300">
-                            Paste the Private Key string. This new account acts as your <strong className="text-primary">Stealth Vault</strong> for settlements.
+                        <span className="w-5 h-5 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center text-[10px] font-bold border border-slate-700 shrink-0">3</span>
+                        <p className="text-[10px] text-slate-400">
+                            After settlement, your assets arrive in that imported account — your <strong className="text-white">Stealth Vault</strong>.
                         </p>
                     </div>
                 </div>

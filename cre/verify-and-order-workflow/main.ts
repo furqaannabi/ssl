@@ -387,12 +387,32 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
       const bridgeTxHash = sendReportToChain(runtime, bridgeReport, sourceChain, sourceVault);
       runtime.log("Bridge tx: " + bridgeTxHash);
 
+      // type=4: settle RWA for buyer on DEST vault (avoids CCIP token bridge for the buyer side).
+      // The dest vault already holds the seller's RWA; we transfer it to the buyer's stealth address.
+      const rwaReport = encodeAbiParameters(
+        parseAbiParameters(
+          "uint8 reportType, bytes32 orderId, address recipient, address token, uint256 amount"
+        ),
+        [
+          4,
+          orderId as `0x${string}`,
+          buyerStealthAddr as `0x${string}`,  // buyer receives RWA
+          data.baseTokenAddress as `0x${string}`,
+          tradeAmount,                          // base token amount in wei
+        ]
+      );
+
+      runtime.log("Sending RWA settle (type=4) to " + destChain + " vault " + destCfg.vault);
+      const rwaSettleTxHash = sendReportToChain(runtime, rwaReport, destChain, destCfg.vault);
+      runtime.log("RWA settle tx: " + rwaSettleTxHash);
+
       return JSON.stringify({
         status: "settled_cross_chain",
         orderId,
         stealthBuyer: buyerStealthAddr,
         stealthSeller: sellerStealthAddr,
         bridgeTxHash,
+        rwaSettleTxHash,
       });
     }
 

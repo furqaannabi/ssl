@@ -34,62 +34,37 @@ interface OrderConfirmPayload {
     signature: string;
 }
 
-// ── Step 1: Create Order (PENDING) ──
+// ── POST / (Place Order — unified: create + open + match in one request) ──
 order.post("/", authMiddleware, async (c) => {
     const body = await c.req.json<OrderInitPayload>();
     const userAddress = (c.get("user") as string).toLowerCase();
 
     // Validate required fields
-    const required = [
-        "pairId",
-        "amount",
-        "price",
-        "side",
-        "stealthAddress",
-        "baseChainSelector",
-        "quoteChainSelector",
-    ] as const;
-
+    const required = ["pairId", "amount", "price", "side", "stealthAddress", "baseChainSelector", "quoteChainSelector"] as const;
     for (const field of required) {
-        if (!body[field]) {
-            return c.json({ error: `Missing required field: ${field}` }, 400);
-        }
+        if (!body[field]) return c.json({ error: `Missing required field: ${field}` }, 400);
     }
 
     if (body.side !== "BUY" && body.side !== "SELL") {
         return c.json({ error: "side must be BUY or SELL" }, 400);
     }
-
     if (!/^0x[0-9a-fA-F]{40}$/.test(body.stealthAddress)) {
-        return c.json({
-            error: "Invalid stealthAddress. Must be a valid Ethereum address (0x + 40 hex chars)."
-        }, 400);
+        return c.json({ error: "Invalid stealthAddress. Must be a valid Ethereum address (0x + 40 hex chars)." }, 400);
     }
 
     const parsedAmount = parseFloat(body.amount);
     const parsedPrice = parseFloat(body.price);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) return c.json({ error: "amount must be a positive number" }, 400);
+    if (isNaN(parsedPrice) || parsedPrice <= 0) return c.json({ error: "price must be a positive number" }, 400);
 
-    if (isNaN(parsedAmount) || parsedAmount <= 0) {
-        return c.json({ error: "amount must be a positive number" }, 400);
-    }
-    if (isNaN(parsedPrice) || parsedPrice <= 0) {
-        return c.json({ error: "price must be a positive number" }, 400);
-    }
-
-    const MIN_ORDER_USDC = 5;
     const orderValue = parsedAmount * parsedPrice;
-    if (orderValue < MIN_ORDER_USDC) {
-        return c.json({ error: `Minimum order value is ${MIN_ORDER_USDC} USDC (current: ${orderValue.toFixed(2)})` }, 400);
-    }
+    if (orderValue < 5) return c.json({ error: `Minimum order value is 5 USDC (current: ${orderValue.toFixed(2)})` }, 400);
 
     try {
-        // Validate pair exists
         const pair = await prisma.pair.findUnique({ where: { id: body.pairId } });
-        if (!pair) {
-            return c.json({ error: "Invalid pairId: pair not found" }, 400);
-        }
+        if (!pair) return c.json({ error: "Invalid pairId: pair not found" }, 400);
 
-        // Create order as PENDING
+        // Create order directly as OPEN
         const newOrder = await prisma.order.create({
             data: {
                 pairId: body.pairId,
@@ -97,86 +72,31 @@ order.post("/", authMiddleware, async (c) => {
                 price: body.price,
                 side: body.side as OrderSide,
                 stealthAddress: body.stealthAddress,
-                status: OrderStatus.PENDING,
-                userAddress: userAddress,
+                status: OrderStatus.OPEN,
+                userAddress,
                 baseChainSelector: body.baseChainSelector,
                 quoteChainSelector: body.quoteChainSelector,
             },
         });
 
-        console.log(`[order] Created PENDING order ${newOrder.id} for ${userAddress}`);
+        console.log(`[order] Created OPEN order ${newOrder.id} for ${userAddress}`);
 
-        return c.json({
-            success: true,
-            orderId: newOrder.id,
-            messageToSign: newOrder.id,
-            status: "PENDING",
-        });
-    } catch (err) {
-        console.error("[order] DB create failed:", err);
-        return c.json({ error: "Failed to create order", detail: String(err) }, 500);
-    }
-});
-
-// ── Step 2: Confirm Order (OPEN) ──
-order.post("/:id/confirm", authMiddleware, async (c) => {
-    const id = c.req.param("id");
-    // const body = await c.req.json<OrderConfirmPayload>();
-    const userAddress = c.get("user") as string;
-
-    /* if (!body.signature) {
-        return c.json({ error: "Missing signature" }, 400);
-    } */
-
-    try {
-        const existingOrder = await prisma.order.findUnique({
-            where: { id },
-        });
-
-        if (!existingOrder) {
-            return c.json({ error: "Order not found" }, 404);
-        }
-
-        if (existingOrder.status !== "PENDING") {
-            return c.json({ success: true, status: existingOrder.status, message: "Order already processed" });
-        }
-
-        if (!existingOrder.userAddress) {
-            return c.json({ error: "Order has no user address to verify against" }, 400);
-        }
-
-        // Ensure ownership
-        if (existingOrder.userAddress.toLowerCase() !== userAddress.toLowerCase()) {
-            return c.json({ error: "Unauthorized: You do not own this order" }, 403);
-        }
-
-        // Activate Order
-        const updatedOrder = await prisma.order.update({
-            where: { id },
-            data: { status: "OPEN" },
-        });
-
-        console.log(`[order] Order ${id} verified and OPENED.`);
-
-        // Trigger Matching Engine with SSE
+        // Stream matching engine logs back to client
         return streamText(c, async (stream) => {
-            await stream.writeln(JSON.stringify({ type: 'log', message: 'Order verified and OPENED. Starting matching engine...' }));
+            await stream.writeln(JSON.stringify({ type: 'log', message: `Order placed: ${newOrder.id.slice(0, 8)}... Running matching engine...` }));
 
             try {
-                await matchOrders(updatedOrder.id, async (log) => {
+                await matchOrders(newOrder.id, async (log) => {
                     await stream.writeln(JSON.stringify({ type: 'log', message: log }));
                 });
 
-                // Fetch latest status
-                const finalOrder = await prisma.order.findUnique({ where: { id: updatedOrder.id } });
-
+                const finalOrder = await prisma.order.findUnique({ where: { id: newOrder.id } });
                 await stream.writeln(JSON.stringify({
                     type: 'result',
                     success: true,
-                    orderId: updatedOrder.id,
+                    orderId: newOrder.id,
                     status: finalOrder?.status || "OPEN",
                 }));
-                // Note: we might want to fetch the fresh status to return here
             } catch (err) {
                 console.error("[order] Matching failed:", err);
                 await stream.writeln(JSON.stringify({
@@ -188,8 +108,8 @@ order.post("/:id/confirm", authMiddleware, async (c) => {
         });
 
     } catch (err) {
-        console.error("[order] Confirmation failed:", err);
-        return c.json({ error: "Order confirmation failed", detail: String(err) }, 500);
+        console.error("[order] Create failed:", err);
+        return c.json({ error: "Failed to place order", detail: String(err) }, 500);
     }
 });
 
@@ -206,7 +126,7 @@ order.get("/book", async (c) => {
         const orders = await prisma.order.findMany({
             where: whereClause,
             orderBy: { createdAt: "desc" },
-            include: { pair: { include: { baseToken: true, quoteToken: true } } }
+            include: { pair: true },
         });
 
         return c.json({
