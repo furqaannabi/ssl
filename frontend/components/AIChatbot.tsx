@@ -27,6 +27,105 @@ const QUICK_PROMPTS = [
     { label: 'Help', prompt: 'How do I deposit and trade on this platform?' },
 ];
 
+/**
+ * Lightweight markdown renderer — processes line by line.
+ * Handles: ### headings, **bold**, *italic*, `code`, $price,
+ *          bullet lists (* / -), numbered lists, blank lines as spacing.
+ */
+function renderMarkdown(text: string): React.ReactNode {
+    const lines = text.split('\n');
+    const output: React.ReactNode[] = [];
+    let i = 0;
+
+    while (i < lines.length) {
+        const raw = lines[i];
+        const trimmed = raw.trim();
+
+        // Skip blank lines (they add spacing via the container's space-y)
+        if (!trimmed) { i++; continue; }
+
+        // Headings: ### ## #
+        const headingMatch = trimmed.match(/^(#{1,3})\s+(.+)/);
+        if (headingMatch) {
+            const level = headingMatch[1].length;
+            const cls = level === 1
+                ? 'text-sm font-bold text-white mt-2 mb-0.5'
+                : level === 2
+                ? 'text-xs font-bold text-white mt-1.5 mb-0.5'
+                : 'text-[11px] font-bold text-slate-200 mt-1 mb-0.5 uppercase tracking-wide';
+            output.push(<p key={i} className={cls}>{renderInline(headingMatch[2])}</p>);
+            i++; continue;
+        }
+
+        // Bullet list — collect consecutive bullet lines
+        if (/^[\*\-]\s+/.test(trimmed)) {
+            const items: string[] = [];
+            while (i < lines.length && /^[\*\-]\s+/.test(lines[i].trim())) {
+                items.push(lines[i].trim().replace(/^[\*\-]\s+/, ''));
+                i++;
+            }
+            output.push(
+                <ul key={`ul-${i}`} className="list-none space-y-0.5 my-1">
+                    {items.map((item, li) => (
+                        <li key={li} className="flex gap-1.5 items-baseline">
+                            <span className="text-primary shrink-0 leading-none">›</span>
+                            <span className="leading-relaxed">{renderInline(item)}</span>
+                        </li>
+                    ))}
+                </ul>
+            );
+            continue;
+        }
+
+        // Numbered list — collect consecutive numbered lines
+        if (/^\d+\.\s+/.test(trimmed)) {
+            const items: string[] = [];
+            let num = 1;
+            while (i < lines.length && /^\d+\.\s+/.test(lines[i].trim())) {
+                items.push(lines[i].trim().replace(/^\d+\.\s+/, ''));
+                i++;
+            }
+            output.push(
+                <ol key={`ol-${i}`} className="list-none space-y-0.5 my-1">
+                    {items.map((item, li) => (
+                        <li key={li} className="flex gap-1.5 items-baseline">
+                            <span className="text-primary shrink-0 font-bold leading-none">{num++}.</span>
+                            <span className="leading-relaxed">{renderInline(item)}</span>
+                        </li>
+                    ))}
+                </ol>
+            );
+            continue;
+        }
+
+        // Horizontal rule
+        if (/^---+$/.test(trimmed)) {
+            output.push(<hr key={i} className="border-border-dark my-1.5" />);
+            i++; continue;
+        }
+
+        // Regular paragraph line
+        output.push(
+            <p key={i} className="leading-relaxed">{renderInline(trimmed)}</p>
+        );
+        i++;
+    }
+
+    return <div className="space-y-1">{output}</div>;
+}
+
+/** Render inline markdown: **bold**, *italic*, `code`, $price highlights */
+function renderInline(text: string): React.ReactNode {
+    const tokens = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\$[\d,.]+)/);
+    return tokens.map((tok, i) => {
+        if (/^\*\*/.test(tok)) return <strong key={i} className="text-white font-bold">{tok.slice(2, -2)}</strong>;
+        if (/^\*/.test(tok))   return <em key={i} className="text-slate-200 italic">{tok.slice(1, -1)}</em>;
+        if (/^`/.test(tok))    return <code key={i} className="bg-black/60 text-primary px-1 rounded text-[9px] font-mono">{tok.slice(1, -1)}</code>;
+        if (/^\$[\d,.]/.test(tok)) return <span key={i} className="text-primary font-bold">{tok}</span>;
+        return tok;
+    });
+}
+
 export const AIChatbot: React.FC = () => {
     const [isOpen, setIsOpen] = useState(false);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -134,6 +233,8 @@ export const AIChatbot: React.FC = () => {
             });
         } finally {
             setIsStreaming(false);
+            // Restore focus to input after reply
+            setTimeout(() => inputRef.current?.focus(), 10);
         }
     };
 
@@ -198,10 +299,16 @@ export const AIChatbot: React.FC = () => {
                                     <Icon name="bolt" className="text-primary text-2xl" />
                                 </div>
                                 <div>
-                                    <h4 className="text-white text-sm font-bold mb-1">SSL Financial Advisor</h4>
-                                    <p className="text-[11px] text-slate-500 max-w-[280px]">
-                                        I can analyze your portfolio, detect arbitrage opportunities, and provide real-time market insights.
-                                    </p>
+                                    {renderMarkdown(`Hello there! Welcome to SSL (Stealth Settlement Layer), your private cross-chain platform for trading RWA tokens.
+
+I see you haven't deposited any tokens yet. What can I help you with today? Are you looking to:
+
+* **Learn more about the platform?**
+* **See what tokens are available for trading?**
+* **Find out how to deposit funds?**
+* **Or something else entirely?**
+
+Let me know how I can assist!`)}
                                 </div>
                                 <div className="flex flex-wrap gap-2 justify-center">
                                     {QUICK_PROMPTS.map((qp) => (
@@ -239,14 +346,11 @@ export const AIChatbot: React.FC = () => {
                                             Analyzing...
                                         </div>
                                     ) : (
-                                        <div className="whitespace-pre-wrap">
-                                            {msg.content.split(/(\$\d+[\d,.]*)/g).map((part, j) => (
-                                                /^\$\d/.test(part) ? (
-                                                    <span key={j} className="text-primary font-bold">{part}</span>
-                                                ) : (
-                                                    <span key={j}>{part}</span>
-                                                )
-                                            ))}
+                                        <div className="space-y-1.5 text-xs leading-relaxed">
+                                            {msg.role === 'assistant'
+                                                ? renderMarkdown(msg.content)
+                                                : msg.content
+                                            }
                                         </div>
                                     )}
                                 </div>

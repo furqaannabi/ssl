@@ -10,12 +10,14 @@ import { ArbitrageMonitorService } from './arbitrage-monitor.service';
 
 export class AIContextService {
     static async buildContext(userAddress: string): Promise<string> {
+        // Normalise — auth stores addresses lowercase; wagmi sends checksummed mixed-case
+        const address = userAddress.toLowerCase();
         const sections: string[] = [];
 
         // 1. User Portfolio
         try {
             const balances = await prisma.tokenBalance.findMany({
-                where: { userAddress },
+                where: { userAddress: address },
             });
 
             if (balances.length > 0) {
@@ -31,12 +33,23 @@ export class AIContextService {
 
                     if (humanBalance <= 0) continue;
 
-                    const price = await PriceFeedService.getPriceOrMock(symbol);
-                    const value = humanBalance * price.price;
+                    const isUSDC = symbol.toLowerCase().includes('usdc');
+                    let priceObj = { price: 1.0, changePercent: 0 };
+                    
+                    if (!isUSDC) {
+                        try {
+                            priceObj = await PriceFeedService.getPriceOrMock(symbol);
+                        } catch {
+                            // Skip non-stablecoins with no price feed
+                            continue;
+                        }
+                    }
+
+                    const value = humanBalance * priceObj.price;
                     totalValue += value;
 
                     portfolioLines.push(
-                        `  - ${humanBalance.toFixed(4)} ${symbol} @ $${price.price.toFixed(2)} = $${value.toFixed(2)} (${price.changePercent >= 0 ? '+' : ''}${price.changePercent.toFixed(2)}% today)`
+                        `  - ${humanBalance.toFixed(4)} ${symbol} @ $${priceObj.price.toFixed(2)} = $${value.toFixed(2)}${!isUSDC ? ` (${priceObj.changePercent >= 0 ? '+' : ''}${priceObj.changePercent.toFixed(2)}% today)` : ''}`
                     );
                 }
 
