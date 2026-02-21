@@ -20,6 +20,7 @@ import { compliance } from "./routes/compliance";
 import { startVaultListener } from "./listeners/ssl-vault-listener";
 import { ArbitrageMonitorService } from "./services/arbitrage-monitor.service";
 import { seedTokens } from "./lib/seed-tokens";
+import { seedPairs } from "./lib/seed-pairs";
 
 const app = new Hono();
 
@@ -65,14 +66,17 @@ console.log(`
 ╚══════════════════════════════════════╝`
 );
 
-// Seed RWA tokens from rwa-tokens.json (idempotent)
+// Seed RWA tokens then pairs from JSON files (both idempotent)
 seedTokens().then(() => {
-    // Start Vault Listener after tokens are seeded
+    // Seed pairs after tokens so FK constraints are satisfied
+    return seedPairs();
+}).then(() => {
+    // Start Vault Listener after everything is seeded
     startVaultListener().catch((err) => {
         console.error("Failed to start vault listener:", err);
     });
 }).catch((err) => {
-    console.error("Failed to seed tokens:", err);
+    console.error("Failed to seed on startup:", err);
 });
 
 // Start Arbitrage Monitor

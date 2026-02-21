@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Icon, Card, Button, Badge, useToast } from './UI';
 import { OracleIndicator } from './OracleIndicator';
 import { useConnection, useSignMessage } from 'wagmi';
@@ -14,6 +14,7 @@ export const Terminal: React.FC = () => {
   const [selectedPairId, setSelectedPairId] = useState<string>('');
   const [amount, setAmount] = useState('10');
   const [price, setPrice] = useState('100.00');
+  const logEndRef = useRef<HTMLDivElement>(null);
   
   const { address: eoaAddress, isConnected } = useConnection();
   const { mutateAsync: signMessageAsync } = useSignMessage();
@@ -25,21 +26,52 @@ export const Terminal: React.FC = () => {
   const [logs, setLogs] = useState<string[]>([]);
   const [orderBook, setOrderBook] = useState<{bids: any[], asks: any[]}>({ bids: [], asks: [] });
   const [pairs, setPairs] = useState<any[]>([]);
-  const [balances, setBalances] = useState<Record<string, string>>({}); // Map: "SYMBOL-CHAINSELECTOR" -> Amount (as string)
-
+  const [balances, setBalances] = useState<Array<{ token: string; chainSelector: string; balance: string }>>([]); // Raw balance entries from backend
+  const [tokenLookup, setTokenLookup] = useState<Record<string, any>>({}); // address -> token metadata (symbol, decimals)
+console.log(pairs)
   // Fetch Data
   const fetchBalances = async () => {
       try {
-        const user = await import('../lib/auth').then(({ auth }) => auth.getMe());
+        const [user, tokensRes] = await Promise.all([
+            import('../lib/auth').then(({ auth }) => auth.getMe()),
+            fetch(`${API_URL}/api/tokens`),
+        ]);
+
+        // Build address->metadata lookup from /api/tokens
+        if (tokensRes.ok) {
+            const data = await tokensRes.json();
+            if (data.success) {
+                const lookup: Record<string, any> = {};
+                data.tokens.forEach((t: any) => { lookup[t.address.toLowerCase()] = t; });
+                setTokenLookup(lookup);
+            }
+        }
+
         if (user && user.balances) {
-            const newBalances: Record<string, number> = {};
-            user.balances.forEach((b: any) => {
-                const key = `${b.token.toLowerCase()}-${b.chainSelector}`;
-                newBalances[key] = b.balance; // Store string directly
-            });
-            setBalances(newBalances);
+            setBalances(user.balances.map((b: any) => ({
+                token: b.token.toLowerCase(),
+                chainSelector: b.chainSelector,
+                balance: b.balance,
+            })));
         }
       } catch (e) { console.error("Failed to fetch balances", e); }
+  };
+
+  /**
+   * Get total available balance for a token across ALL chains.
+   * Matches by address first, then falls back to symbol matching
+   * (handles cross-chain tokens like USDC with different addresses).
+   */
+  const getAvailableBalance = (tokenAddress: string, decimals: number, symbol?: string): number => {
+      let total = 0;
+      for (const b of balances) {
+          const isMatch = b.token === tokenAddress.toLowerCase() ||
+              (symbol && tokenLookup[b.token]?.symbol === symbol);
+          if (isMatch) {
+              total += Number(b.balance) / (10 ** decimals);
+          }
+      }
+      return total;
   };
   const fetchPairs = async () => {
     try {
@@ -121,7 +153,12 @@ export const Terminal: React.FC = () => {
           if (activeTab === 'BOOK' && selectedPairId) fetchOrderBook();
       }, 3000);
       return () => clearInterval(interval);
-  }, [isConnected, activeTab, selectedPairId]); // Add selectedPairId dependency
+  }, [isConnected, activeTab, selectedPairId]);
+
+  // Auto-scroll logs to bottom whenever logs change
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [logs]);
 
   const cancelOrder = async (orderId: string) => {
       try {
@@ -172,44 +209,21 @@ export const Terminal: React.FC = () => {
         return;
     }
 
-    // CHECK BALANCES
-    // 1. Identify which token we are spending
-    const chainSelector = pair.baseToken.chainSelector;
-    let spendingTokenAddress = "";
-    let spendingAmount = 0n;
-    
-    // We need decimals. Pairs info usually has it? 
-    // Backend /api/pairs returns baseToken { address, symbol, decimals } ?
-    // Let's check pairs state. 
-    // Assuming pair.baseToken.decimals and pair.quoteToken.decimals exist.
-    // If not, we might default to 18.
-    
+    // CHECK BALANCES — aggregate across all chains for cross-chain support
     if (side === 'BUY') {
-        // Spending Quote Token (e.g. USDC)
-        spendingTokenAddress = pair.quoteToken.address.toLowerCase();
         const decimals = pair.quoteToken.decimals || 18;
-        spendingAmount = BigInt(Math.round(totalValue * (10 ** decimals))); // Approximation might have float issues, better use parseUnits if available or careful math
+        const available = getAvailableBalance(pair.quoteToken.address, decimals, pair.quoteToken.symbol);
+        if (totalValue > available) {
+            toast.error(`Insufficient ${pair.quoteToken.symbol} balance. Need: ${totalValue.toFixed(2)}, Have: ${available.toFixed(2)} (across all chains)`);
+            return;
+        }
     } else {
-        // Spending Base Token (e.g. BOND)
-        spendingTokenAddress = pair.baseToken.address.toLowerCase();
         const decimals = pair.baseToken.decimals || 18;
-        // amount is string units
-        // need to convert 
-        const parts = amount.split('.');
-        const whole = BigInt(parts[0]);
-        const fraction = parts[1] ? BigInt(parts[1].padEnd(decimals, '0').slice(0, decimals)) : 0n;
-        spendingAmount = whole * BigInt(10 ** decimals) + fraction;
-    }
-
-    const balanceKey = `${spendingTokenAddress}-${chainSelector}`;
-    const userBalance = BigInt(balances[balanceKey] || "0");
-
-    console.log(`[Order Check] Spend: ${spendingAmount.toString()} ${side==='BUY'?pair.quoteToken.symbol:pair.baseToken.symbol} (${spendingTokenAddress})`);
-    console.log(`[Order Check] Balance: ${userBalance.toString()} (Key: ${balanceKey})`);
-
-    if (userBalance < spendingAmount) {
-        toast.error(`Insufficient Balance. Need: ${side==='BUY'?totalValue.toFixed(2):amount} ${side==='BUY'?pair.quoteToken.symbol:pair.baseToken.symbol}`);
-        return;
+        const available = getAvailableBalance(pair.baseToken.address, decimals, pair.baseToken.symbol);
+        if (Number(amount) > available) {
+            toast.error(`Insufficient ${pair.baseToken.symbol} balance. Need: ${amount}, Have: ${available.toFixed(4)} (across all chains)`);
+            return;
+        }
     }
 
     try {
@@ -402,10 +416,16 @@ export const Terminal: React.FC = () => {
                      >
                         {pairs.length > 0 ? (
                             pairs.map(pair => {
-                                const chainName = Object.values(CHAINS).find(c => c.chainSelector === pair.baseToken.chainSelector)?.name || "Unknown Chain";
+                                const isCrossChain = pair.baseToken.chainSelector !== pair.quoteToken.chainSelector;
+                                const toShort = (name: string) => name.replace(' Sepolia', '').replace('Arbitrum', 'Arb');
+                                const baseName = toShort(Object.values(CHAINS).find(c => c.chainSelector === pair.baseToken.chainSelector)?.name || "?");
+                                const quoteName = toShort(Object.values(CHAINS).find(c => c.chainSelector === pair.quoteToken.chainSelector)?.name || "?");
+                                const label = isCrossChain
+                                    ? `${pair.baseToken.symbol}[${baseName}] / ${pair.quoteToken.symbol}[${quoteName}] ⚡ CCIP`
+                                    : `${pair.baseToken.symbol}/${pair.quoteToken.symbol} — ${baseName}`;
                                 return (
                                 <option key={pair.id} value={pair.id}>
-                                    {pair.baseToken.symbol}/{pair.quoteToken.symbol} ({chainName})
+                                    {label}
                                 </option>
                             )})
                         ) : (
@@ -442,28 +462,21 @@ export const Terminal: React.FC = () => {
 
                <div className="space-y-4 bg-surface-dark/95 p-4 border border-border-dark backdrop-blur-sm">
                   <div className="space-y-1">
-                     <div className="flex justify-between">
+                      <div className="flex justify-between">
                         <label className="text-[10px] text-slate-500 font-mono uppercase">Volume</label>
                         <span className="text-[10px] text-primary font-mono cursor-pointer underline decoration-primary/50" onClick={() => {
-                            // Max Logic
+                            // Max Logic — aggregate across all chains
                             const pair = pairs.find(p => p.id === selectedPairId);
                             if (!pair) return;
-                            const chainSelector = pair.baseToken.chainSelector;
                             
                             if (side === 'BUY') {
-                                // Max Buy = Balance USDC / Price
-                                const tokenAddr = pair.quoteToken.address.toLowerCase();
-                                const balRaw = balances[`${tokenAddr}-${chainSelector}`] || "0";
                                 const decimals = pair.quoteToken.decimals || 18;
-                                const bal = Number(balRaw) / (10**decimals);
+                                const bal = getAvailableBalance(pair.quoteToken.address, decimals, pair.quoteToken.symbol);
                                 const p = Number(price);
                                 if (p > 0) setAmount((bal/p).toFixed(4));
                             } else {
-                                // Max Sell = Balance BOND
-                                const tokenAddr = pair.baseToken.address.toLowerCase();
-                                const balRaw = balances[`${tokenAddr}-${chainSelector}`] || "0";
                                 const decimals = pair.baseToken.decimals || 18;
-                                const bal = Number(balRaw) / (10**decimals);
+                                const bal = getAvailableBalance(pair.baseToken.address, decimals, pair.baseToken.symbol);
                                 setAmount(bal.toFixed(4));
                             }
                         }}>Max</span>
@@ -472,17 +485,14 @@ export const Terminal: React.FC = () => {
                         Available: {(() => {
                             const pair = pairs.find(p => p.id === selectedPairId);
                             if (!pair) return "--";
-                            const chainSelector = pair.baseToken.chainSelector;
                             if (side === 'BUY') {
-                                const tokenAddr = pair.quoteToken.address.toLowerCase();
-                                const balRaw = balances[`${tokenAddr}-${chainSelector}`] || "0";
                                 const decimals = pair.quoteToken.decimals || 18;
-                                return `${(Number(balRaw)/(10**decimals)).toFixed(2)} ${pair.quoteToken.symbol}`;
+                                const bal = getAvailableBalance(pair.quoteToken.address, decimals, pair.quoteToken.symbol);
+                                return `${bal.toFixed(2)} ${pair.quoteToken.symbol} (all chains)`;
                             } else {
-                                const tokenAddr = pair.baseToken.address.toLowerCase();
-                                const balRaw = balances[`${tokenAddr}-${chainSelector}`] || "0";
                                 const decimals = pair.baseToken.decimals || 18;
-                                return `${(Number(balRaw)/(10**decimals)).toFixed(4)} ${pair.baseToken.symbol}`;
+                                const bal = getAvailableBalance(pair.baseToken.address, decimals, pair.baseToken.symbol);
+                                return `${bal.toFixed(4)} ${pair.baseToken.symbol} (all chains)`;
                             }
                         })()}
                      </div>
@@ -530,21 +540,13 @@ export const Terminal: React.FC = () => {
                                   const pair = pairs.find(p => p.id === selectedPairId);
                                   if (!pair) return "text-white";
                                   
-                                  const chainSelector = pair.baseToken.chainSelector;
-                                  // Re-calculate available balance here for validation
-                                  let available = 0;
                                   if (side === 'BUY') {
-                                      const tokenAddr = pair.quoteToken.address.toLowerCase();
-                                      const balRaw = balances[`${tokenAddr}-${chainSelector}`] || "0";
                                       const decimals = pair.quoteToken.decimals || 18;
-                                      available = Number(balRaw) / (10**decimals);
+                                      const available = getAvailableBalance(pair.quoteToken.address, decimals, pair.quoteToken.symbol);
                                       return totalVal > available ? "text-red-500" : "text-primary";
                                   } else {
-                                      // For SELL, check amount vs balance
-                                      const tokenAddr = pair.baseToken.address.toLowerCase();
-                                      const balRaw = balances[`${tokenAddr}-${chainSelector}`] || "0";
                                       const decimals = pair.baseToken.decimals || 18;
-                                      available = Number(balRaw) / (10**decimals);
+                                      const available = getAvailableBalance(pair.baseToken.address, decimals, pair.baseToken.symbol);
                                       return Number(amount) > available ? "text-red-500" : "text-white";
                                   }
                               })()
@@ -557,26 +559,21 @@ export const Terminal: React.FC = () => {
                                   const pair = pairs.find(p => p.id === selectedPairId);
                                   if (!pair) return null;
                                   
-                                  const chainSelector = pair.baseToken.chainSelector;
                                   let available = 0;
                                   let isInsufficient = false;
                                   
                                   if (side === 'BUY') {
-                                      const tokenAddr = pair.quoteToken.address.toLowerCase();
-                                      const balRaw = balances[`${tokenAddr}-${chainSelector}`] || "0";
                                       const decimals = pair.quoteToken.decimals || 18;
-                                      available = Number(balRaw) / (10**decimals);
+                                      available = getAvailableBalance(pair.quoteToken.address, decimals, pair.quoteToken.symbol);
                                       if (totalVal > available) isInsufficient = true;
                                   } else {
-                                      const tokenAddr = pair.baseToken.address.toLowerCase();
-                                      const balRaw = balances[`${tokenAddr}-${chainSelector}`] || "0";
                                       const decimals = pair.baseToken.decimals || 18;
-                                      available = Number(balRaw) / (10**decimals);
+                                      available = getAvailableBalance(pair.baseToken.address, decimals, pair.baseToken.symbol);
                                       if (Number(amount) > available) isInsufficient = true;
                                   }
 
                                   if (isInsufficient) {
-                                      return <span className="text-[9px] text-red-500 font-mono">INSUFFICIENT BALANCE (Max: {available.toFixed(4)})</span>;
+                                      return <span className="text-[9px] text-red-500 font-mono">INSUFFICIENT BALANCE (Max: {available.toFixed(4)} across all chains)</span>;
                                   }
                                   return null;
                               })()}
@@ -657,12 +654,12 @@ export const Terminal: React.FC = () => {
            </Card>
 
            {/* Logs */}
-           <Card className="h-1/3 flex flex-col shadow-heavy">
-              <div className="px-3 py-2 border-b border-border-dark flex items-center gap-2 bg-obsidian">
+           <Card className="min-h-0 h-1/3 flex flex-col shadow-heavy">
+              <div className="px-3 py-2 border-b border-border-dark flex items-center gap-2 bg-obsidian shrink-0">
                  <Icon name="terminal" className="text-slate-500 text-sm" />
                  <span className="text-[10px] font-mono font-bold text-slate-400 uppercase">SYSTEM LOGS</span>
               </div>
-              <div className="flex-1 p-3 overflow-y-auto font-mono text-[10px] space-y-1 bg-black">
+              <div className="flex-1 min-h-0 p-3 overflow-y-auto font-mono text-[10px] space-y-1 bg-black">
                  {logs.length === 0 && <div className="text-slate-600 italic">Ready for logs...</div>}
                  {logs.map((log, i) => (
                      <div key={i} className="flex gap-2">
@@ -670,7 +667,7 @@ export const Terminal: React.FC = () => {
                          <span className="text-slate-300">{log}</span>
                      </div>
                  ))}
-                 <div className="flex gap-2"><span className="text-slate-600 animate-pulse">_</span></div>
+                 <div ref={logEndRef} />
               </div>
            </Card>
         </div>

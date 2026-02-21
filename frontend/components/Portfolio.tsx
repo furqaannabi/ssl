@@ -200,6 +200,7 @@ export const Portfolio: React.FC = () => {
                     <th className="px-6 py-4 font-semibold text-center">Privacy Shield</th>
                     <th className="px-6 py-4 font-semibold">Asset</th>
                     <th className="px-6 py-4 font-semibold">Type</th>
+                    <th className="px-6 py-4 font-semibold">Chain</th>
                     <th className="px-6 py-4 font-semibold text-right">Quantity</th>
                     <th className="px-6 py-4 font-semibold text-right">Allocation</th>
                     <th className="px-6 py-4 font-semibold text-right">Position Size</th>
@@ -235,6 +236,15 @@ export const Portfolio: React.FC = () => {
                         </div>
                       </td>
                       <td className="px-6 py-4 text-slate-400">{asset.type}</td>
+                      <td className="px-6 py-4">
+                        <div className="flex gap-2">
+                            {asset.breakdown && Object.keys(asset.breakdown).map(chain => (
+                                <span key={chain} className="px-2 py-1 bg-slate-800 text-slate-300 rounded text-xs border border-slate-700 font-mono">
+                                    {chain.toLowerCase().includes('base') ? 'Base' : chain.toLowerCase().includes('arbitrum') ? 'Arbitrum' : 'Unknown'}
+                                </span>
+                            ))}
+                        </div>
+                      </td>
                       <td className="px-6 py-4 text-right text-slate-300 font-mono">
                         {asset.balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) || "0.00"}
                       </td>
@@ -249,16 +259,6 @@ export const Portfolio: React.FC = () => {
                       <td className="px-6 py-4 text-right text-slate-200">
                         <span className="blur-[2px] group-hover:blur-none transition-all cursor-crosshair block">{asset.value}</span>
                          <div className="text-[9px] text-slate-500 group-hover:text-primary transition-colors">@ ${(asset as any).price?.toFixed(2)}</div>
-                         {/* Chain Breakdown */}
-                         {asset.breakdown && Object.keys(asset.breakdown).length > 0 && (
-                             <div className="mt-1 flex flex-col items-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                                 {Object.entries(asset.breakdown).map(([chain, bal]) => (
-                                     <span key={chain} className="text-[8px] font-mono text-slate-400 capitalize">
-                                        {chain.includes('base') ? 'Base' : chain.includes('arbitrum') ? 'Arb' : 'Unknown'}: {(bal as number).toFixed(2)}
-                                     </span>
-                                 ))}
-                             </div>
-                         )}
                       </td>
                     </tr>
                   ))}

@@ -16,10 +16,8 @@ export class OracleService {
   static async getSignal(pairId: string): Promise<OracleSignal> {
     const settlements = await prisma.settlement.findMany({
       where: {
-        status: 'COMPLETED',
-        // In a real scenario, we'd filter by pairId if Settlement had it, 
-        // but looking at schema, Settlement links to Order which has pairId.
-        // For simplicity in this "AI-lite" version, we'll aggregate recent settlements.
+        // SETTLED = same-chain settlement done; COMPLETED = cross-chain bridge finished
+        status: { in: ['SETTLED', 'COMPLETED'] },
       },
       orderBy: { createdAt: 'desc' },
       take: this.WINDOW_SIZE,
