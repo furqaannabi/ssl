@@ -9,6 +9,41 @@ function remaining(order: { amount: string; filledAmount: string }): bigint {
     return BigInt(Math.floor(Number(order.amount))) - BigInt(Math.floor(Number(order.filledAmount)));
 }
 
+/** Extract the JSON result object from CRE output (handles both simulate and production modes) */
+function extractCREResult(rawResult: any): Record<string, any> | null {
+    // Production: result is the direct return value from the workflow
+    if (rawResult && typeof rawResult === 'object' && !('output' in rawResult)) return rawResult;
+
+    // Simulate: result is { output: <stdout string> }
+    // The CRE CLI outputs: Workflow Simulation Result: "{\"status\":...}"
+    if (rawResult?.output && typeof rawResult.output === 'string') {
+        const output = rawResult.output as string;
+
+        // Try to find "Workflow Simulation Result: <json-string>" pattern
+        const simResultMatch = output.match(/Workflow Simulation Result:\s*"((?:[^"\\]|\\.)*)"/);
+        if (simResultMatch) {
+            try {
+                // The captured group is an escaped JSON string — unescape and parse
+                const unescaped = simResultMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+                const parsed = JSON.parse(unescaped);
+                if (parsed && typeof parsed === 'object') return parsed;
+            } catch { /* ignore */ }
+        }
+
+        // Fallback: scan lines for a bare JSON object
+        const lines = output.split('\n').reverse();
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('{')) continue;
+            try {
+                const parsed = JSON.parse(trimmed);
+                if (parsed && typeof parsed === 'object') return parsed;
+            } catch { /* not valid JSON */ }
+        }
+    }
+    return null;
+}
+
 export async function matchOrders(newOrderId: string, onLog?: (log: string) => void) {
     const log = (msg: string) => {
         console.log(`[MatchingEngine] ${msg}`);
@@ -86,6 +121,11 @@ export async function matchOrders(newOrderId: string, onLog?: (log: string) => v
             break;
         }
 
+        if (!buyer.stealthAddress || !seller.stealthAddress) {
+            log(`Skipping match: missing stealthAddress (buyer: ${!!buyer.stealthAddress}, seller: ${!!seller.stealthAddress})`);
+            break;
+        }
+
         // Resolve token addresses from DB using chain selectors
         const baseToken = await prisma.token.findFirst({
             where: { symbol: baseSymbol, chainSelector: buyer.baseChainSelector },
@@ -129,22 +169,21 @@ export async function matchOrders(newOrderId: string, onLog?: (log: string) => v
             const destChainCfg = Object.values(config.chains).find(
                 c => c.chainSelector === buyer.baseChainSelector
             );
-            crePayload.crossChain          = true;
-            crePayload.sourceChainSelector = buyer.quoteChainSelector; // USDC chain
-            crePayload.destChainSelector   = buyer.baseChainSelector;  // RWA chain
-            crePayload.ccipDestSelector    = destChainCfg?.ccipChainSelector || "";
 
-            log(`Cross-chain: USDC from ${buyer.quoteChainSelector} → RWA on ${buyer.baseChainSelector}`);
+            if (!destChainCfg) {
+                log(`Cross-chain order but dest chain config not found for selector: "${buyer.baseChainSelector}" — available: ${Object.values(config.chains).map(c => c.chainSelector).join(', ')}`);
+                log(`Falling back to same-chain settlement`);
+            } else {
+                crePayload.crossChain          = true;
+                crePayload.sourceChainSelector = buyer.quoteChainSelector; // USDC chain
+                crePayload.destChainSelector   = buyer.baseChainSelector;  // RWA chain
+                crePayload.ccipDestSelector    = destChainCfg.ccipChainSelector;
+
+                log(`Cross-chain: USDC from ${buyer.quoteChainSelector} → RWA on ${buyer.baseChainSelector} (CCIP selector: ${destChainCfg.ccipChainSelector})`);
+            }
         }
 
-        try {
-            await sendToCRE(crePayload, onLog);
-        } catch (error) {
-            log(`Settlement failed: ${error}`);
-            break;
-        }
-
-        // DB balance updates
+        // ── Settle in DB first (removes orders from book immediately) ──
         const baseChain  = buyer.baseChainSelector;
         const quoteChain = buyer.quoteChainSelector;
 
@@ -153,9 +192,9 @@ export async function matchOrders(newOrderId: string, onLog?: (log: string) => v
                 where: { userAddress_token_chainSelector: { userAddress: user, token, chainSelector: chain } }
             });
 
-        const buyerBaseBal  = BigInt((await findBal(buyer.userAddress!, baseToken.address, baseChain))?.balance  ?? "0");
-        const buyerQuoteBal = BigInt((await findBal(buyer.userAddress!, quoteToken.address, quoteChain))?.balance ?? "0");
-        const sellerBaseBal = BigInt((await findBal(seller.userAddress!, baseToken.address, baseChain))?.balance  ?? "0");
+        const buyerBaseBal   = BigInt((await findBal(buyer.userAddress!, baseToken.address, baseChain))?.balance  ?? "0");
+        const buyerQuoteBal  = BigInt((await findBal(buyer.userAddress!, quoteToken.address, quoteChain))?.balance ?? "0");
+        const sellerBaseBal  = BigInt((await findBal(seller.userAddress!, baseToken.address, baseChain))?.balance  ?? "0");
         const sellerQuoteBal = BigInt((await findBal(seller.userAddress!, quoteToken.address, quoteChain))?.balance ?? "0");
 
         await prisma.$transaction([
@@ -189,7 +228,37 @@ export async function matchOrders(newOrderId: string, onLog?: (log: string) => v
             }),
         ]);
 
-        log(`Settled. Trade: ${tradeAmount} ${baseSymbol} @ ${price} USDC | base: ${baseChain} | quote: ${quoteChain}`);
+        log(`Orders settled in DB. Triggering CRE for on-chain settlement...`);
+
+        // ── Call CRE for on-chain settlement ──
+        try {
+            const rawResult = await sendToCRE(crePayload, onLog);
+            const result = extractCREResult(rawResult);
+
+            log(`CRE settlement complete. Status: ${result?.status ?? 'unknown'}`);
+
+            // For cross-chain orders, store the bridge tx hash so we can show CCIP explorer link
+            if (isCrossChain && result?.bridgeTxHash) {
+                const bridgeTxHash = result.bridgeTxHash as string;
+                log(`Cross-chain bridge tx: ${bridgeTxHash}`);
+
+                await prisma.$transaction([
+                    prisma.order.update({
+                        where: { id: order.id },
+                        data: { bridgeTxHash },
+                    }),
+                    prisma.order.update({
+                        where: { id: match.id },
+                        data: { bridgeTxHash },
+                    }),
+                ]);
+            }
+        } catch (error) {
+            log(`CRE settlement failed (DB already updated): ${error}`);
+            // Orders are already SETTLED in DB; on-chain delivery may be retried manually
+        }
+
+        log(`Done. Trade: ${tradeAmount} ${baseSymbol} @ ${price} USDC | base: ${baseChain} | quote: ${quoteChain}`);
 
         if (orderFullyFilled) break;
     }

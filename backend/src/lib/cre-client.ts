@@ -208,6 +208,7 @@ function sendToCRESimulate(payload: CREPayload, onLog?: (log: string) => void): 
         child.stdout.on("data", (data) => {
             const str = data.toString();
             console.log(`[cre-client:stdout] ${str.trim()}`);
+            console.log(str);
             if (onLog) onLog(str);
             stdout += str;
         });
@@ -215,6 +216,7 @@ function sendToCRESimulate(payload: CREPayload, onLog?: (log: string) => void): 
         child.stderr.on("data", (data) => {
             const str = data.toString();
             console.error(`[cre-client:stderr] ${str.trim()}`);
+            console.error(str);
             if (onLog) onLog(str);
             stderr += str;
         });

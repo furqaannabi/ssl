@@ -2,7 +2,6 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Script.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "../src/core/SSLVault.sol";
 import "../src/core/SSLCCIPReceiver.sol";
 import "./Config.sol";
@@ -28,26 +27,24 @@ contract DeployScript is Script {
         // Resolve defaults from SSLChains, allow env override
         address defaultForwarder = SSLChains.forwarder();
         address defaultRouter    = SSLChains.ccipRouter();
-        address defaultLink      = SSLChains.linkToken();
 
         address forwarder  = vm.envOr("FORWARDER_ADDRESS", defaultForwarder);
         address ccipRouter = vm.envOr("CCIP_ROUTER", defaultRouter);
-        address link       = vm.envOr("LINK_TOKEN", defaultLink);
+
+        // Amount of ETH to pre-fund the vault for CCIP fees (~0.01 ETH covers many settlements)
+        uint256 ethFund = vm.envOr("ETH_FUND", uint256(0.01 ether));
 
         console.log("Chain ID:", block.chainid);
         console.log("Deployer:", deployer);
         console.log("Forwarder:", forwarder);
         console.log("CCIP Router:", ccipRouter);
-        console.log("LINK Token:", link);
-
-        uint256 linkFund = vm.envOr("LINK_FUND", uint256(1 ether));
+        console.log("ETH fee fund:", ethFund);
 
         vm.startBroadcast(deployerPrivateKey);
 
         StealthSettlementVault vault = new StealthSettlementVault(
             forwarder,
-            ccipRouter,
-            link
+            ccipRouter
         );
 
         SSLCCIPReceiver receiver = new SSLCCIPReceiver(
@@ -57,7 +54,9 @@ contract DeployScript is Script {
 
         vault.setCCIPReceiver(address(receiver));
 
-        IERC20(link).transfer(address(vault), linkFund);
+        // Fund vault with native ETH for CCIP fees
+        (bool ok, ) = address(vault).call{value: ethFund}("");
+        require(ok, "ETH fund failed");
 
         vm.stopBroadcast();
 
@@ -65,6 +64,6 @@ contract DeployScript is Script {
         console.log("=== SSL Deployment Complete ===");
         console.log("StealthSettlementVault:", address(vault));
         console.log("SSLCCIPReceiver:", address(receiver));
-        console.log("LINK funded:", linkFund);
+        console.log("ETH funded for CCIP fees:", ethFund);
     }
 }

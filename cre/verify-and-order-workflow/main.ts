@@ -63,7 +63,7 @@ interface VerifyPayload {
 
 type VerificationResponse = {
   statusCode: number;
-  body: any;
+  body: string;
 };
 
 interface MatchPayload {
@@ -230,17 +230,16 @@ const verifyProof = (sendRequester: HTTPSendRequester, config: Config, data: Ver
 
   const resp = sendRequester.sendRequest(req).result();
 
-  let decodedBody = {};
-  if (resp.body) {
+  let responseBody = "";
+  if (resp.body && resp.body.length > 0) {
     try {
-      const jsonString = new TextDecoder().decode(resp.body);
-      decodedBody = JSON.parse(jsonString);
+      responseBody = new TextDecoder().decode(resp.body);
     } catch (e) {
       // ignore
     }
   }
 
-  return { statusCode: resp.statusCode, body: decodedBody };
+  return { statusCode: resp.statusCode ?? 0, body: responseBody };
 };
 
 // ──────────────────────────────────────────────
@@ -347,7 +346,7 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
     );
 
     // ── Cross-chain settlement ──
-    if (data.crossChain && data.ccipDestSelector && data.destChainSelector) {
+    if (data.crossChain && data.destChainSelector) {
       runtime.log("Cross-chain settlement detected");
 
       const primary = getPrimaryChain(runtime.config);
@@ -360,10 +359,16 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
       if (!sourceCfg || !sourceCfg.vault) throw new Error("Source chain not configured: " + sourceChain);
       if (!destCfg || !destCfg.ccipReceiver) throw new Error("Dest chain ccipReceiver not configured: " + destChain);
 
+      // Derive CCIP numeric selector — prefer payload value, fall back to config
+      const ccipDestSelectorStr = data.ccipDestSelector || destCfg.ccipChainSelector;
+      if (!ccipDestSelectorStr) throw new Error("Cannot determine CCIP dest selector for " + destChain);
+
+      runtime.log("CCIP dest selector: " + ccipDestSelectorStr + " (source: " + (data.ccipDestSelector ? "payload" : "config") + ")");
+
       const sourceVault = sourceCfg.vault;
       const destReceiver = destCfg.ccipReceiver;
 
-      const ccipDestSelectorBigInt = BigInt(data.ccipDestSelector);
+      const ccipDestSelectorBigInt = BigInt(ccipDestSelectorStr);
 
       // crossChainSettle (type=3) on SOURCE vault
       // Source vault bridges USDC via CCIP to dest chain's SSLCCIPReceiver

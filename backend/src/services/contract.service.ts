@@ -25,15 +25,22 @@ const client = createPublicClient({
     transport,
 });
 
+// Primary chain vault address (Base Sepolia)
+const vaultAddress = (config.chains.baseSepolia?.vault ?? "") as `0x${string}`;
+
 export const contractService = {
     /**
      * Check if a user address is verified on the SSLVault contract.
      * @param address User's wallet address
      */
     async getIsVerified(address: string): Promise<boolean> {
+        if (!vaultAddress) {
+            console.warn("[ContractService] No vault address configured — skipping isVerified check");
+            return false;
+        }
         try {
             const isVerified = await client.readContract({
-                address: config.vaultAddress as `0x${string}`,
+                address: vaultAddress,
                 abi,
                 functionName: "isVerified",
                 args: [address as `0x${string}`],
@@ -41,8 +48,6 @@ export const contractService = {
             return isVerified;
         } catch (error) {
             console.error("[ContractService] isVerified check failed:", error);
-            // Default to false on error to be safe, or throw?
-            // Let's return false to fail closed.
             return false;
         }
     },

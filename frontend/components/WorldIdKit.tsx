@@ -16,7 +16,7 @@ interface WorldIdKitProps {
   signal?: string;
 }
 
-const WorldIdKit: React.FC<WorldIdKitProps> = ({ 
+const WorldIdKit: React.FC<WorldIdKitProps> = ({
   onSuccess: externalOnSuccess,
   action = import.meta.env.VITE_WORLD_ID_ACTION,
   app_id = import.meta.env.VITE_WORLD_ID_APP_ID,
@@ -24,8 +24,17 @@ const WorldIdKit: React.FC<WorldIdKitProps> = ({
 }) => {
   const [isVerifying, setIsVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [logs, setLogs] = useState<string[]>([]);
+  const logsEndRef = React.useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const { address } = useConnection();
+  const { mutateAsync: signMessageAsync } = useSignMessage();
+
+  React.useEffect(() => {
+      if (logsEndRef.current) {
+          logsEndRef.current.scrollIntoView({ behavior: "smooth" });
+      }
+  }, [logs]);
 
   // Validate configuration
   if (!app_id || !action) {
@@ -35,8 +44,6 @@ const WorldIdKit: React.FC<WorldIdKitProps> = ({
       </div>
     );
   }
-
-  const { mutateAsync: signMessageAsync } = useSignMessage();
 
   const handleVerify = async (proof: ISuccessResult) => {
     setIsVerifying(true);
@@ -117,16 +124,17 @@ const WorldIdKit: React.FC<WorldIdKitProps> = ({
                           console.log("[STREAM LOG]:", cleanMsg);
                       }
                       
-                      // SUCCESS CASE: 
+                      // SUCCESS CASE:
                       if (data.type === "result" && data.success) {
                           if (proof.nullifier_hash) {
                               localStorage.setItem("ssl_nullifier_hash", proof.nullifier_hash);
                           }
-                          
-                        console.log("✅ Verification successful!");
-                          toast.success("Human Verified successfully");
 
-                        return;
+                          console.log("✅ Verification successful!");
+                          toast.success("Human Verified successfully");
+                          window.dispatchEvent(new Event("world-id-updated"));
+
+                          return;
                       }
                       
                       // ERROR CASE:
@@ -191,16 +199,6 @@ const WorldIdKit: React.FC<WorldIdKitProps> = ({
         window.location.reload();
     }, 1500);
   };
-
-  // Scroll to bottom of logs
-  const logsEndRef = React.useRef<HTMLDivElement>(null);
-  const [logs, setLogs] = useState<string[]>([]);
-  
-  React.useEffect(() => {
-      if (logsEndRef.current) {
-          logsEndRef.current.scrollIntoView({ behavior: "smooth" });
-      }
-  }, [logs]);
 
   return (
     <div className="space-y-4">

@@ -101,7 +101,7 @@ export const Terminal: React.FC = () => {
 
   const fetchMyOrders = async () => {
       try {
-          const res = await fetch(`${API_URL}/api/user/orders?status=OPEN`, { credentials: "include" });
+          const res = await fetch(`${API_URL}/api/user/orders`, { credentials: "include" });
           if (res.ok) {
               const data = await res.json();
               if (data.success) setMyOrders(data.orders);
@@ -155,8 +155,8 @@ export const Terminal: React.FC = () => {
           fetchMyOrders();
           fetchBalances();
       }
-      // fetchOrderBook() is called below when selectedPairId changes
-      
+      if (selectedPairId) fetchOrderBook();
+
       const interval = setInterval(() => {
           if (isConnected) {
               if (activeTab === 'MY_ORDERS') fetchMyOrders();
@@ -785,8 +785,10 @@ export const Terminal: React.FC = () => {
                                       : (pair ? (CHAINS[pair.tokens?.[0]?.chainSelector]?.name?.replace(' Sepolia','') || '') : '');
                                   const pairSymbol = pair ? `${pair.baseSymbol}/USDC` : "UNK/USDC";
 
+                                  const isCrossChainSettled = order.status === 'SETTLED' && order.bridgeTxHash;
+                                  const ccipUrl = order.bridgeTxHash ? `https://ccip.chain.link/tx/${order.bridgeTxHash}` : null;
                                   return (
-                                  <div key={order.id} className="grid grid-cols-5 px-4 py-3 border-b border-white/5 items-center hover:bg-white/5 transition-colors">
+                                  <div key={order.id} className={`grid grid-cols-5 px-4 py-3 border-b items-center hover:bg-white/5 transition-colors ${isCrossChainSettled ? 'border-primary/10 bg-primary/3' : 'border-white/5'}`}>
                                       <div className="flex flex-col">
                                           <span className="text-white font-bold">{pair?.baseSymbol || order.asset || "UNK"}</span>
                                           <span className="text-[9px] text-slate-500">{(Number(order.amount)).toFixed(2)} @ {Number(order.price).toFixed(2)}</span>
@@ -797,19 +799,32 @@ export const Terminal: React.FC = () => {
                                       </div>
                                       <div className={`text-right font-bold ${order.side === 'BUY' ? 'text-primary' : 'text-red-500'}`}>{order.side}</div>
                                       <div className="text-right hidden sm:block">
-                                          <Badge variant={order.status === 'OPEN' ? 'success' : order.status === 'MATCHED' ? 'warning' : 'outline'}>
-                                              {order.status}
-                                          </Badge>
+                                          <Badge
+                                            label={order.status}
+                                            color={order.status === 'OPEN' ? 'blue' : order.status === 'SETTLED' ? 'primary' : order.status === 'MATCHED' ? 'yellow' : 'slate'}
+                                          />
                                       </div>
-                                      <div className="text-right">
+                                      <div className="text-right flex flex-col items-end gap-1">
                                           {['OPEN', 'PENDING'].includes(order.status) && (
-                                              <Button 
-                                                variant="ghost" 
+                                              <Button
+                                                variant="ghost"
                                                 className="h-6 px-2 text-[8px] border-red-500/30 text-red-500 hover:bg-red-500/10"
                                                 onClick={() => cancelOrder(order.id)}
                                               >
                                                   CANCEL
                                               </Button>
+                                          )}
+                                          {ccipUrl && (
+                                              <a
+                                                href={ccipUrl}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="flex items-center gap-1 text-[8px] text-primary hover:text-primary/80 font-mono transition-colors"
+                                                title="View CCIP bridge transaction"
+                                              >
+                                                <Icon name="link" className="text-[10px]" />
+                                                CCIP
+                                              </a>
                                           )}
                                       </div>
                                   </div>

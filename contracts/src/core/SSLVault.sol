@@ -34,8 +34,15 @@ contract StealthSettlementVault is
     using SafeERC20 for IERC20;
 
     IRouterClient public immutable ccipRouter;
-    IERC20 public immutable linkToken;
     address public ccipReceiver;
+
+    /// @notice Accept ETH to fund native CCIP fees
+    receive() external payable {}
+
+    function withdrawETH(address payable to) external onlyOwner {
+        (bool ok, ) = to.call{value: address(this).balance}("");
+        require(ok, "SSL: ETH withdraw failed");
+    }
 
     /// @notice address => verified
     mapping(address => bool) public override isVerified;
@@ -66,11 +73,9 @@ contract StealthSettlementVault is
 
     constructor(
         address _forwarderAddress,
-        address _ccipRouter,
-        address _linkToken
+        address _ccipRouter
     ) ReceiverTemplate(_forwarderAddress) {
         ccipRouter = IRouterClient(_ccipRouter);
-        linkToken = IERC20(_linkToken);
     }
 
     function whitelistToken(
@@ -310,17 +315,15 @@ contract StealthSettlementVault is
                     gasLimit: 200_000
                 })
             ),
-            feeToken: address(linkToken)
+            feeToken: address(0) // pay CCIP fee in native ETH
         });
 
         IERC20(token).safeIncreaseAllowance(address(ccipRouter), amount);
 
         uint256 fee = ccipRouter.getFee(destChainSelector, message);
-        require(linkToken.balanceOf(address(this)) >= fee, "SSL: insufficient LINK for CCIP fee");
+        require(address(this).balance >= fee, "SSL: insufficient ETH for CCIP fee");
 
-        linkToken.safeIncreaseAllowance(address(ccipRouter), fee);
-
-        bytes32 messageId = ccipRouter.ccipSend(
+        bytes32 messageId = ccipRouter.ccipSend{value: fee}(
             destChainSelector,
             message
         );

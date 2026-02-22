@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Button, Icon, useToast } from './UI';
-import { 
-    generateSpendingKeypair, 
-    downloadKeyfile, 
+import {
+    generateSpendingKeypair,
+    downloadKeyfile,
     SpendingKeypair,
 } from '../lib/stealth';
 import { useConnection } from 'wagmi';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import WorldIdKit from './WorldIdKit';
+import { auth } from '../lib/auth';
 
 const StealthGenerator: React.FC = () => {
     const [keys, setKeys] = useState<SpendingKeypair | null>(null);
@@ -125,8 +126,6 @@ const StealthGenerator: React.FC = () => {
         </div>
     );
 };
-
-import { auth } from '../lib/auth';
 
 export const ProfileModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen, onClose }) => {
     const { address: eoaAddress, isConnected } = useConnection();

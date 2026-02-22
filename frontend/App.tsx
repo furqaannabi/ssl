@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Routes, Route, NavLink, useLocation } from 'react-router-dom';
+import { Routes, Route, NavLink } from 'react-router-dom';
 import { Icon, ToastProvider } from './components/UI';
 
 import { Portfolio } from './components/Portfolio';
@@ -115,7 +115,6 @@ function AppContent() {
  
          <nav className="flex flex-col gap-4">
            {navItems.map((item) => {
-             const isActive = location.pathname === item.path || (item.path === '/' && location.pathname === '/');
              return (
                <NavLink
                  key={item.path}
