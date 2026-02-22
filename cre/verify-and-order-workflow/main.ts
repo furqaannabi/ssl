@@ -266,15 +266,30 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
     if (verificationResult.statusCode < 200 || verificationResult.statusCode >= 300) {
       // World ID returns 500 when the nullifier was already used (max_verifications_reached).
       // This means the identity is valid — proceed with the on-chain report.
+      const verificationBody = verificationResult.body || "";
+      const compactBody = verificationBody.replace(/\s+/g, " ").trim();
       const alreadyUsed =
         verificationResult.statusCode === 500 &&
-        verificationResult.body.includes("max_verifications_reached");
+        verificationBody.includes("max_verifications_reached");
 
       if (!alreadyUsed) {
-        runtime.log("Verification failed: " + verificationResult.statusCode);
+        runtime.log("Verification failed: status=" + verificationResult.statusCode + " body=" + compactBody);
+
+        let worldErrorCode = "unknown";
+        try {
+          const parsed = JSON.parse(verificationBody);
+          if (parsed && typeof parsed.error === "string") {
+            worldErrorCode = parsed.error;
+          }
+        } catch {
+          // Body is not JSON; keep code as "unknown"
+        }
+
         return JSON.stringify({
           status: "failed",
-          error: "Verification failed with status " + verificationResult.statusCode
+          error: "Verification failed with status " + verificationResult.statusCode,
+          worldErrorCode,
+          worldResponseBody: compactBody,
         });
       }
 
