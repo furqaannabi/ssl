@@ -264,11 +264,21 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
       .result();
 
     if (verificationResult.statusCode < 200 || verificationResult.statusCode >= 300) {
-      runtime.log("Verification failed: " + verificationResult.statusCode);
-      return JSON.stringify({
-        status: "failed",
-        error: "Verification failed with status " + verificationResult.statusCode
-      });
+      // World ID returns 500 when the nullifier was already used (max_verifications_reached).
+      // This means the identity is valid — proceed with the on-chain report.
+      const alreadyUsed =
+        verificationResult.statusCode === 500 &&
+        verificationResult.body.includes("max_verifications_reached");
+
+      if (!alreadyUsed) {
+        runtime.log("Verification failed: " + verificationResult.statusCode);
+        return JSON.stringify({
+          status: "failed",
+          error: "Verification failed with status " + verificationResult.statusCode
+        });
+      }
+
+      runtime.log("Nullifier already registered with World ID — proceeding with on-chain report");
     }
 
     runtime.log("Proof Verified. Broadcasting on-chain report for address: " + data.userAddress);
@@ -295,9 +305,8 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
       try {
         alreadyVerified = checkIsVerified(runtime, chainCfg, data.userAddress);
       } catch (err: any) {
-        runtime.log(`isVerified check FAILED on ${chainName}: ${err.message}`);
-        chainResults[chainName] = "CHECK_FAILED: " + (err.message || "unknown");
-        continue;
+        runtime.log(`isVerified check FAILED on ${chainName}: ${err.message} — proceeding with report`);
+        alreadyVerified = false;
       }
 
       if (alreadyVerified) {

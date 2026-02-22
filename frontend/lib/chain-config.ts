@@ -18,12 +18,12 @@ export const CHAINS: Record<string, ChainConfig> = {
         chainId: 84532,
         chainSelector: "ethereum-testnet-sepolia-base-1",
         ccipChainSelector: "10344971235874465080",
-        vault: "0xc714ac1aaca711d8fe20c1c1f5ad492958094073",
+        vault: "0x775dc213cf0672728a16994f351d10b52723abe7",
         usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
         ccipRouter: "0xD3b06cEbF099CE7DA4AcCf578aaEBFDBd6e88a93",
         forwarder: "0x82300bd7c3958625581cc2F77bC6464dcEcDF3e5",
-        rpcUrl: "https://base-sepolia.g.alchemy.com/v2/",
-        wsUrl: "wss://base-sepolia.g.alchemy.com/v2/",
+        rpcUrl: "https://base-sepolia.infura.io/v3/",
+        wsUrl: "wss://base-sepolia.infura.io/ws/v3/",
         blockExplorer: "https://sepolia.basescan.org"
     },
     "ethereum-testnet-sepolia-arbitrum-1": {
@@ -31,12 +31,12 @@ export const CHAINS: Record<string, ChainConfig> = {
         chainId: 421614,
         chainSelector: "ethereum-testnet-sepolia-arbitrum-1",
         ccipChainSelector: "3478487238524512106",
-        vault: "0x8af46b8badc3fbcf3588ba9d1a166dd799a97736",
+        vault: "0x85d980ff955fc203649f38207ed125cd84043a42",
         usdc: "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
         ccipRouter: "0x2a9C5afB0d0e4BAb2BCdaE109EC4b0c4Be15a165",
         forwarder: "0x82300bd7c3958625581cc2F77bC6464dcEcDF3e5",
-        rpcUrl: "https://arb-sepolia.g.alchemy.com/v2/",
-        wsUrl: "wss://arb-sepolia.g.alchemy.com/v2/",
+        rpcUrl: "https://arbitrum-sepolia.infura.io/v3/",
+        wsUrl: "wss://arbitrum-sepolia.infura.io/ws/v3/",
         blockExplorer: "https://sepolia.arbiscan.io"
     }
 };

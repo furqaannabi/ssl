@@ -60,7 +60,7 @@ async function ensureTokenExists(
 
 /**
  * Replay all historical Funded events missed while the listener was offline.
- * Paginates in 10-block chunks to comply with Alchemy free-tier limits.
+ * Paginates in 10-block chunks to comply with Infura free-tier limits.
  * Safe to run on every startup — deduplicates by txHash so nothing is double-counted.
  */
 async function replayMissedEvents(
@@ -69,8 +69,8 @@ async function replayMissedEvents(
     chainSelector: string,
     tag: string
 ): Promise<void> {
-    // Configurable chunk size — Alchemy free tier max is 10
-    const CHUNK_SIZE = 10;
+    // Infura supports up to 10,000 blocks per eth_getLogs call
+    const CHUNK_SIZE = 2000;
 
     try {
         const currentBlock = await provider.getBlockNumber();
@@ -170,9 +170,9 @@ async function startChainListener(chainName: string, chain: ChainConfig) {
         return;
     }
 
-    const alchemyKey = process.env.ALCHEMY_API_KEY;
-    const wsUrl = (alchemyKey && chain.wsUrl.includes("alchemy.com"))
-        ? `${chain.wsUrl}${alchemyKey}`
+    const infuraKey = process.env.INFURA_API_KEY;
+    const wsUrl = (infuraKey && chain.wsUrl.includes("infura.io"))
+        ? `${chain.wsUrl}${infuraKey}`
         : chain.wsUrl;
 
     try {

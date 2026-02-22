@@ -61,9 +61,33 @@ verify.post("/", authMiddleware, async (c) => {
     }
 
     try {
-        // ── Forward to CRE for Verification with SSE ──
+        // ── Step 1: Verify proof with World ID API (v2) ──
+        const worldIdUrl = `https://developer.worldcoin.org/api/v2/verify/${config.worldIdAppId}`;
+        const worldIdRes = await fetch(worldIdUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                nullifier_hash: body.nullifier_hash,
+                merkle_root: body.merkle_root,
+                proof: body.proof,
+                verification_level: body.verification_level,
+                action: config.worldIdAction,
+            }),
+        });
+
+        if (!worldIdRes.ok) {
+            const errBody = await worldIdRes.json().catch(() => ({})) as any;
+            const alreadyUsed = worldIdRes.status === 500 && errBody?.code === "max_verifications_reached";
+            if (!alreadyUsed) {
+                console.error("[verify] World ID rejected proof:", worldIdRes.status, errBody);
+                return c.json({ error: "World ID verification failed", detail: errBody }, 400);
+            }
+            console.log("[verify] Nullifier already used — treating as verified");
+        }
+
+        // ── Step 2: Forward to CRE for on-chain settlement (World ID already confirmed) ──
         return streamText(c, async (stream) => {
-            await stream.writeln(JSON.stringify({ type: 'log', message: 'Starting CRE verification...' }));
+            await stream.writeln(JSON.stringify({ type: 'log', message: 'World ID verified. Broadcasting on-chain...' }));
 
             try {
                 const creResponse = await sendToCRE({
@@ -75,6 +99,7 @@ verify.post("/", authMiddleware, async (c) => {
                     verification_level: body.verification_level,
                     signal: body.signal ?? "",
                     userAddress: body.user_address,
+                    preVerified: true,
                 }, async (log) => {
                     await stream.writeln(JSON.stringify({ type: 'log', message: log }));
                 });

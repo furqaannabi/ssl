@@ -29,7 +29,8 @@ export const config = {
     port: Number(process.env.PORT || 3001),
     nodeEnv: process.env.NODE_ENV || "development",
     evmPrivateKey: required("EVM_PRIVATE_KEY") as `0x${string}`,
-    worldAction: process.env.WORLD_ACTION || "verify-human",
+    worldIdAppId: process.env.WORLD_ID_APP_ID || "app_staging_72f7715e459d7b53ec15c8bf7398fd0f",
+    worldIdAction: process.env.WORLD_ID_ACTION || "atlasverification",
 
     /** All chain configs keyed by chain name */
     chains,
