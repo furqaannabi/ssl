@@ -24,7 +24,6 @@ import { seedTokens } from "./lib/seed-tokens";
 const app = new Hono();
 
 // ── Middleware ──
-app.use("*", logger());
 app.use(
     "*",
     cors({
