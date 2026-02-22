@@ -2,7 +2,6 @@
 pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IRouterClient} from "@chainlink/contracts-ccip/contracts/interfaces/IRouterClient.sol";
 import {Client} from "@chainlink/contracts-ccip/contracts/libraries/Client.sol";
@@ -31,7 +30,6 @@ contract StealthSettlementVault is
     ReceiverTemplate,
     ReentrancyGuard
 {
-    using SafeERC20 for IERC20;
 
     IRouterClient public immutable ccipRouter;
     IERC20 public immutable linkToken;
@@ -73,12 +71,11 @@ contract StealthSettlementVault is
         linkToken = IERC20(_linkToken);
     }
 
-    function whitelistToken(ISSLVault.TokenInput[] calldata tokens) external onlyOwner {
+    function whitelistToken(ISSLVault.TokenInput[] calldata tokens) external override onlyOwner {
         for (uint256 i = 0; i < tokens.length; i++) {
             ISSLVault.TokenInput calldata t = tokens[i];
             require(t.token != address(0), "SSL: zero address");
             require(!whitelistedTokens[t.token], "SSL: already whitelisted");
-
             whitelistedTokens[t.token] = true;
             tokenMetadata[t.token] = TokenMetadata({
                 symbol: t.symbol,
@@ -87,12 +84,11 @@ contract StealthSettlementVault is
                 active: true
             });
             whitelistedTokenList.push(t.token);
-
             emit TokenWhitelisted(t.token, t.symbol, t.tokenType);
         }
     }
 
-    function removeToken(address token) external onlyOwner {
+    function removeToken(address token) external override onlyOwner {
         require(whitelistedTokens[token], "SSL: not whitelisted");
         whitelistedTokens[token] = false;
         tokenMetadata[token].active = false;
@@ -123,12 +119,12 @@ contract StealthSettlementVault is
         require(msg.sender == ccipReceiver, "SSL: only ccip receiver");
         require(!rwaSettledOrders[orderId], "SSL: rwa settled");
         rwaSettledOrders[orderId] = true;
-        IERC20(rwaToken).safeTransfer(buyer, rwaAmount);
+        IERC20(rwaToken).transfer(buyer, rwaAmount);
         emit Settled(orderId, buyer, address(0));
     }
 
     function withdrawFees(address _token, address _to) external onlyOwner {
-        IERC20(_token).safeTransfer(_to, IERC20(_token).balanceOf(address(this)));
+        IERC20(_token).transfer(_to, IERC20(_token).balanceOf(address(this)));
     }
 
     // ──────────────────────────────────────────────
@@ -145,7 +141,7 @@ contract StealthSettlementVault is
         // Verify sender address is whitelisted by CRE
         require(isVerified[msg.sender], "SSL: address not verified");
 
-        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        IERC20(token).transferFrom(msg.sender, address(this), amount);
 
         emit Funded(token, amount, msg.sender);
     }
@@ -190,7 +186,7 @@ contract StealthSettlementVault is
 
         request.claimed = true;
 
-        IERC20(request.token).safeTransfer(_user, request.amount);
+        IERC20(request.token).transfer(_user, request.amount);
 
         emit WithdrawalClaimed(_user, _withdrawalId, block.timestamp);
     }
@@ -272,8 +268,8 @@ contract StealthSettlementVault is
         require(!settledOrders[orderId], "settled");
 
         // Transfer to stealth addresses
-        IERC20(tokenA).safeTransfer(stealthBuyer, amountA);
-        IERC20(tokenB).safeTransfer(stealthSeller, amountB);
+        IERC20(tokenA).transfer(stealthBuyer, amountA);
+        IERC20(tokenB).transfer(stealthSeller, amountB);
 
         settledOrders[orderId] = true;
 
@@ -324,11 +320,11 @@ contract StealthSettlementVault is
             feeToken: address(linkToken) // pay CCIP fee in LINK
         });
 
-        IERC20(usdcToken).safeIncreaseAllowance(address(ccipRouter), usdcAmount);
+        IERC20(usdcToken).approve(address(ccipRouter), usdcAmount);
 
         uint256 fee = ccipRouter.getFee(destChainSelector, message);
         require(linkToken.balanceOf(address(this)) >= fee, "SSL: insufficient LINK for CCIP fee");
-        linkToken.safeIncreaseAllowance(address(ccipRouter), fee);
+        linkToken.approve(address(ccipRouter), fee);
 
         bytes32 messageId = ccipRouter.ccipSend(destChainSelector, message);
 

@@ -34,15 +34,15 @@
             "chainId": 11155111,
             "vault": "0x9ca10e614e6213f8a29f98d0d580815769a9eca4",
             "tokens": {
-                "tMETA": "0x9f5a57890b138838959398daf732308349db02ca",
-                "tGOOGL": "0x1a80ec54c5501f1fbff74994905dd394cbba0fef",
-                "tAAPL": "0x1abd9fdd8bbfbc20b8b8f9fe1f3097dc1752025d",
-                "tTSLA": "0xfa555e3d2211f6eb35716847e538fbcdc7e4f25d",
-                "tAMZN": "0x7e732cd9e3dad91b42a0f56b72df1077da9f4b92",
-                "tNVDA": "0x5ce647da2e40088df1c1a9aaf9b30eb932c6130b",
-                "tSPY": "0x447a8cf64c8d7ce5e17af77c3cb57e81a7b8bb4c",
-                "tQQQ": "0x5e242897f79120ff571c4e694001e45e16b3c569",
-                "tBOND": "0x90f4f8744f2c4d7b67ed6b42dd86e15acd52933c"
+                "tMETA": "0x78935ffbb8a1db84d532c5a2436410c757065db9",
+                "tGOOGL": "0x9cbcaf05e7eec8ad2ebabd32d4ee7744299ef706",
+                "tAAPL": "0xac426c94d557a1a6cf6877e7baffb78d33d272f5",
+                "tTSLA": "0xb62fa90112a0b1b70bcfa0ce512c116e61dbdb5e",
+                "tAMZN": "0xbe2599288c0c154cc14915710296707334749120",
+                "tNVDA": "0x903fca584ca24186066cf3257a101c8302550ba3",
+                "tSPY": "0x3c90c7ca8a2be62b4c60f74f0bc868e4668da412",
+                "tQQQ": "0xea3860d2459760b991f9af6db6836a71b105f77c",
+                "tBOND": "0x4a46860cd09f674a15095fc6e1fd2587e5fab35b"
             }
         }
     }
