@@ -13,9 +13,8 @@ import {
   HTTPClient,
   HTTPSendRequester,
   consensusIdenticalAggregation,
-  ok,
 } from "@chainlink/cre-sdk";
-import { keccak256, encodePacked, encodeAbiParameters, parseAbiParameters, encodeFunctionData, decodeAbiParameters } from "viem";
+import { keccak256, toBytes, encodePacked, encodeAbiParameters, parseAbiParameters, encodeFunctionData, decodeAbiParameters } from "viem";
 
 // ──────────────────────────────────────────────
 // Types
@@ -51,14 +50,18 @@ function findChainBySelector(config: Config, selectorName: string): ChainEntry |
 
 interface VerifyPayload {
   action: "verify";
-  nullifierHash: string;
+  nullifier_hash: string;
   proof: string;
   merkle_root: string;
-  credential_type: string;
   verification_level: string;
-  signal: string;
+  signal?: string;
   userAddress: string;
-  selectedChains?: string[]; // chain names to verify on; if omitted, all chains are used
+  selectedChains?: string[];
+}
+
+function hashToField(input: string): string {
+  const hash = BigInt(keccak256(toBytes(input))) >> 8n;
+  return `0x${hash.toString(16).padStart(64, "0")}`;
 }
 
 type VerificationResponse = {
@@ -202,14 +205,13 @@ function checkIsVerified(runtime: Runtime<Config>, chainCfg: ChainEntry, userAdd
 // ──────────────────────────────────────────────
 
 const verifyProof = (sendRequester: HTTPSendRequester, config: Config, data: VerifyPayload): VerificationResponse => {
-  const bodyData = {
-    nullifier_hash: data.nullifierHash,
+  const bodyData: Record<string, string> = {
+    nullifier_hash: data.nullifier_hash,
     merkle_root: data.merkle_root,
     proof: data.proof,
-    credential_type: data.credential_type,
     verification_level: data.verification_level,
     action: config.worldIdAction,
-    signal: data.signal,
+    signal_hash: hashToField(data.signal ?? ""),
   };
 
   const bodyBytes = new TextEncoder().encode(JSON.stringify(bodyData));
@@ -234,8 +236,8 @@ const verifyProof = (sendRequester: HTTPSendRequester, config: Config, data: Ver
   if (resp.body && resp.body.length > 0) {
     try {
       responseBody = new TextDecoder().decode(resp.body);
-    } catch (e) {
-      // ignore
+    } catch {
+      // ignore decode failures
     }
   }
 
@@ -252,10 +254,10 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
   // ── Action: verify ──
 
   if (data.action === "verify") {
-    runtime.log("Verify request for nullifier: " + data.nullifierHash + ", address: " + data.userAddress);
+    runtime.log("Verify request for nullifier: " + data.nullifier_hash + ", address: " + data.userAddress);
 
     const httpClient = new HTTPClient();
-   /* const verificationResult = httpClient
+    const verificationResult = httpClient
       .sendRequest(
         runtime,
         (sender, cfg: Config) => verifyProof(sender, cfg, data),
@@ -264,13 +266,13 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
       .result();
 
     if (verificationResult.statusCode < 200 || verificationResult.statusCode >= 300) {
-      // World ID returns 500 when the nullifier was already used (max_verifications_reached).
-      // This means the identity is valid — proceed with the on-chain report.
+      // World ID may return already-verified style errors for reused proofs; allow these.
       const verificationBody = verificationResult.body || "";
       const compactBody = verificationBody.replace(/\s+/g, " ").trim();
       const alreadyUsed =
-        verificationResult.statusCode === 500 &&
-        verificationBody.includes("max_verifications_reached");
+        verificationBody.includes("max_verifications_reached") ||
+        verificationBody.includes("already_verified") ||
+        verificationBody.includes("exceeded_max_verifications");
 
       if (!alreadyUsed) {
         runtime.log("Verification failed: status=" + verificationResult.statusCode + " body=" + compactBody);
@@ -278,25 +280,24 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
         let worldErrorCode = "unknown";
         try {
           const parsed = JSON.parse(verificationBody);
-          if (parsed && typeof parsed.error === "string") {
+          if (parsed && typeof parsed.code === "string") {
+            worldErrorCode = parsed.code;
+          } else if (parsed && typeof parsed.error === "string") {
             worldErrorCode = parsed.error;
           }
         } catch {
           // Body is not JSON; keep code as "unknown"
         }
-
         return JSON.stringify({
           status: "failed",
-          error: "Verification failed with status " + verificationResult.statusCode,
+          error: "Verification failed with status " + verificationResult.statusCode + " body: " + compactBody,
           worldErrorCode,
           worldResponseBody: compactBody,
         });
       }
 
-      runtime.log("Nullifier already registered with World ID — proceeding with on-chain report");
-    }*/
-
-    runtime.log("Proof Verified. Broadcasting on-chain report for address: " + data.userAddress);
+      runtime.log("World ID reports already verified/max verifications — proceeding with on-chain report");
+    }
 
     const reportData = encodeAbiParameters(
       parseAbiParameters("uint8 reportType, address user"),
@@ -349,7 +350,7 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
 
     return JSON.stringify({
       status: "verified",
-      nullifierHash: data.nullifierHash,
+      nullifier_hash: data.nullifier_hash,
       userAddress: data.userAddress,
       chains: chainResults,
     });

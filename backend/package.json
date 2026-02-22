@@ -15,6 +15,7 @@
         "@prisma/adapter-pg": "^7.4.0",
         "@prisma/client": "^7.4.0",
         "@types/pg": "^8.16.0",
+        "@worldcoin/idkit": "^4.0.1",
         "ethers": "^6.16.0",
         "hono": "^4.7.0",
         "jose": "^6.1.3",

@@ -6,13 +6,12 @@ import { config } from "./config";
 
 export interface VerifyPayload {
     action: "verify";
-    nullifierHash: string; // Required for World ID API check
+    nullifier_hash: string;
     proof: string;
     merkle_root: string;
-    credential_type: string;
-    verification_level: string; // Required for World ID v2
-    signal: string;
+    verification_level: string;
     userAddress: string;
+    selectedChains?: string[];
 }
 
 export interface OrderPayload {

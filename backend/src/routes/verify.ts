@@ -7,7 +7,6 @@
 // to the CRE workflow.
 
 import { Hono } from "hono";
-import { config } from "../lib/config";
 import { sendToCRE } from "../lib/cre-client";
 import { streamText } from 'hono/streaming'
 import { authMiddleware } from "../middleware/auth";
@@ -26,9 +25,8 @@ interface VerifyInitPayload {
     nullifier_hash: string;
     proof: string;
     verification_level: string;
-    credential_type: string;
-    signal?: string;
-    user_address: string; // New field
+    user_address: string;
+    selectedChains?: string[];
 }
 
 interface VerifyConfirmPayload {
@@ -43,8 +41,7 @@ verify.post("/", authMiddleware, async (c) => {
         "nullifier_hash",
         "proof",
         "merkle_root",
-        "user_address", // Still required in body for consistency, but we check against auth
-        "credential_type",
+        "user_address",
         "verification_level"
     ] as const;
 
@@ -67,13 +64,12 @@ verify.post("/", authMiddleware, async (c) => {
             try {
                 const creResponse = await sendToCRE({
                     action: "verify",
-                    nullifierHash: body.nullifier_hash,
+                    nullifier_hash: body.nullifier_hash,
                     proof: body.proof,
                     merkle_root: body.merkle_root,
-                    credential_type: body.credential_type,
                     verification_level: body.verification_level,
-                    signal: body.signal ?? "",
                     userAddress: body.user_address,
+                    selectedChains: body.selectedChains,
                 }, async (log) => {
                     await stream.writeln(JSON.stringify({ type: 'log', message: log }));
                 });

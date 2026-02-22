@@ -64,9 +64,6 @@ const WorldIdKit: React.FC<WorldIdKitProps> = ({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...proof,
-          credential_type: proof.verification_level,
-          action,
-          signal: signal || "", 
           user_address: address,
         }),
         credentials: 'include'
@@ -207,7 +204,7 @@ const WorldIdKit: React.FC<WorldIdKitProps> = ({
         action={action}
         onSuccess={onSuccess}
         handleVerify={handleVerify}
-        verification_level={VerificationLevel.Device}
+        verification_level={VerificationLevel.Orb}
       >
         {({ open }) => (
           <Button 
