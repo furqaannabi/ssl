@@ -49,25 +49,25 @@ Settles a matched trade order between a buyer and seller.
 
 **Cross-chain** (`crossChain: true`):
 - Sends `report(type=3)` to the source vault (buyer's USDC chain).
-- Source vault bridges `quoteAmount` USDC + encoded `(orderId, stealthSeller)` via CCIP to the destination chain's `SSLCCIPReceiver`.
-- Receiver forwards USDC to seller and calls `vault.markSettled(orderId)`.
+- Source vault bridges `quoteAmount` USDC + encoded `(orderId, buyer, seller, rwaToken, rwaAmount)` via CCIP to the destination chain's `SSLCCIPReceiver`.
+- Receiver atomically transfers USDC to the seller and calls `vault.ccipSettle(orderId, buyer, rwaToken, rwaAmount)` so the destination vault delivers the RWA token to the buyer and marks the order settled.
 
 **Payload:**
 ```json
 {
   "action": "settle_match",
-  "baseTokenAddress": "0x...",
-  "quoteTokenAddress": "0x...",
-  "tradeAmount": "5000000000000000000",   // base token in wei (18 decimals)
-  "quoteAmount": "1500000000",            // USDC in wei (6 decimals)
+  "baseTokenAddress": "0x...",      // RWA token address (e.g. tMETA)
+  "quoteTokenAddress": "0x...",     // USDC address on the source chain
+  "tradeAmount": "5000000000000000000",   // base token in wei (18 decimals) → buyer
+  "quoteAmount": "1500000000",            // USDC in wei (6 decimals) → seller
   "baseChainSelector": "ethereum-testnet-sepolia-arbitrum-1",
   "buyer":  { "orderId": "uuid", "stealthAddress": "0x..." },
   "seller": { "orderId": "uuid", "stealthAddress": "0x..." },
   // cross-chain only:
   "crossChain": true,
-  "sourceChainSelector": "ethereum-testnet-sepolia-base-1",
-  "destChainSelector": "ethereum-testnet-sepolia-arbitrum-1",
-  "ccipDestSelector": "3478487238524512106"
+  "sourceChainSelector": "ethereum-testnet-sepolia-base-1",   // buyer's USDC chain
+  "destChainSelector": "ethereum-testnet-sepolia-arbitrum-1", // RWA token chain
+  "ccipDestSelector": "3478487238524512106"                   // numeric CCIP selector for dest
 }
 ```
 
@@ -81,9 +81,13 @@ encodeAbiParameters(
 
 // type=3 (cross-chain settle)
 encodeAbiParameters(
-  "uint8, bytes32, uint64, address, address, address, uint256",
-  [3, orderId, ccipDestSelector, destReceiver, stealthSeller, quoteTokenAddress, quoteAmount]
+  "uint8, bytes32, uint64, address, address, address, address, uint256, address, uint256",
+  [3, orderId, ccipDestSelector, destReceiver, buyer, seller, usdcToken, usdcAmount, rwaToken, rwaAmount]
 )
+// destReceiver = SSLCCIPReceiver on destination chain
+// buyer/seller = stealth addresses
+// usdcToken / usdcAmount = USDC to bridge to seller
+// rwaToken / rwaAmount = RWA to deliver to buyer on destination chain
 ```
 
 ---
@@ -120,7 +124,7 @@ encodeAbiParameters("uint8, address, uint256", [2, userAddress, withdrawalId])
 | 0 | verify | `(uint8, address user)` |
 | 1 | settle | `(uint8, bytes32 orderId, address stealthBuyer, address stealthSeller, address tokenA, address tokenB, uint256 amountA, uint256 amountB)` |
 | 2 | withdraw | `(uint8, address user, uint256 withdrawalId)` |
-| 3 | crossChainSettle | `(uint8, bytes32 orderId, uint64 destChainSelector, address destReceiver, address recipient, address token, uint256 amount)` |
+| 3 | crossChainSettle | `(uint8, bytes32 orderId, uint64 destChainSelector, address destReceiver, address buyer, address seller, address usdcToken, uint256 usdcAmount, address rwaToken, uint256 rwaAmount)` |
 
 ---
 

@@ -366,8 +366,8 @@ The backend runs WebSocket listeners for **every chain with a vault in `addresse
 - **`Funded`** -- Upserts user and `Token` record (address + chainSelector); updates `TokenBalance` tagged with `chainSelector`; records a `DEPOSIT` transaction. Trading pairs are **not** auto-created here -- they are seeded at startup by symbol via `seed-tokens.ts`.
 - **`WithdrawalRequested`** -- Validates sufficient balance on the correct chain, atomically deducts balance, forwards to CRE. Skips withdrawals already handled by `/api/withdraw`.
 - **`Settled`** -- Records same-chain settlement in the `Settlement` table.
-- **`CrossChainSettled`** -- Records CCIP bridge initiation (status: `BRIDGING`) with the CCIP message ID.
-- **`TokenReleased`** -- Emitted by the destination chain's `SSLCCIPReceiver` when bridged tokens are auto-released to the recipient. Marks settlement as `COMPLETED`.
+- **`CrossChainSettled`** -- Records CCIP bridge initiation (status: `BRIDGING`) with the CCIP message ID. The source vault encodes buyer, seller, rwaToken, and rwaAmount into the CCIP message alongside the USDC transfer so the destination `SSLCCIPReceiver` can atomically complete the full trade.
+- **`TokenReleased`** -- Emitted by the destination chain's `SSLCCIPReceiver` after `ccipSettle` completes (USDC paid to seller, RWA delivered to buyer). Marks settlement as `COMPLETED`.
 
 Each listener reconnects automatically on connection drops (5s backoff).
 

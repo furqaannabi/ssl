@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Script.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "../src/core/SSLVault.sol";
 import "../src/core/SSLCCIPReceiver.sol";
 import "./Config.sol";
@@ -54,12 +55,15 @@ contract DeployScript is Script {
 
         vault.setCCIPReceiver(address(receiver));
 
+        // Fund vault with 2 LINK for CCIP fees
+        IERC20(link).transfer(address(vault), 2 ether);
+
         vm.stopBroadcast();
 
         console.log("");
         console.log("=== SSL Deployment Complete ===");
         console.log("StealthSettlementVault:", address(vault));
         console.log("SSLCCIPReceiver:", address(receiver));
-        console.log("Fund vault with LINK before first settlement");
+        console.log("Vault funded with 2 LINK for CCIP fees");
     }
 }

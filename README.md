@@ -96,18 +96,19 @@ Backend ──> CRE ──> report(type=1) ──> Vault (baseChain)
 
 **Cross-chain settlement** (`quoteChainSelector != baseChainSelector`) via CCIP:
 ```
-Backend ──> CRE ──> report(type=3) ──> Source Vault (quoteChain) ──CCIP(quoteAmount USDC + orderId/recipient)──> SSLCCIPReceiver (destChain)
-                                                                                                                   │
-                                                                                                                   ├── transfers USDC to seller (stealthSeller)
-                                                                                                                   └── calls Dest Vault.markSettled(orderId)
+Backend ──> CRE ──> report(type=3) ──> Source Vault (quoteChain) ──CCIP(USDC + encoded settlement data)──> SSLCCIPReceiver (destChain)
+                                                                                                              │
+                                                                                                              ├── transfers bridged USDC to seller (stealthSeller)
+                                                                                                              └── calls vault.ccipSettle(orderId, buyer, rwaToken, rwaAmount)
+                                                                                                                    └── vault transfers RWA to buyer (stealthBuyer), marks order settled
 ```
 
 For cross-chain trades (e.g. buy Token X on Arbitrum using USDC on Base):
 - CRE sends **one report** (type=3) to the source vault (where buyer's USDC is held)
-- Source vault sends `quoteAmount` USDC + encoded `(orderId, recipient)` via CCIP to the **SSLCCIPReceiver** on the destination chain
-- The receiver forwards USDC to the seller's stealth address and calls the destination vault to mark the order settled
+- Source vault encodes `(orderId, buyer, seller, rwaToken, rwaAmount)` as CCIP message data alongside `quoteAmount` USDC and calls `ccipSend` to the **SSLCCIPReceiver** on the destination chain
+- The receiver atomically pays the seller their USDC and calls `vault.ccipSettle()` so the vault delivers the RWA token to the buyer — one CCIP message, full atomic settlement
 - `tradeAmount` (base token) and `quoteAmount` (USDC) are separate wei values with correct decimal precision
-- CCIP fees are paid in LINK from the vault's balance
+- CCIP fees are paid in LINK from the vault's balance (vault is seeded with 2 LINK on deploy)
 
 ### Phase 5: Withdrawal
 
@@ -124,7 +125,7 @@ User ── requestWithdrawal ──> Vault ── event ──> Backend Listene
 | 0 | verify | `(uint8, address user)` |
 | 1 | settle | `(uint8, bytes32 orderId, address stealthBuyer, address stealthSeller, address tokenA, address tokenB, uint256 amountA, uint256 amountB)` |
 | 2 | withdraw | `(uint8, address user, uint256 withdrawalId)` |
-| 3 | crossChainSettle | `(uint8, bytes32 orderId, uint64 destChainSelector, address destReceiver, address recipient, address token, uint256 amount)` |
+| 3 | crossChainSettle | `(uint8, bytes32 orderId, uint64 destChainSelector, address destReceiver, address buyer, address seller, address usdcToken, uint256 usdcAmount, address rwaToken, uint256 rwaAmount)` |
 
 ### What's On-Chain vs Off-Chain
 
@@ -152,7 +153,7 @@ User ── requestWithdrawal ──> Vault ── event ──> Backend Listene
 ### Contracts
 
 - **StealthSettlementVault** -- Holds deposited tokens. Deployed per chain. Accepts 4 report types from CRE via KeystoneForwarder (see table above). For cross-chain trades, initiates CCIP programmable token transfers of USDC + encoded data to the destination chain. CCIP fees paid in LINK. Enforces **token whitelist** -- only owner-approved RWA tokens can be deposited.
-- **SSLCCIPReceiver** -- Standalone CCIP receiver deployed per chain. Receives USDC + `(orderId, recipient)` via CCIP, forwards USDC to the seller, and calls the local vault to mark the order settled.
+- **SSLCCIPReceiver** -- Standalone CCIP receiver deployed per chain. Receives USDC + encoded `(orderId, buyer, seller, rwaToken, rwaAmount)` via CCIP, atomically pays the seller their USDC, and calls `vault.ccipSettle()` so the vault delivers the RWA token to the buyer and marks the order settled.
 - **SSLChains** (`Config.sol`) -- Pure helper library with chain constants (CCIP selectors, router addresses, forwarder addresses). No deployment needed -- used by deploy scripts and referenced off-chain.
 - **ReceiverTemplate** -- Abstract base that validates reports come from the trusted forwarder
 - **ISSLVault** -- Vault interface (fund, requestWithdrawal, isVerified, settledOrders, events including `CrossChainSettled`, `TokenReleased`, `TokenWhitelisted`, `TokenRemoved`)
@@ -163,7 +164,7 @@ User ── requestWithdrawal ──> Vault ── event ──> Backend Listene
 Single HTTP trigger with three actions:
 
 - `verify` -- Validates World ID proof via cloud API, then reads `isVerified(userAddress)` on each target chain via `EVMClient.callContract`. Only writes `report(type=0)` on chains where the user is not yet verified. Supports optional `selectedChains` to restrict which chains are checked.
-- `settle_match` -- Receives matched order data from backend (including separate `tradeAmount` for the base token and `quoteAmount` for USDC, plus `baseChainSelector`). Routes settlement to the vault on `baseChainSelector` via `report(type=1)`. For cross-chain trades, sends `report(type=3)` to the source vault which bridges `quoteAmount` USDC via CCIP to the destination chain's `SSLCCIPReceiver`.
+- `settle_match` -- Receives matched order data from backend (including separate `tradeAmount` for the base token and `quoteAmount` for USDC, plus `baseChainSelector`). Routes settlement to the vault on `baseChainSelector` via `report(type=1)`. For cross-chain trades, sends `report(type=3)` to the source vault which bridges `quoteAmount` USDC + full settlement data (buyer, seller, rwaToken, rwaAmount) via CCIP to the destination chain's `SSLCCIPReceiver` for atomic settlement.
 - `withdraw` -- Receives withdrawal request, writes withdrawal report `(type=2)` to vault
 
 ### Backend (`backend/`)
@@ -239,9 +240,11 @@ The deploy script (`contracts/deploy.sh`) auto-populates this file after each de
 
 ### Contracts
 
+CCIP contracts are installed via npm (`@chainlink/contracts-ccip` in `node_modules`). `remappings.txt` and `foundry.toml` are pre-configured.
+
 ```bash
 cd contracts
-forge install
+npm install        # or: bun install
 forge build
 forge test -vv
 ```
@@ -280,7 +283,7 @@ The `deploy-rwa.sh` script:
 4. Extracts deployed addresses from broadcast files
 5. Writes `backend/rwa-tokens.json` with per-chain token addresses
 
-Environment variables: `PRIVATE_KEY` (required), `FORWARDER_ADDRESS` / `CCIP_ROUTER` / `LINK_TOKEN` (optional overrides, auto-resolved from `SSLChains`). `LINK_FUND` controls how much LINK to seed the vault with (default 1 LINK).
+Environment variables: `PRIVATE_KEY` (required), `FORWARDER_ADDRESS` / `CCIP_ROUTER` / `LINK_TOKEN` (optional overrides, auto-resolved from `SSLChains`). `LINK_FUND` controls how much LINK to seed the vault with (default 2 LINK).
 
 ### Backend
 

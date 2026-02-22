@@ -15,15 +15,14 @@ Main vault contract deployed on each supported chain. Holds deposited tokens and
 | 0 | verify | `(uint8, address user)` |
 | 1 | settle | `(uint8, bytes32 orderId, address stealthBuyer, address stealthSeller, address tokenA, address tokenB, uint256 amountA, uint256 amountB)` |
 | 2 | withdraw | `(uint8, address user, uint256 withdrawalId)` |
-| 3 | crossChainSettle | `(uint8, bytes32 orderId, uint64 destChainSelector, address destReceiver, address recipient, address token, uint256 amount)` -- programmable token transfer via CCIP |
+| 3 | crossChainSettle | `(uint8, bytes32 orderId, uint64 destChainSelector, address destReceiver, address buyer, address seller, address usdcToken, uint256 usdcAmount, address rwaToken, uint256 rwaAmount)` -- bridges USDC via CCIP; receiver atomically pays seller and delivers RWA to buyer |
 
 **CCIP integration (two-contract pattern):**
 
-- The **vault** initiates programmable token transfers (USDC + data) on `crossChainSettle` (type=3). It approves the CCIP router and calls `ccipSend`, paying fees in LINK.
-- The **SSLCCIPReceiver** contract on the destination chain is the CCIP receiver. Its `ccipReceive` hook:
-  - Decodes `(orderId, recipient)` from `message.data`
-  - Transfers the received USDC to `recipient`
-  - Calls `vault.markSettled(orderId)` on the local vault to update accounting
+- The **vault** initiates programmable token transfers on `crossChainSettle` (type=3). It approves the CCIP router, encodes `(orderId, buyer, seller, rwaToken, rwaAmount)` as message data alongside the USDC token amount, and calls `ccipSend`, paying fees in LINK (vault must be pre-funded with LINK -- deploy seeds 2 LINK).
+- The **SSLCCIPReceiver** on the destination chain is the CCIP message receiver. Its `ccipReceive` hook atomically:
+  1. Transfers the bridged USDC to the seller's stealth address
+  2. Calls `vault.ccipSettle(orderId, buyer, rwaToken, rwaAmount)` so the vault transfers the RWA token to the buyer's stealth address and marks the order settled
 
 ### SSLChains (`src/core/Config.sol`)
 
@@ -66,8 +65,9 @@ Generic mock ERC-20 for deploying tokenized Real World Assets. Accepts configura
 Standalone CCIP receiver contract deployed per chain. It:
 
 - Implements `IAny2EVMMessageReceiver` with a router-only `ccipReceive`
-- Forwards bridged USDC to the trade recipient
-- Notifies the local vault via `markSettled(bytes32 orderId)`
+- Decodes `(orderId, buyer, seller, rwaToken, rwaAmount)` from `message.data`
+- Transfers the bridged USDC to the seller's stealth address
+- Calls `vault.ccipSettle(orderId, buyer, rwaToken, rwaAmount)` which transfers the RWA token to the buyer and marks the order settled
 
 ## Token Whitelist
 
@@ -82,8 +82,10 @@ The `fund()` function reverts with `"SSL: token not whitelisted"` for non-approv
 
 ## Build
 
+CCIP contracts are installed via npm (`@chainlink/contracts-ccip` in `node_modules`). The `remappings.txt` and `foundry.toml` are pre-configured to resolve these imports.
+
 ```bash
-forge install
+npm install        # or: bun install
 forge build
 forge test -vv
 ```
@@ -112,7 +114,7 @@ CHAIN=arbitrumSepolia ./deploy.sh  # Arbitrum Sepolia only
 - `FORWARDER_ADDRESS` -- override KeystoneForwarder (optional, auto-resolved)
 - `CCIP_ROUTER` -- override CCIP router (optional, auto-resolved)
 - `LINK_TOKEN` -- override LINK token (optional, auto-resolved)
-- `LINK_FUND` -- LINK to seed vault with (optional, default 1 LINK)
+- `LINK_FUND` -- LINK to seed vault with (optional, default 2 LINK)
 
 **Output:** `backend/addresses.json` with per-chain vault, CCIP receiver, CCIP router, forwarder, USDC, LINK, RPC/WS URLs.
 
