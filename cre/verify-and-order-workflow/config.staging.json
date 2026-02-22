@@ -29,7 +29,7 @@
     },
     "ethSepolia": {
       "chainId": 11155111,
-      "chainSelector": "ethereum-testnet-sepolia-1",
+      "chainSelector": "ethereum-testnet-sepolia",
       "ccipChainSelector": "16015286601757825753",
       "vault": "0x339065958febda77f44a142456fed062acfaa4e6",
       "ccipReceiver": "0xe6f05e198857eaf9bee00c299551495fa4119818",

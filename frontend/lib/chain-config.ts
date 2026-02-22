@@ -39,10 +39,10 @@ export const CHAINS: Record<string, ChainConfig> = {
         wsUrl: "wss://arbitrum-sepolia.infura.io/ws/v3/",
         blockExplorer: "https://sepolia.arbiscan.io"
     },
-    "ethereum-testnet-sepolia-1": {
+    "ethereum-testnet-sepolia": {
         name: "Ethereum Sepolia",
         chainId: 11155111,
-        chainSelector: "ethereum-testnet-sepolia-1",
+        chainSelector: "ethereum-testnet-sepolia",
         ccipChainSelector: "16015286601757825753",
         vault: "0x339065958febda77f44a142456fed062acfaa4e6",
         usdc: "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",

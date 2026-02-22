@@ -25,7 +25,7 @@ const TOKEN_META: Record<string, { name: string; decimals: number }> = {
 const CHAIN_SELECTORS: Record<string, string> = {
     baseSepolia: 'ethereum-testnet-sepolia-base-1',
     arbitrumSepolia: 'ethereum-testnet-sepolia-arbitrum-1',
-    ethSepolia: 'ethereum-testnet-sepolia-1',
+    ethSepolia: 'ethereum-testnet-sepolia',
 };
 
 export async function seedTokens(): Promise<void> {
