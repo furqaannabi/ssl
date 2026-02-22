@@ -4,8 +4,8 @@ pragma solidity ^0.8.24;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@chainlink/contracts-ccip/contracts/interfaces/IRouterClient.sol";
-import "@chainlink/contracts-ccip/contracts/libraries/Client.sol";
+import {IRouterClient} from "@chainlink/contracts-ccip/contracts/interfaces/IRouterClient.sol";
+import {Client} from "@chainlink/contracts-ccip/contracts/libraries/Client.sol";
 import "../interfaces/ISSLVault.sol";
 import "./ReceiverTemplate.sol";
 
@@ -34,15 +34,8 @@ contract StealthSettlementVault is
     using SafeERC20 for IERC20;
 
     IRouterClient public immutable ccipRouter;
+    IERC20 public immutable linkToken;
     address public ccipReceiver;
-
-    /// @notice Accept ETH to fund native CCIP fees
-    receive() external payable {}
-
-    function withdrawETH(address payable to) external onlyOwner {
-        (bool ok, ) = to.call{value: address(this).balance}("");
-        require(ok, "SSL: ETH withdraw failed");
-    }
 
     /// @notice address => verified
     mapping(address => bool) public override isVerified;
@@ -73,9 +66,11 @@ contract StealthSettlementVault is
 
     constructor(
         address _forwarderAddress,
-        address _ccipRouter
+        address _ccipRouter,
+        address _linkToken
     ) ReceiverTemplate(_forwarderAddress) {
         ccipRouter = IRouterClient(_ccipRouter);
+        linkToken = IERC20(_linkToken);
     }
 
     function whitelistToken(
@@ -119,10 +114,19 @@ contract StealthSettlementVault is
         ccipReceiver = _receiver;
     }
 
-    function markSettled(bytes32 orderId) external {
+    /// @notice Called by SSLCCIPReceiver when a cross-chain message arrives.
+    ///         Transfers the RWA token to the buyer and marks the order settled.
+    function ccipSettle(
+        bytes32 orderId,
+        address buyer,
+        address rwaToken,
+        uint256 rwaAmount
+    ) external {
         require(msg.sender == ccipReceiver, "SSL: only ccip receiver");
-        require(!settledOrders[orderId], "SSL: settled");
-        settledOrders[orderId] = true;
+        require(!rwaSettledOrders[orderId], "SSL: rwa settled");
+        rwaSettledOrders[orderId] = true;
+        IERC20(rwaToken).safeTransfer(buyer, rwaAmount);
+        emit Settled(orderId, buyer, address(0));
     }
 
     function withdrawFees(address _token, address _to) external onlyOwner {
@@ -217,8 +221,6 @@ contract StealthSettlementVault is
             _claimWithdrawal(report);
         } else if (reportType == 3) {
             _processCrossChainSettle(report);
-        } else if (reportType == 4) {
-            _processRWASettle(report);
         } else {
             revert("SSL: unknown report type");
         }
@@ -289,77 +291,55 @@ contract StealthSettlementVault is
             ,
             bytes32 orderId,
             uint64 destChainSelector,
-            address destVault,
-            address recipient,
-            address token,
-            uint256 amount
+            address destReceiver,
+            address buyer,
+            address seller,
+            address usdcToken,
+            uint256 usdcAmount,
+            address rwaToken,
+            uint256 rwaAmount
         ) = abi.decode(
                 report,
-                (uint8, bytes32, uint64, address, address, address, uint256)
+                (uint8, bytes32, uint64, address, address, address, address, uint256, address, uint256)
             );
 
         require(!settledOrders[orderId], "SSL: settled");
 
         Client.EVMTokenAmount[] memory tokenAmounts = new Client.EVMTokenAmount[](1);
         tokenAmounts[0] = Client.EVMTokenAmount({
-            token: token,
-            amount: amount
+            token: usdcToken,
+            amount: usdcAmount
         });
 
+        // Encode buyer, seller, rwaToken, rwaAmount so the dest CCIPReceiver can
+        // atomically pay the seller their USDC and give the buyer their RWA token.
         Client.EVM2AnyMessage memory message = Client.EVM2AnyMessage({
-            receiver: abi.encode(destVault),
-            data: abi.encode(orderId, recipient),
+            receiver: abi.encode(destReceiver),
+            data: abi.encode(orderId, buyer, seller, rwaToken, rwaAmount),
             tokenAmounts: tokenAmounts,
             extraArgs: Client._argsToBytes(
-                Client.EVMExtraArgsV1({
-                    gasLimit: 200_000
+                Client.GenericExtraArgsV2({
+                    gasLimit: 300_000,
+                    allowOutOfOrderExecution: true
                 })
             ),
-            feeToken: address(0) // pay CCIP fee in native ETH
+            feeToken: address(linkToken) // pay CCIP fee in LINK
         });
 
-        IERC20(token).safeIncreaseAllowance(address(ccipRouter), amount);
+        IERC20(usdcToken).safeIncreaseAllowance(address(ccipRouter), usdcAmount);
 
         uint256 fee = ccipRouter.getFee(destChainSelector, message);
-        require(address(this).balance >= fee, "SSL: insufficient ETH for CCIP fee");
+        require(linkToken.balanceOf(address(this)) >= fee, "SSL: insufficient LINK for CCIP fee");
+        linkToken.safeIncreaseAllowance(address(ccipRouter), fee);
 
-        bytes32 messageId = ccipRouter.ccipSend{value: fee}(
-            destChainSelector,
-            message
-        );
+        bytes32 messageId = ccipRouter.ccipSend(destChainSelector, message);
 
         settledOrders[orderId] = true;
 
-        emit CrossChainSettled(orderId, destChainSelector, recipient, messageId);
+        emit CrossChainSettled(orderId, destChainSelector, buyer, messageId);
     }
 
-    // ──────────────────────────────────────────────
-    //  Cross-chain RWA settle for buyer (type=4)
-    //  Sent by CRE to DEST vault after type=3 bridges USDC to seller.
-    //  Transfers the base (RWA) token to the buyer's stealth address.
-    //  Uses a separate rwaSettledOrders map so it doesn't conflict with
-    //  the markSettled() call that arrives later via the CCIP receiver.
-    // ──────────────────────────────────────────────
-
-    function _processRWASettle(bytes calldata report) private {
-        (
-            ,
-            bytes32 orderId,
-            address recipient,
-            address token,
-            uint256 amount
-        ) = abi.decode(report, (uint8, bytes32, address, address, uint256));
-
-        require(!rwaSettledOrders[orderId], "SSL: rwa settled");
-
-        IERC20(token).safeTransfer(recipient, amount);
-
-        rwaSettledOrders[orderId] = true;
-
-        emit Settled(orderId, recipient, address(0));
-    }
-
-    /// @inheritdoc IERC165
+/// @inheritdoc IERC165
     function supportsInterface(
         bytes4 interfaceId
     ) public view override returns (bool) {

@@ -9,24 +9,35 @@ import "@chainlink/contracts-ccip/contracts/libraries/Client.sol";
 import "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 interface ISSLVaultSettlement {
-    function markSettled(bytes32 orderId) external;
+    /// @notice Transfers the RWA token to the buyer and marks the order settled.
+    ///         Called by this receiver after paying the seller their bridged USDC.
+    function ccipSettle(
+        bytes32 orderId,
+        address buyer,
+        address rwaToken,
+        uint256 rwaAmount
+    ) external;
 }
 
 /// @title SSLCCIPReceiver
-/// @notice Standalone CCIP receiver deployed per chain alongside the vault.
-///         Receives programmable token transfers (USDC + orderId/recipient),
-///         forwards tokens to the recipient, and calls vault.markSettled().
+/// @notice Receives a cross-chain CCIP message carrying USDC + settlement data.
+///         On arrival it atomically:
+///           1. Transfers the bridged USDC to the seller.
+///           2. Calls vault.ccipSettle() so the vault sends the RWA token to the buyer.
 contract SSLCCIPReceiver is IAny2EVMMessageReceiver, IERC165, Ownable {
     using SafeERC20 for IERC20;
 
     address public immutable router;
     ISSLVaultSettlement public vault;
 
-    event TokenReleased(
+    event CrossChainSettled(
         bytes32 indexed orderId,
-        address recipient,
-        address token,
-        uint256 amount,
+        address buyer,
+        address seller,
+        address usdcToken,
+        uint256 usdcAmount,
+        address rwaToken,
+        uint256 rwaAmount,
         bytes32 ccipMessageId
     );
 
@@ -56,19 +67,33 @@ contract SSLCCIPReceiver is IAny2EVMMessageReceiver, IERC165, Ownable {
     function _ccipReceive(
         Client.Any2EVMMessage calldata message
     ) internal {
-        (bytes32 orderId, address recipient) = abi.decode(
-            message.data,
-            (bytes32, address)
+        (
+            bytes32 orderId,
+            address buyer,
+            address seller,
+            address rwaToken,
+            uint256 rwaAmount
+        ) = abi.decode(message.data, (bytes32, address, address, address, uint256));
+
+        address usdcToken = message.destTokenAmounts[0].token;
+        uint256 usdcAmount = message.destTokenAmounts[0].amount;
+
+        // 1. Pay seller their bridged USDC
+        IERC20(usdcToken).safeTransfer(seller, usdcAmount);
+
+        // 2. Vault transfers RWA to buyer and marks order settled
+        vault.ccipSettle(orderId, buyer, rwaToken, rwaAmount);
+
+        emit CrossChainSettled(
+            orderId,
+            buyer,
+            seller,
+            usdcToken,
+            usdcAmount,
+            rwaToken,
+            rwaAmount,
+            message.messageId
         );
-
-        address token = message.destTokenAmounts[0].token;
-        uint256 amount = message.destTokenAmounts[0].amount;
-
-        IERC20(token).safeTransfer(recipient, amount);
-
-        vault.markSettled(orderId);
-
-        emit TokenReleased(orderId, recipient, token, amount, message.messageId);
     }
 
     function getRouter() public view returns (address) {

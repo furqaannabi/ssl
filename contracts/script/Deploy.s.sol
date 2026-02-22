@@ -27,24 +27,24 @@ contract DeployScript is Script {
         // Resolve defaults from SSLChains, allow env override
         address defaultForwarder = SSLChains.forwarder();
         address defaultRouter    = SSLChains.ccipRouter();
+        address defaultLink      = SSLChains.linkToken();
 
         address forwarder  = vm.envOr("FORWARDER_ADDRESS", defaultForwarder);
         address ccipRouter = vm.envOr("CCIP_ROUTER", defaultRouter);
-
-        // Amount of ETH to pre-fund the vault for CCIP fees (~0.01 ETH covers many settlements)
-        uint256 ethFund = vm.envOr("ETH_FUND", uint256(0.01 ether));
+        address link       = vm.envOr("LINK_TOKEN", defaultLink);
 
         console.log("Chain ID:", block.chainid);
         console.log("Deployer:", deployer);
         console.log("Forwarder:", forwarder);
         console.log("CCIP Router:", ccipRouter);
-        console.log("ETH fee fund:", ethFund);
+        console.log("LINK Token:", link);
 
         vm.startBroadcast(deployerPrivateKey);
 
         StealthSettlementVault vault = new StealthSettlementVault(
             forwarder,
-            ccipRouter
+            ccipRouter,
+            link
         );
 
         SSLCCIPReceiver receiver = new SSLCCIPReceiver(
@@ -54,16 +54,12 @@ contract DeployScript is Script {
 
         vault.setCCIPReceiver(address(receiver));
 
-        // Fund vault with native ETH for CCIP fees
-        (bool ok, ) = address(vault).call{value: ethFund}("");
-        require(ok, "ETH fund failed");
-
         vm.stopBroadcast();
 
         console.log("");
         console.log("=== SSL Deployment Complete ===");
         console.log("StealthSettlementVault:", address(vault));
         console.log("SSLCCIPReceiver:", address(receiver));
-        console.log("ETH funded for CCIP fees:", ethFund);
+        console.log("Fund vault with LINK before first settlement");
     }
 }
