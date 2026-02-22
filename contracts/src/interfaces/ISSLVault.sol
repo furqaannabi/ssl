@@ -70,7 +70,14 @@ interface ISSLVault {
         address user
     ) external view returns (uint256[] memory);
 
+    struct TokenInput {
+        address token;
+        string symbol;
+        string name;
+        uint8 tokenType;
+    }
+
     function isTokenWhitelisted(address token) external view returns (bool);
-    function whitelistToken(address token, string calldata symbol, string calldata name, uint8 tokenType) external;
+    function whitelistToken(TokenInput[] calldata tokens) external;
     function removeToken(address token) external;
 }

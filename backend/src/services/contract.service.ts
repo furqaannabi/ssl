@@ -15,9 +15,9 @@ const abi = [
 ] as const;
 
 // Create Viem Client
-// We use the Alchemy key from env if available, otherwise fall back to public RPC
-const transport = process.env.ALCHEMY_API_KEY
-    ? http(`https://base-sepolia.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`)
+// We use the Infura key from env if available, otherwise fall back to public RPC
+const transport = process.env.INFURA_API_KEY
+    ? http(`https://base-sepolia.infura.io/v3/${process.env.INFURA_API_KEY}`)
     : http();
 
 const client = createPublicClient({

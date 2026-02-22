@@ -25,6 +25,7 @@ const TOKEN_META: Record<string, { name: string; decimals: number }> = {
 const CHAIN_SELECTORS: Record<string, string> = {
     baseSepolia: 'ethereum-testnet-sepolia-base-1',
     arbitrumSepolia: 'ethereum-testnet-sepolia-arbitrum-1',
+    ethSepolia: 'ethereum-testnet-sepolia-1',
 };
 
 export async function seedTokens(): Promise<void> {
@@ -51,7 +52,7 @@ export async function seedTokens(): Promise<void> {
 
                 await prisma.token.upsert({
                     where: { address: address.toLowerCase() },
-                    update: {}, // Don't overwrite manually edited data
+                    update: { chainSelector, symbol, name: meta.name },
                     create: {
                         address: address.toLowerCase(),
                         symbol,
@@ -76,6 +77,10 @@ export async function seedTokens(): Promise<void> {
 
                 const usdcAddress = (chainData as any).usdc;
                 if (usdcAddress) {
+                    // USDC address may be shared across chains (same address on Arb + Eth Sepolia).
+                    // Since Token.address is @id, only one chainSelector can be stored.
+                    // The FundingModal injects USDC from chain config directly, so DB chainSelector
+                    // for USDC only matters as a fallback — don't overwrite if already exists.
                     await prisma.token.upsert({
                         where: { address: usdcAddress.toLowerCase() },
                         update: {},

@@ -8,7 +8,7 @@ import "./Config.sol";
 
 /**
  * @title DeployRWATokens
- * @notice Deploys all mock RWA tokens and whitelists them on the vault.
+ * @notice Deploys all mock RWA tokens and batch-whitelists them on the vault in one call.
  *
  *   Usage:
  *     forge script script/DeployRWATokens.s.sol:DeployRWATokens --rpc-url baseSepolia --broadcast
@@ -24,7 +24,7 @@ contract DeployRWATokens is Script {
         string name;
         string symbol;
         uint8 decimals;
-        uint8 tokenType; // 0=STOCK, 1=ETF, 2=BOND
+        uint8 tokenType; // 0=STOCK, 1=ETF, 2=BOND, 4=STABLE
     }
 
     function _getChainUsdc() internal view returns (address) {
@@ -44,16 +44,18 @@ contract DeployRWATokens is Script {
         StealthSettlementVault vault = StealthSettlementVault(vaultAddress);
 
         TokenConfig[9] memory tokenConfigs = [
-            TokenConfig("SSL Tokenized Meta Platforms",  "tMETA",  18, 0),
-            TokenConfig("SSL Tokenized Alphabet Inc.",   "tGOOGL", 18, 0),
-            TokenConfig("SSL Tokenized Apple Inc.",      "tAAPL",  18, 0),
-            TokenConfig("SSL Tokenized Tesla Inc.",      "tTSLA",  18, 0),
-            TokenConfig("SSL Tokenized Amazon.com",      "tAMZN",  18, 0),
-            TokenConfig("SSL Tokenized NVIDIA Corp",     "tNVDA",  18, 0),
-            TokenConfig("SSL Tokenized S&P 500 ETF",     "tSPY",   18, 1),
-            TokenConfig("SSL Tokenized Nasdaq 100 ETF",  "tQQQ",   18, 1),
-            TokenConfig("SSL Tokenized US Treasury Bond", "tBOND", 18, 2)
+            TokenConfig("SSL Tokenized Meta Platforms",   "tMETA",  18, 0),
+            TokenConfig("SSL Tokenized Alphabet Inc.",    "tGOOGL", 18, 0),
+            TokenConfig("SSL Tokenized Apple Inc.",       "tAAPL",  18, 0),
+            TokenConfig("SSL Tokenized Tesla Inc.",       "tTSLA",  18, 0),
+            TokenConfig("SSL Tokenized Amazon.com",       "tAMZN",  18, 0),
+            TokenConfig("SSL Tokenized NVIDIA Corp",      "tNVDA",  18, 0),
+            TokenConfig("SSL Tokenized S&P 500 ETF",      "tSPY",   18, 1),
+            TokenConfig("SSL Tokenized Nasdaq 100 ETF",   "tQQQ",   18, 1),
+            TokenConfig("SSL Tokenized US Treasury Bond", "tBOND",  18, 2)
         ];
+
+        address usdc = vm.envOr("USDC_ADDRESS", _getChainUsdc());
 
         console.log("=== SSL RWA Token Deployment ===");
         console.log("Chain ID:", block.chainid);
@@ -65,39 +67,57 @@ contract DeployRWATokens is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
+        // --- Deploy all RWA tokens ---
+        // Use max-size array then trim to actual count of non-whitelisted tokens
+        ISSLVault.TokenInput[] memory inputsBuf = new ISSLVault.TokenInput[](10);
+        uint256 count = 0;
+
         for (uint256 i = 0; i < tokenConfigs.length; i++) {
             TokenConfig memory cfg = tokenConfigs[i];
 
-            // Deploy token
-            MockRWAToken token = new MockRWAToken(
-                cfg.name,
-                cfg.symbol,
-                cfg.decimals
-            );
-
-            // Mint initial supply
-            uint256 mintUnits = mintAmount * (10 ** uint256(cfg.decimals));
-            token.mint(mintTo, mintUnits);
-
-            // Whitelist on vault
-            vault.whitelistToken(
-                address(token),
-                cfg.symbol,
-                cfg.name,
-                cfg.tokenType
-            );
+            MockRWAToken token = new MockRWAToken(cfg.name, cfg.symbol, cfg.decimals);
+            token.mint(mintTo, mintAmount * (10 ** uint256(cfg.decimals)));
 
             console.log(string.concat(
                 cfg.symbol, ": ", vm.toString(address(token)),
                 " (type=", vm.toString(cfg.tokenType), ")"
             ));
+
+            // Only whitelist if not already registered
+            if (!vault.whitelistedTokens(address(token))) {
+                inputsBuf[count++] = ISSLVault.TokenInput({
+                    token: address(token),
+                    symbol: cfg.symbol,
+                    name: cfg.name,
+                    tokenType: cfg.tokenType
+                });
+            } else {
+                console.log(string.concat("  (already whitelisted, skipping)"));
+            }
         }
 
-        // Whitelist USDC (resolved per-chain from SSLChains)
-        address usdc = vm.envOr("USDC_ADDRESS", _getChainUsdc());
+        // --- Append USDC if available and not already whitelisted ---
         if (usdc != address(0)) {
-            vault.whitelistToken(usdc, "USDC", "USD Coin", 4);
             console.log(string.concat("USDC: ", vm.toString(usdc), " (type=4)"));
+            if (!vault.whitelistedTokens(usdc)) {
+                inputsBuf[count++] = ISSLVault.TokenInput({
+                    token: usdc,
+                    symbol: "USDC",
+                    name: "USD Coin",
+                    tokenType: 4
+                });
+            } else {
+                console.log("  (already whitelisted, skipping)");
+            }
+        }
+
+        // --- Batch whitelist only new tokens ---
+        if (count > 0) {
+            ISSLVault.TokenInput[] memory inputs = new ISSLVault.TokenInput[](count);
+            for (uint256 i = 0; i < count; i++) inputs[i] = inputsBuf[i];
+            vault.whitelistToken(inputs);
+        } else {
+            console.log("All tokens already whitelisted - nothing to do." );
         }
 
         vm.stopBroadcast();

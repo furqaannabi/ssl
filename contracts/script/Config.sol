@@ -29,7 +29,7 @@ library SSLChains {
     uint256 constant ETH_SEPOLIA_CHAIN_ID       = 11155111;
     address constant ETH_SEPOLIA_CCIP_ROUTER    = 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59;
     address constant ETH_SEPOLIA_FORWARDER      = 0x15fC6ae953E024d975e77382eEeC56A9101f9F88;
-    address constant ETH_SEPOLIA_USDC          = 0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d;
+    address constant ETH_SEPOLIA_USDC          = 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
     address constant ETH_SEPOLIA_LINK          = 0x779877A7B0D9E8603169DdbD7836e478b4624789;
     /**
      * @notice Resolve CCIP router for the current chain (block.chainid).
@@ -48,6 +48,7 @@ library SSLChains {
     function forwarder() internal view returns (address) {
         if (block.chainid == BASE_SEPOLIA_CHAIN_ID)  return BASE_SEPOLIA_FORWARDER;
         if (block.chainid == ARB_SEPOLIA_CHAIN_ID)   return ARB_SEPOLIA_FORWARDER;
+        if (block.chainid == ETH_SEPOLIA_CHAIN_ID)   return ETH_SEPOLIA_FORWARDER;
         revert("SSLChains: unsupported chain");
     }
 

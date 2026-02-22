@@ -73,25 +73,23 @@ contract StealthSettlementVault is
         linkToken = IERC20(_linkToken);
     }
 
-    function whitelistToken(
-        address token,
-        string calldata symbol,
-        string calldata name,
-        uint8 tokenType
-    ) external onlyOwner {
-        require(token != address(0), "SSL: zero address");
-        require(!whitelistedTokens[token], "SSL: already whitelisted");
+    function whitelistToken(ISSLVault.TokenInput[] calldata tokens) external onlyOwner {
+        for (uint256 i = 0; i < tokens.length; i++) {
+            ISSLVault.TokenInput calldata t = tokens[i];
+            require(t.token != address(0), "SSL: zero address");
+            require(!whitelistedTokens[t.token], "SSL: already whitelisted");
 
-        whitelistedTokens[token] = true;
-        tokenMetadata[token] = TokenMetadata({
-            symbol: symbol,
-            name: name,
-            tokenType: tokenType,
-            active: true
-        });
-        whitelistedTokenList.push(token);
+            whitelistedTokens[t.token] = true;
+            tokenMetadata[t.token] = TokenMetadata({
+                symbol: t.symbol,
+                name: t.name,
+                tokenType: t.tokenType,
+                active: true
+            });
+            whitelistedTokenList.push(t.token);
 
-        emit TokenWhitelisted(token, symbol, tokenType);
+            emit TokenWhitelisted(t.token, t.symbol, t.tokenType);
+        }
     }
 
     function removeToken(address token) external onlyOwner {

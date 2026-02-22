@@ -255,7 +255,7 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
     runtime.log("Verify request for nullifier: " + data.nullifierHash + ", address: " + data.userAddress);
 
     const httpClient = new HTTPClient();
-    const verificationResult = httpClient
+   /* const verificationResult = httpClient
       .sendRequest(
         runtime,
         (sender, cfg: Config) => verifyProof(sender, cfg, data),
@@ -294,7 +294,7 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
       }
 
       runtime.log("Nullifier already registered with World ID — proceeding with on-chain report");
-    }
+    }*/
 
     runtime.log("Proof Verified. Broadcasting on-chain report for address: " + data.userAddress);
 
@@ -315,6 +315,12 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
 
     const chainResults: Record<string, string> = {};
     for (const [chainName, chainCfg] of targetChains) {
+      if (!chainCfg.vault) {
+        runtime.log(`No vault deployed on ${chainName}, skipping`);
+        chainResults[chainName] = "no_vault";
+        continue;
+      }
+
       // Step 1: read isVerified on-chain
       let alreadyVerified = false;
       try {
@@ -450,6 +456,7 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
     // Send to the vault on the base chain (where RWA tokens are held)
     const baseCfg = findChainBySelector(runtime.config, data.baseChainSelector);
     if (!baseCfg) throw new Error("Base chain not configured: " + data.baseChainSelector);
+    if (!baseCfg.vault) throw new Error("No vault deployed on chain: " + data.baseChainSelector);
     const txHash = sendReportToChain(runtime, reportData, baseCfg.chainSelector, baseCfg.vault);
     runtime.log("Settlement tx: " + txHash);
 

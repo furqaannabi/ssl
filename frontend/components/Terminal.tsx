@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Icon, Card, Button, Badge, useToast } from './UI';
 import { OracleIndicator } from './OracleIndicator';
+import { FundingModal } from './FundingModal';
 import { useConnection } from 'wagmi';
 import { CHAINS } from '../lib/chain-config';
 import { auth } from '../lib/auth';
@@ -20,6 +21,7 @@ export const Terminal: React.FC = () => {
 
   const API_URL = ""; // Use Vite proxy for CORS/cookie consistency
   // Order State
+  const [isFundingOpen, setIsFundingOpen] = useState(false);
   const [myOrders, setMyOrders] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'BOOK' | 'MY_ORDERS'>('BOOK');
   const [logs, setLogs] = useState<string[]>([]);
@@ -351,7 +353,16 @@ export const Terminal: React.FC = () => {
                   <Icon name="vpn_key" className="text-primary text-sm" />
                   Confidential Order Entry
                </h2>
-               <div className="w-1.5 h-1.5 bg-primary"></div>
+               <div className="flex items-center gap-2">
+                  <Button
+                     variant="ghost"
+                     className="h-6 px-2 text-[8px] text-primary border border-primary/30 hover:bg-primary/10 font-mono uppercase tracking-wider"
+                     onClick={() => setIsFundingOpen(true)}
+                  >
+                     + Deposit
+                  </Button>
+                  <div className="w-1.5 h-1.5 bg-primary"></div>
+               </div>
             </div>
             
             <div className="p-5 flex-1 overflow-y-auto space-y-6 bg-stripes bg-[length:20px_20px]">
@@ -899,6 +910,8 @@ export const Terminal: React.FC = () => {
                </div>
             </Card>
         </div>
+
+        <FundingModal isOpen={isFundingOpen} onClose={() => setIsFundingOpen(false)} />
     </div>
   );
 };

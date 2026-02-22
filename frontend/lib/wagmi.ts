@@ -3,11 +3,11 @@ import {
   RainbowKitProvider,
   darkTheme,
 } from '@rainbow-me/rainbowkit';
-import { baseSepolia, arbitrumSepolia } from 'wagmi/chains';
+import { baseSepolia, arbitrumSepolia, sepolia } from 'wagmi/chains';
 
 export const config = getDefaultConfig({
   appName: 'SSL Terminal',
   projectId: import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || '',
-  chains: [baseSepolia, arbitrumSepolia],
+  chains: [baseSepolia, arbitrumSepolia, sepolia],
   ssr: false,
 });

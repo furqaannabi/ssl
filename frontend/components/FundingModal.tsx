@@ -39,6 +39,7 @@ export const FundingModal: React.FC<FundingModalProps> = ({
     const [selectedChainId, setSelectedChainId] = useState<number>(84532); // Default Base Sepolia
     const [allTokens, setAllTokens] = useState<TokenEntry[]>([]);
     const [selectedTokenAddress, setSelectedTokenAddress] = useState<string>("");
+    const [tokensLoading, setTokensLoading] = useState(false);
 
     const { isConnected, address: eoaAddress, chain } = useConnection();
     const { switchChainAsync } = useSwitchChain();
@@ -46,15 +47,17 @@ export const FundingModal: React.FC<FundingModalProps> = ({
     // Fetch tokens from backend on mount
     useEffect(() => {
         const fetchTokens = async () => {
+            setTokensLoading(true);
             try {
                 const res = await fetch(`/api/tokens`);
                 if (res.ok) {
                     const data = await res.json();
-                    if (data.success && data.tokens.length > 0) {
-                        setAllTokens(data.tokens);
+                    if (data.success) {
+                        setAllTokens(data.tokens || []);
                     }
                 }
             } catch (e) { console.error("Failed to fetch tokens", e); }
+            finally { setTokensLoading(false); }
         };
         if (isOpen) fetchTokens();
     }, [isOpen]);
@@ -62,7 +65,24 @@ export const FundingModal: React.FC<FundingModalProps> = ({
     // Filter tokens by selected chain
     const activeChainConfig = Object.values(CHAINS).find(c => c.chainId === selectedChainId);
     const chainSelector = activeChainConfig?.chainSelector || "";
-    const tokensForChain = allTokens.filter(t => t.chainSelector === chainSelector);
+    const dbTokensForChain = allTokens.filter(t => t.chainSelector === chainSelector);
+
+    // Always inject USDC from chain config — its address may be shared across chains
+    // so it might not have this chain's chainSelector in DB
+    const usdcFromConfig: TokenEntry | null = activeChainConfig?.usdc ? {
+        address: activeChainConfig.usdc.toLowerCase(),
+        symbol: 'USDC',
+        name: 'USD Coin',
+        decimals: 6,
+        chainSelector,
+        tokenType: 'STABLE',
+    } : null;
+
+    const tokensForChain = usdcFromConfig && !dbTokensForChain.find(t => t.address === usdcFromConfig.address)
+        ? [...dbTokensForChain, usdcFromConfig]
+        : dbTokensForChain;
+
+    const hasVault = !!(activeChainConfig?.vault);
 
     // Auto-select first token when chain changes or tokens load
     useEffect(() => {
@@ -283,7 +303,7 @@ export const FundingModal: React.FC<FundingModalProps> = ({
                                             );
                                         })
                                     ) : (
-                                        <option disabled>Loading tokens...</option>
+                                        <option disabled>{tokensLoading ? 'Loading tokens...' : 'No tokens on this network'}</option>
                                     )}
                                 </select>
                             </div>
@@ -302,8 +322,15 @@ export const FundingModal: React.FC<FundingModalProps> = ({
                             </div>
                         </div>
 
+                        {!hasVault && (
+                            <div className="bg-yellow-500/10 border border-yellow-500/20 p-3 rounded text-[10px] text-yellow-400 font-mono flex items-center gap-2">
+                                <Icon name="info" className="text-sm shrink-0" />
+                                No vault deployed on this network. Deposit unavailable.
+                            </div>
+                        )}
+
                         <div className="pt-2">
-                            <Button fullWidth variant="primary" icon="account_balance_wallet" onClick={handleFund}>
+                            <Button fullWidth variant="primary" icon="account_balance_wallet" onClick={handleFund} disabled={!hasVault}>
                                 Review & Deposit
                             </Button>
                         </div>
