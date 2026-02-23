@@ -34,8 +34,8 @@ contract SSLCCIPReceiver is IAny2EVMMessageReceiver, IERC165, Ownable {
         bytes32 indexed orderId,
         address buyer,
         address seller,
-        address usdcToken,
-        uint256 usdcAmount,
+        /*address usdcToken,
+        uint256 usdcAmount,*/
         address rwaToken,
         uint256 rwaAmount,
         bytes32 ccipMessageId
@@ -75,11 +75,13 @@ contract SSLCCIPReceiver is IAny2EVMMessageReceiver, IERC165, Ownable {
             uint256 rwaAmount
         ) = abi.decode(message.data, (bytes32, address, address, address, uint256));
 
+        /* TODO: Uncomment when we are in mainnet as sourceTokenDataTooLarge error is thrown on testnet
         address usdcToken = message.destTokenAmounts[0].token;
         uint256 usdcAmount = message.destTokenAmounts[0].amount;
 
         // 1. Pay seller their bridged USDC
         IERC20(usdcToken).safeTransfer(seller, usdcAmount);
+        */
 
         // 2. Vault transfers RWA to buyer and marks order settled
         vault.ccipSettle(orderId, buyer, rwaToken, rwaAmount);
@@ -88,8 +90,8 @@ contract SSLCCIPReceiver is IAny2EVMMessageReceiver, IERC165, Ownable {
             orderId,
             buyer,
             seller,
-            usdcToken,
-            usdcAmount,
+            /*usdcToken,
+            usdcAmount,*/
             rwaToken,
             rwaAmount,
             message.messageId
