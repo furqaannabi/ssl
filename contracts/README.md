@@ -24,6 +24,39 @@ Main vault contract deployed on each supported chain. Holds deposited tokens and
   1. Transfers the bridged USDC to the seller's stealth address
   2. Calls `vault.ccipSettle(orderId, buyer, rwaToken, rwaAmount)` so the vault transfers the RWA token to the buyer's stealth address and marks the order settled
 
+### Why USDC is not transferred via CCIP on testnet
+
+Real USDC on testnet uses Circle's **Cross-Chain Transfer Protocol (CCTP)**. When CCIP tries to bridge a CCTP token, Circle's token pool appends **64 bytes of nonce/version data** to the transfer. The testnet `FeeQuoter` contract rejects this extra data and throws:
+
+```
+SourceTokenDataTooLarge(usdcTokenAddress)
+```
+
+This is a **testnet-only limitation** — mainnet's FeeQuoter is fully configured for USDC/CCTP.
+
+**Current workaround (testnet):** `_processCrossChainSettle` sends a data-only CCIP message with no token transfer. The USDC transfer is commented out:
+
+```solidity
+/* TODO: Uncomment for mainnet — SourceTokenDataTooLarge on testnet because
+   Circle's CCTP token pool appends 64 bytes of extra data that the testnet
+   FeeQuoter rejects.
+
+   Client.EVMTokenAmount[] memory tokenAmounts = new Client.EVMTokenAmount[](1);
+   tokenAmounts[0] = Client.EVMTokenAmount({ token: usdcToken, amount: usdcAmount });
+*/
+Client.EVMTokenAmount[] memory tokenAmounts = new Client.EVMTokenAmount[](0);
+```
+
+The CCIP message still carries `(orderId, buyer, seller, rwaToken, rwaAmount)` so the destination `SSLCCIPReceiver` can deliver the RWA token to the buyer. On testnet the USDC leg of settlement is omitted.
+
+**Mainnet checklist before deploying:**
+- [ ] Uncomment `tokenAmounts` block in `SSLVault._processCrossChainSettle`
+- [ ] Remove the `tokenAmounts = new Client.EVMTokenAmount[](0)` line
+- [ ] Ensure vault holds sufficient USDC before cross-chain settlement
+- [ ] Confirm the CCIP lane for the target chain supports USDC at [ccip.chain.link](https://ccip.chain.link)
+
+---
+
 ### SSLChains (`src/core/Config.sol`)
 
 Pure helper library -- not deployed. Contains chain constants so magic numbers live in one place:
