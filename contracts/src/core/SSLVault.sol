@@ -299,12 +299,13 @@ contract StealthSettlementVault is
 
         require(!settledOrders[orderId], "SSL: settled");
 
-        Client.EVMTokenAmount[] memory tokenAmounts = new Client.EVMTokenAmount[](1);
+ /* TODO: Uncomment when we are in mainnet as sourceTokenDataTooLarge error is thrown on testnet
+    Client.EVMTokenAmount[] memory tokenAmounts = new Client.EVMTokenAmount[](1);
         tokenAmounts[0] = Client.EVMTokenAmount({
             token: usdcToken,
             amount: usdcAmount
-        });
-
+        });*/
+        Client.EVMTokenAmount[] memory tokenAmounts = new Client.EVMTokenAmount[](0);
         // Encode buyer, seller, rwaToken, rwaAmount so the dest CCIPReceiver can
         // atomically pay the seller their USDC and give the buyer their RWA token.
         Client.EVM2AnyMessage memory message = Client.EVM2AnyMessage({
