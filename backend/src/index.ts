@@ -53,6 +53,13 @@ app.notFound((c) => c.json({ error: "Not found" }, 404));
 // ── Error handler ──
 app.onError((err, c) => {
     console.error("[server] Unhandled error:", err);
+    console.error("[server] Error status:", err?.status);
+    
+    // If it's a 429, pass it through
+    if (err?.status === 429) {
+        return c.json({ error: "Too many requests" }, 429);
+    }
+    
     return c.json({ error: "Internal server error" }, 500);
 });
 

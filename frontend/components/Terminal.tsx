@@ -911,7 +911,7 @@ export const Terminal: React.FC = () => {
             </Card>
         </div>
 
-        <FundingModal isOpen={isFundingOpen} onClose={() => setIsFundingOpen(false)} />
+        <FundingModal isOpen={isFundingOpen} onClose={() => setIsFundingOpen(false)} context="terminal" />
     </div>
   );
 };

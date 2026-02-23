@@ -307,6 +307,7 @@ export const Portfolio: React.FC = () => {
             setIsFundingOpen(false);
             fetchBalances(); // Refresh balances on close
         }} 
+        context="portfolio"
       />
       <WithdrawalModal 
         isOpen={isWithdrawalOpen} 
