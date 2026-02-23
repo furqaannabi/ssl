@@ -1,7 +1,7 @@
 
-import { createPublicClient, http, defineChain } from "viem";
-import { baseSepolia } from "viem/chains";
-import { config } from "../lib/config";
+import { createPublicClient, http, type Chain } from "viem";
+import { baseSepolia, arbitrumSepolia, sepolia } from "viem/chains";
+import { getActiveChains, type ChainConfig } from "../lib/config";
 
 // Minimal ABI for isVerified
 const abi = [
@@ -14,41 +14,69 @@ const abi = [
     },
 ] as const;
 
-// Create Viem Client
-// We use the Infura key from env if available, otherwise fall back to public RPC
-const transport = process.env.INFURA_API_KEY
-    ? http(`https://base-sepolia.infura.io/v3/${process.env.INFURA_API_KEY}`)
-    : http();
+// Map config chain names → viem chain objects
+const VIEM_CHAINS: Record<string, Chain> = {
+    baseSepolia,
+    arbitrumSepolia,
+    ethSepolia: sepolia,
+};
 
-const client = createPublicClient({
-    chain: baseSepolia,
-    transport,
-});
-
-// Primary chain vault address (Base Sepolia)
-const vaultAddress = (config.chains.baseSepolia?.vault ?? "") as `0x${string}`;
+function buildTransport(chainName: string, chainCfg: ChainConfig) {
+    if (chainCfg.rpcUrl) return http(chainCfg.rpcUrl);
+    if (process.env.INFURA_API_KEY) {
+        const infuraMap: Record<string, string> = {
+            baseSepolia: `https://base-sepolia.infura.io/v3/${process.env.INFURA_API_KEY}`,
+            arbitrumSepolia: `https://arbitrum-sepolia.infura.io/v3/${process.env.INFURA_API_KEY}`,
+            ethSepolia: `https://sepolia.infura.io/v3/${process.env.INFURA_API_KEY}`,
+        };
+        if (infuraMap[chainName]) return http(infuraMap[chainName]);
+    }
+    return http();
+}
 
 export const contractService = {
     /**
-     * Check if a user address is verified on the SSLVault contract.
+     * Check if a user address is verified on ALL active SSLVault contracts.
+     * Returns true only when every chain returns true.
      * @param address User's wallet address
      */
     async getIsVerified(address: string): Promise<boolean> {
-        if (!vaultAddress) {
-            console.warn("[ContractService] No vault address configured — skipping isVerified check");
+        const activeChains = getActiveChains();
+
+        if (activeChains.length === 0) {
+            console.warn("[ContractService] No active chains configured — skipping isVerified check");
             return false;
         }
-        try {
-            const isVerified = await client.readContract({
-                address: vaultAddress,
-                abi,
-                functionName: "isVerified",
-                args: [address as `0x${string}`],
-            });
-            return isVerified;
-        } catch (error) {
-            console.error("[ContractService] isVerified check failed:", error);
-            return false;
-        }
+
+        const results = await Promise.all(
+            activeChains.map(async ([chainName, chainCfg]) => {
+                const viemChain = VIEM_CHAINS[chainName];
+                if (!viemChain) {
+                    console.warn(`[ContractService] Unknown chain "${chainName}" — skipping`);
+                    return false;
+                }
+
+                const client = createPublicClient({
+                    chain: viemChain,
+                    transport: buildTransport(chainName, chainCfg),
+                });
+
+                try {
+                    const verified = await client.readContract({
+                        address: chainCfg.vault as `0x${string}`,
+                        abi,
+                        functionName: "isVerified",
+                        args: [address as `0x${string}`],
+                    });
+                    console.log(`[ContractService] isVerified on ${chainName}: ${verified}`);
+                    return verified;
+                } catch (error) {
+                    console.error(`[ContractService] isVerified check failed on ${chainName}:`, error);
+                    return false;
+                }
+            })
+        );
+
+        return results.every(Boolean);
     },
 };

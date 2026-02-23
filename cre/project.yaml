@@ -22,7 +22,7 @@ local-simulation:
     - chain-name: ethereum-testnet-sepolia-arbitrum-1
       url: https://sepolia-rollup.arbitrum.io/rpc
     - chain-name: ethereum-testnet-sepolia
-      url: https://ethereum-sepolia.gateway.tatum.io
+      url: https://ethereum-sepolia-rpc.publicnode.com
 
 # ==========================================================================
 staging-settings:
@@ -34,7 +34,7 @@ staging-settings:
     - chain-name: ethereum-testnet-sepolia-arbitrum-1
       url: https://sepolia-rollup.arbitrum.io/rpc
     - chain-name: ethereum-testnet-sepolia
-      url: https://ethereum-sepolia.gateway.tatum.io
+      url: https://ethereum-sepolia-rpc.publicnode.com
 
 
 production-settings:
