@@ -209,7 +209,7 @@ function AppContent() {
          </header>
 
          {/* Content View — h-full wrapper propagates bounded height to child pages */}
-         <main className="flex-1 overflow-hidden relative min-h-0">
+         <main className="flex-1 overflow-y-auto relative min-h-0">
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(13,242,89,0.03)_0%,transparent_50%)] pointer-events-none"></div>
             <div className="h-full">
               <Routes>

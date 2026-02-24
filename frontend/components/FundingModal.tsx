@@ -13,6 +13,7 @@ import { auth } from '../lib/auth';
 interface FundingModalProps {
     isOpen: boolean;
     onClose: () => void;
+    context?: 'portfolio' | 'terminal';
 }
 
 // Token entry from GET /api/tokens (enriched with price data)
@@ -29,7 +30,8 @@ interface TokenEntry {
 
 export const FundingModal: React.FC<FundingModalProps> = ({ 
     isOpen, 
-    onClose
+    onClose,
+    context = 'portfolio'
 }) => {
     const [step, setStep] = useState<'DETAILS' | 'APPROVING' | 'FUNDING' | 'SUCCESS'>('DETAILS');
     const [amount, setAmount] = useState("10");
@@ -372,7 +374,9 @@ export const FundingModal: React.FC<FundingModalProps> = ({
                             <h3 className="text-white font-bold uppercase tracking-wider text-sm">Deposit Successful</h3>
                             <p className="text-[10px] text-slate-400 mt-1 font-mono tracking-wide">Your assets are now shielded and ready for trading.</p>
                         </div>
-                        <Button variant="primary" fullWidth onClick={onClose} className="mt-4">Back to Portfolio</Button>
+                        <Button variant="primary" fullWidth onClick={onClose} className="mt-4">
+                            {context === 'terminal' ? 'Close' : 'Back to Portfolio'}
+                        </Button>
                     </div>
                 )}
             </div>

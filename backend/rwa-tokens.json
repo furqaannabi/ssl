@@ -1,49 +1,49 @@
 {
-    "chains": {
-        "baseSepolia": {
-            "chainId": 84532,
-            "vault": "0xde99626b99889284a782915edd25e5c17a987bab",
-            "tokens": {
-                "tMETA": "0xa6ba5238fa7866120fafc5f0b9a242e44de6acc7",
-                "tGOOGL": "0x74ed831013328732e8a80974eaed7949ab554850",
-                "tAAPL": "0xa785fcbdcb0962e4adf8c8e3187eb0d5f0a64192",
-                "tTSLA": "0xd8ee75e2709af421d8e604e6ed343eec1f9838b3",
-                "tAMZN": "0x0fb500f62772bd324896cd2dcf30bb6d1993e980",
-                "tNVDA": "0xc251aca5d13ac162a33f7acc8316b949d188c36f",
-                "tSPY": "0x0f346b23ce9caf4d9fc53ce37d25de8a2d25f426",
-                "tQQQ": "0x8bd46bab9c426804b4029bd3c607ebe676d826af",
-                "tBOND": "0x9e004ab46af2c72d969d4e2a697e870b54170e3e"
-            }
-        },
-        "arbitrumSepolia": {
-            "chainId": 421614,
-            "vault": "0x3e3161d1568cb16e80b7b5c7865e0a4a616ca516",
-            "tokens": {
-                "tMETA": "0x18bfbfef1302804cf77b99457dcd969babf1a91b",
-                "tGOOGL": "0x095885e90fc6b5bf6cf4990df05f11b930599011",
-                "tAAPL": "0x1575ffc4b51b16e6bafc3d3ef7a1c9c6d639a794",
-                "tTSLA": "0xd55c467432a5e30c8bf286450e8d937562997c31",
-                "tAMZN": "0xb90ae3b2938f19d357e9d9143cc4e02878096c91",
-                "tNVDA": "0x26b524456a756c3fc9ed68c76d8e747f54f3526c",
-                "tSPY": "0x0d93520f2b5f0b96ea90a9dd0d76d523977528c8",
-                "tQQQ": "0xe2d0e6621834a4418dae21bd19005b8923812792",
-                "tBOND": "0x583ce749fd8f950a1c05b4ae168428134a7a7179"
-            }
-        },
-        "ethSepolia": {
-            "chainId": 11155111,
-            "vault": "0x339065958febda77f44a142456fed062acfaa4e6",
-            "tokens": {
-                "tMETA": "0xfcc7984f670f67b30ebe357af9e57111206752d2",
-                "tGOOGL": "0xfd9cb05bbf89b73bc7e0e2e9e62ba0e857f99023",
-                "tAAPL": "0x802ffdc48bf2b3d29dd8337a571c69feffbed025",
-                "tTSLA": "0xec501fd82c92e6757136c7a90799b2f6fbe5a64c",
-                "tAMZN": "0x40064da590b7e8e9d48dad025860ef8c85c1577e",
-                "tNVDA": "0xc45d33597dc462506d179988314bb3154321399c",
-                "tSPY": "0x6dd00c4598dfac984ac25671437a77170f96a57d",
-                "tQQQ": "0xc34f4bb995c2d185b0aa88a7cad7a56def4aae57",
-                "tBOND": "0xec07e587b64ef0e678cd7d747aa6bf2fb505c335"
-            }
-        }
+  "chains": {
+    "baseSepolia": {
+      "chainId": 84532,
+      "vault": "0xde99626b99889284a782915edd25e5c17a987bab",
+      "tokens": {
+        "tMETA": "0xa6ba5238fa7866120fafc5f0b9a242e44de6acc7",
+        "tGOOGL": "0x74ed831013328732e8a80974eaed7949ab554850",
+        "tAAPL": "0xa785fcbdcb0962e4adf8c8e3187eb0d5f0a64192",
+        "tTSLA": "0xd8ee75e2709af421d8e604e6ed343eec1f9838b3",
+        "tAMZN": "0x0fb500f62772bd324896cd2dcf30bb6d1993e980",
+        "tNVDA": "0xc251aca5d13ac162a33f7acc8316b949d188c36f",
+        "tSPY": "0x0f346b23ce9caf4d9fc53ce37d25de8a2d25f426",
+        "tQQQ": "0x8bd46bab9c426804b4029bd3c607ebe676d826af",
+        "tBOND": "0x9e004ab46af2c72d969d4e2a697e870b54170e3e"
+      }
+    },
+    "arbitrumSepolia": {
+      "chainId": 421614,
+      "vault": "0x3e3161d1568cb16e80b7b5c7865e0a4a616ca516",
+      "tokens": {
+        "tMETA": "0x18bfbfef1302804cf77b99457dcd969babf1a91b",
+        "tGOOGL": "0x095885e90fc6b5bf6cf4990df05f11b930599011",
+        "tAAPL": "0x1575ffc4b51b16e6bafc3d3ef7a1c9c6d639a794",
+        "tTSLA": "0xd55c467432a5e30c8bf286450e8d937562997c31",
+        "tAMZN": "0xb90ae3b2938f19d357e9d9143cc4e02878096c91",
+        "tNVDA": "0x26b524456a756c3fc9ed68c76d8e747f54f3526c",
+        "tSPY": "0x0d93520f2b5f0b96ea90a9dd0d76d523977528c8",
+        "tQQQ": "0xe2d0e6621834a4418dae21bd19005b8923812792",
+        "tBOND": "0x583ce749fd8f950a1c05b4ae168428134a7a7179"
+      }
+    },
+    "ethSepolia": {
+      "chainId": 11155111,
+      "vault": "0x339065958febda77f44a142456fed062acfaa4e6",
+      "tokens": {
+        "tMETA": "0xfcc7984f670f67b30ebe357af9e57111206752d2",
+        "tGOOGL": "0xfd9cb05bbf89b73bc7e0e2e9e62ba0e857f99023",
+        "tAAPL": "0x802ffdc48bf2b3d29dd8337a571c69feffbed025",
+        "tTSLA": "0xec501fd82c92e6757136c7a90799b2f6fbe5a64c",
+        "tAMZN": "0x40064da590b7e8e9d48dad025860ef8c85c1577e",
+        "tNVDA": "0xc45d33597dc462506d179988314bb3154321399c",
+        "tSPY": "0x6dd00c4598dfac984ac25671437a77170f96a57d",
+        "tQQQ": "0xc34f4bb995c2d185b0aa88a7cad7a56def4aae57",
+        "tBOND": "0xec07e587b64ef0e678cd7d747aa6bf2fb505c335"
+      }
     }
+  }
 }

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Icon } from './UI';
 import { useConnection } from 'wagmi';
+import { OrderPreviewModal } from './OrderPreviewModal';
 
 interface ChatMessage {
     role: 'user' | 'assistant';
@@ -18,6 +19,30 @@ interface ArbitrageOpportunity {
     direction: 'BUY' | 'SELL';
     orderAmount: number;
     potentialProfit: number;
+}
+
+interface ParsedOrder {
+    side: 'BUY' | 'SELL';
+    amount: string;
+    price: string;
+    symbol: string;
+    chain: string;
+    pairId?: string;
+    chainSelector?: string;
+}
+
+interface BalanceCheck {
+    hasSufficientBalance: boolean;
+    required: string;
+    available: string;
+    error: string;
+}
+
+interface ParseResponse {
+    parsed: ParsedOrder | null;
+    requiresConfirmation: boolean;
+    balanceCheck: BalanceCheck | null;
+    totalValue?: string;
 }
 
 const QUICK_PROMPTS = [
@@ -136,7 +161,14 @@ export const AIChatbot: React.FC = () => {
     const inputRef = useRef<HTMLInputElement>(null);
     const { address: eoaAddress } = useConnection();
 
-    const API_URL = ""; // Use Vite proxy for CORS/cookie consistency
+    const API_URL = "";
+
+    // Order Preview Modal State
+    const [isOrderPreviewOpen, setIsOrderPreviewOpen] = useState(false);
+    const [parsedOrder, setParsedOrder] = useState<ParsedOrder | null>(null);
+    const [balanceCheck, setBalanceCheck] = useState<BalanceCheck | null>(null);
+    const [orderTotalValue, setOrderTotalValue] = useState<string | undefined>();
+    const [pendingMessage, setPendingMessage] = useState<string>('');
 
     // Auto-scroll to bottom
     useEffect(() => {
@@ -147,6 +179,88 @@ export const AIChatbot: React.FC = () => {
     useEffect(() => {
         if (isOpen) inputRef.current?.focus();
     }, [isOpen]);
+
+    // Check for trading intent keywords
+    const hasTradingIntent = (text: string): boolean => {
+        const tradingKeywords = ['buy', 'sell', 'purchase', 'trade', 'order', 'long', 'short'];
+        const lower = text.toLowerCase();
+        return tradingKeywords.some(kw => lower.includes(kw));
+    };
+
+    // Handle order confirmation from modal
+    const handleOrderConfirm = async (order: {
+        pairId: string;
+        amount: string;
+        price: string;
+        side: 'BUY' | 'SELL';
+        stealthAddress: string;
+        baseChainSelector: string;
+        quoteChainSelector: string;
+    }, onLog?: (log: string) => void): Promise<{ success: boolean; logs?: string[]; error?: string }> => {
+        const logs: string[] = [];
+
+        const pushLog = (msg: string) => {
+            logs.push(msg);
+            onLog?.(msg);
+        };
+        
+        try {
+            const response = await fetch(`${API_URL}/api/order`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ...order,
+                    userAddress: eoaAddress,
+                }),
+                credentials: 'include',
+            });
+
+            console.log('[Order] Response status:', response.status);
+            
+            if (!response.ok) {
+                const text = await response.text();
+                console.log('[Order] Error response:', text);
+                try {
+                    const err = JSON.parse(text);
+                    return { success: false, error: err.error || `HTTP ${response.status}` };
+                } catch {
+                    return { success: false, error: `HTTP ${response.status}: ${text || 'No response body'}` };
+                }
+            }
+
+            // Stream the response to get logs
+            const reader = response.body?.getReader();
+            const decoder = new TextDecoder();
+            
+            if (reader) {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value, { stream: true });
+                    const lines = chunk.split('\n').filter(l => l.trim() !== '');
+                    
+                    for (const line of lines) {
+                        try {
+                            const data = JSON.parse(line);
+                            if (data.type === 'log') {
+                                pushLog(data.message);
+                            } else if (data.type === 'result') {
+                                pushLog(`Order ${data.orderId?.slice(0, 8)}... ${data.status}`);
+                                return { success: true, logs };
+                            } else if (data.type === 'error') {
+                                return { success: false, error: data.detail || 'Matching engine failed', logs };
+                            }
+                        } catch { /* skip malformed */ }
+                    }
+                }
+            }
+
+            return { success: true, logs };
+        } catch (err: any) {
+            return { success: false, error: err.message || 'Failed to place order', logs };
+        }
+    };
 
     // Poll arbitrage count for badge
     useEffect(() => {
@@ -168,9 +282,83 @@ export const AIChatbot: React.FC = () => {
         const text = messageText || input.trim();
         if (!text || isStreaming) return;
 
+        // Clear input immediately
+        setInput('');
+
+        // Check for trading intent BEFORE sending to chat
+        if (hasTradingIntent(text)) {
+            if (!eoaAddress) {
+                // User not connected - show error in chat
+                const errorMsg: ChatMessage = {
+                    role: 'assistant',
+                    content: 'To place an order, please connect your wallet first.',
+                    timestamp: Date.now(),
+                };
+                setMessages(prev => [...prev, errorMsg]);
+                return;
+            }
+
+            setPendingMessage(text);
+            setIsStreaming(true);
+
+            try {
+                const res = await fetch(`${API_URL}/api/order/parse`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: text,
+                        userAddress: eoaAddress,
+                    }),
+                });
+
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}`);
+                }
+
+                const data = await res.json();
+
+                if (data.requiresConfirmation && data.parsed) {
+                    // Show the order preview modal
+                    setParsedOrder(data.parsed);
+                    setBalanceCheck(data.balanceCheck);
+                    setOrderTotalValue(data.totalValue);
+                    setIsOrderPreviewOpen(true);
+                    setIsStreaming(false);
+                    setTimeout(() => inputRef.current?.focus(), 10);
+                    return;
+                } else if (data.parsed?.error) {
+                    // Show error message in chat
+                    const errorMsg: ChatMessage = {
+                        role: 'assistant',
+                        content: data.parsed.error,
+                        timestamp: Date.now(),
+                    };
+                    setMessages(prev => [...prev, errorMsg]);
+                    setIsStreaming(false);
+                    setTimeout(() => inputRef.current?.focus(), 10);
+                    return;
+                } else {
+                    // Parse succeeded but not a valid order - continue to regular chat
+                    console.log('[OrderParse] Not a valid order, continuing to chat');
+                }
+            } catch (err: any) {
+                console.error('[OrderParse] Error:', err);
+                // Show error message in chat
+                const errorMsg: ChatMessage = {
+                    role: 'assistant',
+                    content: 'Sorry, I had trouble processing that order. Please try again or try a simpler format like "Buy 0.5 tMETA at $100 on Base".',
+                    timestamp: Date.now(),
+                };
+                setMessages(prev => [...prev, errorMsg]);
+            } finally {
+                setIsStreaming(false);
+                setTimeout(() => inputRef.current?.focus(), 10);
+            }
+        }
+
+        // Regular chat message (non-trading)
         const userMsg: ChatMessage = { role: 'user', content: text, timestamp: Date.now() };
         setMessages(prev => [...prev, userMsg]);
-        setInput('');
         setIsStreaming(true);
 
         // Add placeholder assistant message
@@ -396,6 +584,21 @@ Let me know how I can assist!`)}
                     </div>
                 </div>
             )}
+
+            {/* Order Preview Modal */}
+            <OrderPreviewModal
+                isOpen={isOrderPreviewOpen}
+                onClose={() => {
+                    setIsOrderPreviewOpen(false);
+                    setParsedOrder(null);
+                    setBalanceCheck(null);
+                    setOrderTotalValue(undefined);
+                }}
+                parsed={parsedOrder}
+                balanceCheck={balanceCheck}
+                totalValue={orderTotalValue}
+                onConfirm={handleOrderConfirm}
+            />
         </>
     );
 };

@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => {
         host: '0.0.0.0',
         proxy: {
           '/api': {
-            target: env.VITE_API_URL || 'https://arc.furqaannabi.com',
+            target: 'http://localhost:3001',
             changeOrigin: true,
             secure: false,
           }

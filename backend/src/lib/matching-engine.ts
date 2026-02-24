@@ -5,8 +5,19 @@ import type { MatchPayload } from "./cre-client";
 import { config } from "./config";
 import { parseUnits } from "ethers";
 
+// Use 1e18 precision to handle decimal token amounts in BigInt math
+const PRECISION = 10n ** 18n;
+
+function toBigWithPrecision(value: string | number): bigint {
+    return BigInt(Math.round(Number(value) * 1e18));
+}
+
+function fromBigWithPrecision(value: bigint): number {
+    return Number(value) / 1e18;
+}
+
 function remaining(order: { amount: string; filledAmount: string }): bigint {
-    return BigInt(Math.floor(Number(order.amount))) - BigInt(Math.floor(Number(order.filledAmount)));
+    return toBigWithPrecision(order.amount) - toBigWithPrecision(order.filledAmount);
 }
 
 /** Extract the JSON result object from CRE output (handles both simulate and production modes) */
@@ -58,6 +69,7 @@ export async function matchOrders(newOrderId: string, onLog?: (log: string) => v
     if (!order || order.status !== OrderStatus.OPEN) return;
 
     const { baseSymbol } = order.pair;
+    log(`Starting match for order ${order.id} | ${order.side} ${order.amount} ${baseSymbol} @ ${order.price} | chain: ${order.baseChainSelector}`);
 
     while (true) {
         order = await prisma.order.findUnique({
@@ -68,6 +80,7 @@ export async function matchOrders(newOrderId: string, onLog?: (log: string) => v
         if (!order || order.status !== OrderStatus.OPEN) break;
 
         const orderRemaining = remaining(order);
+        log(`Order remaining: ${fromBigWithPrecision(orderRemaining)} (raw: ${orderRemaining})`);
         if (orderRemaining <= 0n) break;
 
         const oppositeSide = order.side === OrderSide.BUY ? OrderSide.SELL : OrderSide.BUY;
@@ -104,14 +117,18 @@ export async function matchOrders(newOrderId: string, onLog?: (log: string) => v
         if (matchRemaining <= 0n) continue;
 
         const tradeAmount = orderRemaining < matchRemaining ? orderRemaining : matchRemaining;
+        const tradeAmountDecimal = fromBigWithPrecision(tradeAmount);
 
-        log(`Match found: ${order.id} <-> ${match.id} (trade: ${tradeAmount})`);
+        log(`Match found: ${order.id} <-> ${match.id} (trade: ${tradeAmountDecimal} ${baseSymbol})`);
 
-        const orderNewFilled = BigInt(Math.floor(Number(order.filledAmount))) + tradeAmount;
-        const matchNewFilled = BigInt(Math.floor(Number(match.filledAmount))) + tradeAmount;
+        const orderNewFilled = toBigWithPrecision(order.filledAmount) + tradeAmount;
+        const matchNewFilled = toBigWithPrecision(match.filledAmount) + tradeAmount;
 
-        const orderFullyFilled = orderNewFilled >= BigInt(Math.floor(Number(order.amount)));
-        const matchFullyFilled = matchNewFilled >= BigInt(Math.floor(Number(match.amount)));
+        const orderFullyFilled = orderNewFilled >= toBigWithPrecision(order.amount);
+        const matchFullyFilled = matchNewFilled >= toBigWithPrecision(match.amount);
+
+        const orderNewFilledDecimal = fromBigWithPrecision(orderNewFilled).toString();
+        const matchNewFilledDecimal = fromBigWithPrecision(matchNewFilled).toString();
 
         const buyer  = order.side === OrderSide.BUY  ? order : match;
         const seller = order.side === OrderSide.SELL ? order : match;
@@ -140,9 +157,9 @@ export async function matchOrders(newOrderId: string, onLog?: (log: string) => v
         }
 
         const price = Number(match.price);
-        const costQuote = Number(tradeAmount) * price;
+        const costQuote = tradeAmountDecimal * price;
 
-        const baseAmountWei  = parseUnits(tradeAmount.toString(), baseToken.decimals);
+        const baseAmountWei  = parseUnits(tradeAmountDecimal.toFixed(baseToken.decimals), baseToken.decimals);
         const quoteAmountWei = parseUnits(costQuote.toFixed(quoteToken.decimals), quoteToken.decimals);
 
         // Cross-chain: buyer's USDC is on a different chain than the RWA
@@ -200,11 +217,11 @@ export async function matchOrders(newOrderId: string, onLog?: (log: string) => v
         await prisma.$transaction([
             prisma.order.update({
                 where: { id: order.id },
-                data: { filledAmount: orderNewFilled.toString(), status: orderFullyFilled ? OrderStatus.SETTLED : OrderStatus.OPEN },
+                data: { filledAmount: orderNewFilledDecimal, status: orderFullyFilled ? OrderStatus.SETTLED : OrderStatus.OPEN },
             }),
             prisma.order.update({
                 where: { id: match.id },
-                data: { filledAmount: matchNewFilled.toString(), status: matchFullyFilled ? OrderStatus.SETTLED : OrderStatus.OPEN },
+                data: { filledAmount: matchNewFilledDecimal, status: matchFullyFilled ? OrderStatus.SETTLED : OrderStatus.OPEN },
             }),
             prisma.tokenBalance.upsert({
                 where: { userAddress_token_chainSelector: { userAddress: buyer.userAddress!, token: baseToken.address, chainSelector: baseChain } },
@@ -258,7 +275,7 @@ export async function matchOrders(newOrderId: string, onLog?: (log: string) => v
             // Orders are already SETTLED in DB; on-chain delivery may be retried manually
         }
 
-        log(`Done. Trade: ${tradeAmount} ${baseSymbol} @ ${price} USDC | base: ${baseChain} | quote: ${quoteChain}`);
+        log(`Done. Trade: ${tradeAmountDecimal} ${baseSymbol} @ ${price} USDC | base: ${baseChain} | quote: ${quoteChain}`);
 
         if (orderFullyFilled) break;
     }

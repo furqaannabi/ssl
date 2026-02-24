@@ -10,6 +10,9 @@ import { matchOrders } from "../lib/matching-engine";
 import { OrderSide, OrderStatus } from "../../generated/prisma/client";
 import { streamText } from 'hono/streaming'
 import { authMiddleware } from "../middleware/auth";
+import { NLParserService } from "../services/nl-parser.service";
+import { PriceFeedService } from "../services/price-feed.service";
+import addresses from "../../addresses.json";
 
 
 type Variables = {
@@ -34,10 +37,167 @@ interface OrderConfirmPayload {
     signature: string;
 }
 
+// Chain selector mapping
+const CHAIN_SELECTOR_MAP: Record<string, string> = {
+    'baseSepolia': 'ethereum-testnet-sepolia-base-1',
+    'arbitrumSepolia': 'ethereum-testnet-sepolia-arbitrum-1',
+};
+
+// ── POST /parse (Parse natural language order message) ──
+order.post("/parse", async (c) => {
+    const body = await c.req.json<{
+        message: string;
+        userAddress?: string;
+    }>();
+
+    if (!body.message || typeof body.message !== 'string') {
+        return c.json({ error: 'Message is required' }, 400);
+    }
+
+    const userAddress = (body.userAddress || '').toLowerCase();
+
+    try {
+        // Parse the message
+        const parsed = await NLParserService.parseOrderMessage(body.message);
+
+        // If not a valid trading request, return parsed result with requiresConfirmation: false
+        if (!parsed.isValid) {
+            return c.json({
+                parsed,
+                requiresConfirmation: false,
+                balanceCheck: null,
+            });
+        }
+
+        // Get pair ID for the symbol
+        const pair = await prisma.pair.findUnique({
+            where: { baseSymbol: parsed.symbol },
+        });
+
+        if (!pair) {
+            return c.json({
+                parsed,
+                requiresConfirmation: false,
+                balanceCheck: null,
+                error: `Trading pair not found for ${parsed.symbol}`,
+            });
+        }
+
+        // Get chain selector
+        const chainSelector = CHAIN_SELECTOR_MAP[parsed.chain];
+        const chainConfig = addresses.chains[parsed.chain as keyof typeof addresses.chains];
+
+        // Calculate amount from dollarAmount if provided
+        let amount = parsed.amount;
+        let price = parsed.price;
+        
+        if (parsed.dollarAmount && !parsed.amount) {
+            // User specified dollar value - need to get price and calculate amount
+            let unitPrice: number;
+            
+            if (parsed.price) {
+                // User specified a unit price - use it
+                unitPrice = parseFloat(parsed.price);
+            } else {
+                // No unit price provided - fetch market price
+                const priceData = await PriceFeedService.getPriceOrMock(parsed.symbol);
+                unitPrice = priceData.price;
+                price = priceData.price.toString();
+            }
+            
+            const dollarValue = parseFloat(parsed.dollarAmount);
+            amount = (dollarValue / unitPrice).toFixed(6); // Calculate token amount
+        }
+
+        // Check balance
+        let balanceCheck = {
+            hasSufficientBalance: false,
+            required: '',
+            available: '',
+            error: '',
+        };
+
+        if (userAddress) {
+            if (parsed.side === 'BUY') {
+                // Check USDC balance
+                const usdcToken = chainConfig?.usdc;
+                if (usdcToken) {
+                    const tokenBalance = await prisma.tokenBalance.findFirst({
+                        where: {
+                            userAddress,
+                            token: usdcToken.toLowerCase(),
+                        },
+                    });
+
+                    const availableUSDC = tokenBalance ? parseFloat(tokenBalance.balance) / 1e6 : 0;
+                    const totalValue = parseFloat(amount) * parseFloat(price);
+
+                    balanceCheck = {
+                        hasSufficientBalance: availableUSDC >= totalValue,
+                        required: `${totalValue.toFixed(2)} USDC`,
+                        available: `${availableUSDC.toFixed(2)} USDC`,
+                        error: availableUSDC >= totalValue ? '' : `Insufficient USDC balance. Need ${totalValue.toFixed(2)} USDC, have ${availableUSDC.toFixed(2)} USDC`,
+                    };
+                }
+            } else if (parsed.side === 'SELL') {
+                // Check token balance
+                const token = await prisma.token.findFirst({
+                    where: {
+                        symbol: parsed.symbol,
+                        chainSelector,
+                    },
+                });
+
+                if (token) {
+                    const tokenBalance = await prisma.tokenBalance.findFirst({
+                        where: {
+                            userAddress,
+                            token: token.address.toLowerCase(),
+                        },
+                    });
+
+                    const decimals = token.decimals || 18;
+                    const availableToken = tokenBalance ? parseFloat(tokenBalance.balance) / Math.pow(10, decimals) : 0;
+                    const requiredToken = parseFloat(amount);
+
+                    balanceCheck = {
+                        hasSufficientBalance: availableToken >= requiredToken,
+                        required: `${requiredToken.toFixed(4)} ${parsed.symbol}`,
+                        available: `${availableToken.toFixed(4)} ${parsed.symbol}`,
+                        error: availableToken >= requiredToken ? '' : `Insufficient ${parsed.symbol} balance. Need ${requiredToken.toFixed(4)}, have ${availableToken.toFixed(4)}`,
+                    };
+                }
+            }
+        }
+
+        // Calculate total value
+        const totalValue = parseFloat(amount) * parseFloat(price);
+
+        return c.json({
+            parsed: {
+                ...parsed,
+                amount,
+                price,
+                pairId: pair.id,
+                chainSelector,
+            },
+            totalValue: totalValue.toFixed(2),
+            requiresConfirmation: true,
+            balanceCheck,
+        });
+
+    } catch (err: any) {
+        console.error('[order/parse] Error:', err);
+        return c.json({ error: err.message || 'Failed to parse message' }, 500);
+    }
+});
+
 // ── POST / (Place Order — unified: create + open + match in one request) ──
 order.post("/", authMiddleware, async (c) => {
+    console.log('[order] POST /api/order called');
     const body = await c.req.json<OrderInitPayload>();
     const userAddress = (c.get("user") as string).toLowerCase();
+    console.log('[order] User:', userAddress, 'Order:', body);
 
     // Validate required fields
     const required = ["pairId", "amount", "price", "side", "stealthAddress", "baseChainSelector", "quoteChainSelector"] as const;
@@ -58,11 +218,13 @@ order.post("/", authMiddleware, async (c) => {
     if (isNaN(parsedPrice) || parsedPrice <= 0) return c.json({ error: "price must be a positive number" }, 400);
 
     const orderValue = parsedAmount * parsedPrice;
-    if (orderValue < 5) return c.json({ error: `Minimum order value is 5 USDC (current: ${orderValue.toFixed(2)})` }, 400);
+    if (Math.round(orderValue * 100) / 100 < 4.99) return c.json({ error: `Minimum order value is 5 USDC (current: ${orderValue.toFixed(2)})` }, 400);
 
     try {
         const pair = await prisma.pair.findUnique({ where: { id: body.pairId } });
         if (!pair) return c.json({ error: "Invalid pairId: pair not found" }, 400);
+
+        console.log('[order] Creating order for:', userAddress);
 
         // Create order directly as OPEN
         const newOrder = await prisma.order.create({
@@ -107,8 +269,23 @@ order.post("/", authMiddleware, async (c) => {
             }
         });
 
-    } catch (err) {
+    } catch (err: any) {
         console.error("[order] Create failed:", err);
+        console.error("[order] Error type:", typeof err);
+        console.error("[order] Error message:", err?.message);
+        console.error("[order] Error code:", err?.code);
+        console.error("[order] Error status:", err?.status);
+        
+        // Check for rate limiting (429)
+        if (err.message?.includes('429') || err.message?.includes('rate limit') || err?.status === 429 || err?.code === '429') {
+            return c.json({ error: "Too many requests. Please try again in a moment.", detail: String(err) }, 429);
+        }
+        
+        // Check for Prisma errors
+        if (err.message?.includes('Prisma') || err.code?.includes('P')) {
+            return c.json({ error: "Database error. Please try again.", detail: err.message }, 500);
+        }
+        
         return c.json({ error: "Failed to place order", detail: String(err) }, 500);
     }
 });
