@@ -3,6 +3,7 @@
 // ──────────────────────────────────────────────
 
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { config } from "./lib/config";
@@ -17,7 +18,6 @@ import oracle from "./routes/oracle";
 import { chat } from "./routes/chat";
 import { tokens } from "./routes/tokens";
 import { compliance } from "./routes/compliance";
-import { startVaultListener } from "./listeners/ssl-vault-listener";
 import { ArbitrageMonitorService } from "./services/arbitrage-monitor.service";
 import { seedTokens } from "./lib/seed-tokens";
 
@@ -53,10 +53,10 @@ app.notFound((c) => c.json({ error: "Not found" }, 404));
 // ── Error handler ──
 app.onError((err, c) => {
     console.error("[server] Unhandled error:", err);
-    console.error("[server] Error status:", err?.status);
+    console.error("[server] Error message:", err.message);
     
     // If it's a 429, pass it through
-    if (err?.status === 429) {
+    if (err instanceof HTTPException && (err as HTTPException).status === 429) {
         return c.json({ error: "Too many requests" }, 429);
     }
     
@@ -72,13 +72,7 @@ console.log(`
 );
 
 // Seed RWA tokens + pairs (idempotent)
-seedTokens().then(() => {
-    startVaultListener().catch((err) => {
-        console.error("Failed to start vault listener:", err);
-    });
-}).catch((err) => {
-    console.error("Failed to seed on startup:", err);
-});
+seedTokens();
 
 // Start Arbitrage Monitor
 ArbitrageMonitorService.startMonitor(
