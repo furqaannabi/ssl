@@ -1,0 +1,20 @@
+# Foundry build artifacts
+out/
+cache/
+broadcast/
+
+# Foundry dependencies (reinstall with: forge install)
+lib/
+
+# Node (if any)
+node_modules/
+
+# Environment & secrets
+.env
+.env.*
+
+# OS files
+.DS_Store
+
+# Editor
+.vscode/
