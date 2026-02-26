@@ -1,162 +1,198 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Button, Icon, useToast } from './UI';
-import {
-    generateSpendingKeypair,
-    downloadKeyfile,
-    SpendingKeypair,
-} from '../lib/stealth';
-import { useConnection } from 'wagmi';
+import { useConnection, useSignTypedData } from 'wagmi';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import WorldIdKit from './WorldIdKit';
 import { auth } from '../lib/auth';
 
-const StealthGenerator: React.FC = () => {
-    const [keys, setKeys] = useState<SpendingKeypair | null>(null);
-    const [isRevealed, setIsRevealed] = useState(false);
+// ─── EIP-712 constants (must match the Convergence API / backend) ─────────────
+
+const SHIELD_DOMAIN = {
+    name:              'CompliantPrivateTokenDemo',
+    version:           '0.0.1',
+    chainId:           11155111, // ETH Sepolia
+    verifyingContract: '0xE588a6c73933BFD66Af9b4A07d48bcE59c0D2d13' as `0x${string}`,
+} as const;
+
+const SHIELD_TYPES = {
+    'Generate Shielded Address': [
+        { name: 'account',   type: 'address' },
+        { name: 'timestamp', type: 'uint256' },
+    ],
+} as const;
+
+// ─── Shielded Address Generator ───────────────────────────────────────────────
+
+const ShieldedAddressGenerator: React.FC = () => {
+    const { address: eoaAddress, isConnected } = useConnection();
     const { toast } = useToast();
+    const { signTypedDataAsync } = useSignTypedData();
 
-    const handleGenerate = () => {
-        const newKeys = generateSpendingKeypair();
-        setKeys(newKeys);
+    const [shieldedAddress, setShieldedAddress] = useState<string | null>(null);
+    const [isGenerating, setIsGenerating] = useState(false);
+
+    const handleGenerate = async () => {
+        if (!eoaAddress) {
+            toast.error('Connect your wallet first');
+            return;
+        }
+
+        setIsGenerating(true);
+        try {
+            const timestamp = Math.floor(Date.now() / 1000);
+
+            // User signs the EIP-712 request with their own wallet
+            const signature = await signTypedDataAsync({
+                domain:      SHIELD_DOMAIN,
+                types:       SHIELD_TYPES,
+                primaryType: 'Generate Shielded Address',
+                message: {
+                    account:   eoaAddress as `0x${string}`,
+                    timestamp: BigInt(timestamp),
+                },
+            });
+
+            // Backend proxies signed request to the Convergence API
+            const res = await fetch('/api/user/shield-address', {
+                method:      'POST',
+                headers:     { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ timestamp, auth: signature }),
+            });
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || `HTTP ${res.status}`);
+            }
+
+            const { address } = await res.json();
+            setShieldedAddress(address);
+            toast.success('Shielded address generated');
+        } catch (err: any) {
+            if (err.message?.includes('User rejected') || err.message?.includes('rejected')) {
+                toast.error('Signature rejected');
+            } else {
+                toast.error(err.message || 'Failed to generate shielded address');
+            }
+        } finally {
+            setIsGenerating(false);
+        }
     };
 
-    const handleClear = () => {
-        setKeys(null);
-        setIsRevealed(false);
-    };
+    if (!isConnected) {
+        return (
+            <div className="text-center py-6 text-slate-500 text-xs font-mono">
+                Connect your wallet to generate a shielded address.
+            </div>
+        );
+    }
 
-    if (!keys) {
+    if (!shieldedAddress) {
         return (
             <div className="text-center py-6">
-                 <div className="w-16 h-16 mx-auto bg-primary/10 rounded-full flex items-center justify-center mb-4 border border-primary/20">
-                    <Icon name="key" className="text-2xl text-primary" />
-                 </div>
-                 <h4 className="text-sm font-bold text-white uppercase tracking-wider mb-2">Generate Stealth Identity</h4>
-                 <p className="text-[10px] text-slate-400 mb-6 font-mono max-w-[250px] mx-auto">
-                    Create a disposable cryptographic keypair for confidential settlements.
-                 </p>
-                 <Button fullWidth variant="primary" icon="bolt" onClick={handleGenerate}>
-                    Generate New Keys
-                 </Button>
+                <div className="w-16 h-16 mx-auto bg-primary/10 rounded-full flex items-center justify-center mb-4 border border-primary/20">
+                    <Icon name="shield" className="text-2xl text-primary" />
+                </div>
+                <h4 className="text-sm font-bold text-white uppercase tracking-wider mb-2">Generate Shield Address</h4>
+                <p className="text-[10px] text-slate-400 mb-6 font-mono max-w-[260px] mx-auto">
+                    A privacy-preserving address linked to your wallet. Tokens sent here are credited back to your account — no private key management required.
+                </p>
+                <Button fullWidth variant="primary" icon="shield" onClick={handleGenerate} disabled={isGenerating}>
+                    {isGenerating ? 'Generating...' : 'Generate Shield Address'}
+                </Button>
             </div>
         );
     }
 
     return (
         <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
-            <div className="flex items-center gap-2 p-3 bg-red-900/10 border border-red-900/30 rounded text-red-400 text-[10px] font-mono">
-                <Icon name="warning" className="text-lg" />
+            <div className="flex items-center gap-2 p-3 bg-green-900/10 border border-green-900/30 rounded text-green-400 text-[10px] font-mono">
+                <Icon name="check_circle" className="text-lg" />
                 <div className="flex-1">
-                    <strong className="block mb-0.5 text-red-500">DO NOT REFRESH</strong>
-                    These keys are ephemeral. Copy or download them now. We do not save them.
+                    <strong className="block mb-0.5 text-green-500">Shield address ready</strong>
+                    Paste this into the Stealth Address field when placing an order.
                 </div>
             </div>
 
-            {/* Wallet Address — paste this into the order form */}
             <div className="space-y-2">
                 <label className="text-[9px] text-primary uppercase tracking-widest font-bold flex items-center gap-1">
-                    <Icon name="account_balance_wallet" className="text-xs" />
-                    Stealth Wallet Address <span className="text-slate-500 normal-case font-normal">(paste into Stealth Address field)</span>
+                    <Icon name="shield" className="text-xs" />
+                    Shield Address <span className="text-slate-500 normal-case font-normal">(paste into order form)</span>
                 </label>
                 <div className="p-2.5 bg-primary/5 border border-primary/30 font-mono text-[11px] text-primary break-all select-all flex justify-between items-center group rounded">
-                    <span>{keys.address}</span>
-                    <Icon name="content_copy" className="text-primary/50 cursor-pointer hover:text-primary transition-colors shrink-0 ml-2" onClick={() => {
-                        navigator.clipboard.writeText(keys.address);
-                        toast.success("Wallet Address Copied");
-                    }} />
+                    <span>{shieldedAddress}</span>
+                    <Icon
+                        name="content_copy"
+                        className="text-primary/50 cursor-pointer hover:text-primary transition-colors shrink-0 ml-2"
+                        onClick={() => {
+                            navigator.clipboard.writeText(shieldedAddress);
+                            toast.success('Shield address copied');
+                        }}
+                    />
                 </div>
             </div>
 
-            <div className="space-y-2">
-                <label className="text-[9px] text-slate-500 uppercase tracking-widest font-bold flex justify-between">
-                    <span>Private Key (Secret — import into MetaMask)</span>
-                    <span className="text-[8px] text-primary cursor-pointer hover:underline" onClick={() => setIsRevealed(!isRevealed)}>
-                        {isRevealed ? "HIDE" : "REVEAL"}
-                    </span>
-                </label>
-                <div className={`p-2.5 bg-black border border-border-dark font-mono text-[10px] break-all relative rounded overflow-hidden ${isRevealed ? 'text-red-400' : 'text-slate-700'}`}>
-                     {isRevealed ? keys.privateKey : "••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••"}
-                     <div className="absolute top-2 right-2">
-                          <Icon
-                             name="content_copy"
-                             className="text-slate-600 cursor-pointer hover:text-white transition-colors"
-                             onClick={() => {
-                                 navigator.clipboard.writeText(keys.privateKey);
-                                 toast.success("Private Key Copied");
-                             }}
-                         />
-                     </div>
-                </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 pt-2">
-                <Button variant="secondary" icon="download" onClick={() => downloadKeyfile(keys)} className="text-[10px] border-slate-700 h-10">
-                    Download Backup
-                </Button>
-                <Button variant="ghost" className="text-[10px] h-10 text-slate-500 hover:text-white" onClick={handleClear}>
-                    Clear & Close
-                </Button>
-            </div>
-            
-            <div className="mt-4 pt-4 border-t border-border-dark space-y-3">
+            <div className="mt-2 pt-3 border-t border-border-dark space-y-3">
                 <h5 className="text-[10px] font-bold text-primary uppercase tracking-widest flex items-center gap-2">
-                    <Icon name="verified_user" className="text-sm" /> Setup Instructions
+                    <Icon name="verified_user" className="text-sm" /> How it works
                 </h5>
                 <div className="bg-surface-lighter p-3 rounded border border-border-dark space-y-2">
                     <div className="flex gap-3 items-start">
                         <span className="w-5 h-5 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[10px] font-bold border border-primary/50 shrink-0">1</span>
                         <p className="text-[10px] text-slate-300">
-                            <strong className="text-primary">Copy the Wallet Address</strong> above and paste it into the <strong className="text-white">Stealth Address</strong> field when placing an order.
+                            <strong className="text-primary">Copy the Shield Address</strong> above and paste it into the <strong className="text-white">Stealth Address</strong> field when placing an order.
                         </p>
                     </div>
                     <div className="flex gap-3 items-start">
                         <span className="w-5 h-5 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center text-[10px] font-bold border border-slate-700 shrink-0">2</span>
                         <p className="text-[10px] text-slate-400">
-                            Reveal and copy the <strong className="text-white">Private Key</strong>, then import it into MetaMask via <strong className="text-white">"Import Account"</strong>.
+                            At settlement, tokens are sent privately to your shield address. The Convergence vault links it back to your connected wallet — no key import needed.
                         </p>
                     </div>
                     <div className="flex gap-3 items-start">
                         <span className="w-5 h-5 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center text-[10px] font-bold border border-slate-700 shrink-0">3</span>
                         <p className="text-[10px] text-slate-400">
-                            After settlement, your assets arrive in that imported account — your <strong className="text-white">Stealth Vault</strong>.
+                            Each address is single-use. Generate a new one for each trade to maximise privacy.
                         </p>
                     </div>
                 </div>
             </div>
+
+            <Button
+                variant="ghost"
+                className="text-[10px] h-9 text-slate-500 hover:text-white w-full"
+                onClick={() => setShieldedAddress(null)}
+            >
+                Generate Another
+            </Button>
         </div>
     );
 };
 
+// ─── ProfileModal ─────────────────────────────────────────────────────────────
+
 export const ProfileModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen, onClose }) => {
-    const { address: eoaAddress, isConnected } = useConnection();
+    const { isConnected } = useConnection();
     const [isHumanVerified, setIsHumanVerified] = useState(false);
 
     useEffect(() => {
         const checkStatus = async () => {
-            // console.log("ProfileModal: Checking status...");
             const user = await auth.getMe();
-            // console.log("ProfileModal: User status:", user);
             if (user) {
                 setIsHumanVerified(user.isVerified);
-                // console.log("ProfileModal: Set verified to", user.isVerified);
             }
         };
 
         if (isOpen) checkStatus();
 
         const handleVerificationUpdate = () => {
-            //  console.log("ProfileModal: Received update event. Optimistically verifying...");
-             setIsHumanVerified(true); // Optimistic Update
-             
-             // Add a small delay to ensure DB write is propagated for the background check
-             setTimeout(checkStatus, 1000); 
+             setIsHumanVerified(true);
+             setTimeout(checkStatus, 1000);
         };
-        // Also update immediately on mount in case it changed elsewhere
-        
 
         window.addEventListener("world-id-updated", handleVerificationUpdate);
         return () => window.removeEventListener("world-id-updated", handleVerificationUpdate);
-    }, [isOpen]); // Also re-check when modal opens
+    }, [isOpen]);
 
     return (
         <Modal isOpen={isOpen} onClose={onClose} title="Identity & Access">
@@ -168,10 +204,10 @@ export const ProfileModal: React.FC<{ isOpen: boolean; onClose: () => void }> = 
                 <h4 className="text-[10px] font-bold text-primary uppercase tracking-widest mb-4 flex items-center gap-2">
                     <Icon name="verified" className="text-xs" /> Authority Wallet (EOA)
                 </h4>
-                
+
                 <div className="flex flex-col items-center">
                     <div className="mb-4">
-                        <ConnectButton 
+                        <ConnectButton
                           accountStatus="address"
                           chainStatus="icon"
                           showBalance={false}
@@ -224,9 +260,9 @@ export const ProfileModal: React.FC<{ isOpen: boolean; onClose: () => void }> = 
 
             <div className="h-px bg-border-dark w-full mb-8"></div>
 
-            {/* Stateless Generator Section */}
+            {/* Shielded Address Generator */}
             <div className="mb-4">
-                <StealthGenerator />
+                <ShieldedAddressGenerator />
             </div>
 
         </Modal>

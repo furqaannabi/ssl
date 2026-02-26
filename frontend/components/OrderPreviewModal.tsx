@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Button, Icon, useToast } from './UI';
-import { useConnection } from 'wagmi';
+import { useConnection, useSignMessage } from 'wagmi';
+import { encryptOrder }                  from '../lib/crypto';
+import { fetchCREPublicKey, signEncryptedOrder } from '../lib/cre-client';
 
 interface ParsedOrder {
     side: 'BUY' | 'SELL';
@@ -37,9 +39,10 @@ interface OrderPreviewModalProps {
 }
 
 const CHAIN_OPTIONS = [
-    { value: 'baseSepolia', label: 'Base Sepolia' },
-    { value: 'arbitrumSepolia', label: 'Arbitrum Sepolia' },
+    { value: 'ethSepolia', label: 'Ethereum Sepolia' },
 ];
+
+const ETH_SEPOLIA_SELECTOR = 'ethereum-testnet-sepolia';
 
 export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
     isOpen,
@@ -84,8 +87,8 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
             setAmount(parsed.amount || '');
             setPrice(parsed.price || '');
             setSymbol(parsed.symbol || '');
-            setChain(parsed.chain || 'baseSepolia');
-            setChainSelector(parsed.chainSelector || '');
+            setChain('ethSepolia');
+            setChainSelector(ETH_SEPOLIA_SELECTOR);
             setPairId(parsed.pairId || '');
             setLocalBalanceCheck(balanceCheck);
             
@@ -169,6 +172,8 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
         logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [orderLogs]);
 
+    const { signMessageAsync } = useSignMessage();
+
     const handleConfirm = async () => {
         if (!isValidOrder) {
             toast.error('Please fill in all required fields correctly');
@@ -182,8 +187,24 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
 
         setIsLoading(true);
         setOrderStatus('placing');
-        setOrderLogs(['Placing order...']);
-        
+        setOrderLogs(['Encrypting order for CRE TEE...']);
+
+        // ── Encrypt the order for the TEE before submitting ────────────────────
+        let encrypted: string | undefined;
+        let signature: string | undefined;
+
+        try {
+            const crePublicKey = await fetchCREPublicKey();
+            const orderPayload = { pairId, side, amount, price, stealthAddress };
+            encrypted = await encryptOrder(orderPayload, crePublicKey);
+            signature = await signEncryptedOrder(encrypted, signMessageAsync as any);
+            setOrderLogs(prev => [...prev, 'Order encrypted. Submitting...']);
+        } catch (encErr: any) {
+            // Encryption failed — fall back to plaintext (less private but functional)
+            console.warn('[OrderModal] Encryption failed, using fallback:', encErr?.message);
+            setOrderLogs(prev => [...prev, '[Fallback] Encryption unavailable — submitting plaintext order.']);
+        }
+
         try {
             const result = await onConfirm({
                 pairId,
@@ -193,7 +214,9 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
                 stealthAddress,
                 baseChainSelector: chainSelector,
                 quoteChainSelector: chainSelector,
-            }, (log) => {
+                // Encrypted fields (added to the order body if encryption succeeded)
+                ...(encrypted ? { encrypted, signature, fallbackEnabled: true } : {}),
+            } as any, (log) => {
                 // Live log updates while streaming
                 setOrderLogs(prev => [...prev, log]);
             });
@@ -243,12 +266,8 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
                         <select
                             value={chain}
                             onChange={(e) => {
-                                const newChain = e.target.value;
-                                setChain(newChain);
-                                setChainSelector(newChain === 'baseSepolia' 
-                                    ? 'ethereum-testnet-sepolia-base-1' 
-                                    : 'ethereum-testnet-sepolia-arbitrum-1'
-                                );
+                                setChain(e.target.value);
+                                setChainSelector(ETH_SEPOLIA_SELECTOR);
                             }}
                             className="bg-black border border-border-dark text-white text-sm px-2 py-1 rounded font-mono focus:border-primary outline-none"
                         >

@@ -52,7 +52,15 @@ export interface WithdrawPayload {
     token: string;
 }
 
-export type CREPayload = VerifyPayload | OrderPayload | MatchPayload | WithdrawPayload;
+export interface MatchOrderPayload {
+    action:         "match_order";
+    encryptedOrder: string;  // base64 ECIES ciphertext
+    signature:      string;  // user ECDSA sig over encrypted payload
+    pairId:         string;
+    orderId:        string;
+}
+
+export type CREPayload = VerifyPayload | OrderPayload | MatchPayload | WithdrawPayload | MatchOrderPayload;
 
 // ─── Helpers for production JWT auth (CRE HTTP trigger) ───
 
@@ -233,6 +241,104 @@ function sendToCRESimulate(payload: CREPayload, onLog?: (log: string) => void): 
             } catch (e) {
                 resolve({ output: stdout });
             }
+        });
+    });
+}
+
+// ─── Matching Workflow (separate workflow for TEE matching) ───────────────────
+
+/**
+ * Send a match_order payload to the CRE matching workflow (TEE).
+ * - Production: uses CRE_MATCHING_WORKFLOW_ID
+ * - Simulation:  spawns cre/matching-workflow locally
+ */
+export async function sendToMatchingWorkflow(
+    payload: MatchOrderPayload,
+    onLog?: (log: string) => void
+): Promise<unknown> {
+    if (config.nodeEnv === "production") {
+        const workflowId = process.env.CRE_MATCHING_WORKFLOW_ID || "";
+        if (!workflowId) throw new Error("CRE_MATCHING_WORKFLOW_ID is required in production mode");
+
+        const requestId = crypto.randomUUID();
+        const body = {
+            jsonrpc: "2.0",
+            id:      requestId,
+            method:  "workflows.execute",
+            params:  {
+                input:    payload,
+                workflow: { workflowID: workflowId },
+            },
+        };
+
+        const jwt = await createCREJwt(body, config.evmPrivateKey);
+        const res = await fetch(config.creGatewayUrl, {
+            method:  "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
+            body:    JSON.stringify(body),
+        });
+
+        const json = await res.json();
+        if (!res.ok || json.error) {
+            throw new Error(`CRE matching gateway error: ${json.error?.message ?? JSON.stringify(json)}`);
+        }
+        return json.result;
+    }
+
+    return sendToMatchingWorkflowSimulate(payload, onLog);
+}
+
+function sendToMatchingWorkflowSimulate(
+    payload: MatchOrderPayload,
+    onLog?: (log: string) => void
+): Promise<unknown> {
+    const workflowPath = path.resolve(__dirname, "../../../cre/matching-workflow");
+    const projectRoot  = path.resolve(__dirname, "../../../cre");
+
+    return new Promise((resolve, reject) => {
+        const isWindows = process.platform === "win32";
+        const inputStr  = isWindows
+            ? JSON.stringify(payload).replace(/"/g, '\\"')
+            : JSON.stringify(payload);
+
+        console.log(`[cre-client] Matching simulation for orderId: ${payload.orderId}`);
+
+        const child = spawn("cre", [
+            "workflow", "simulate", workflowPath,
+            "--target=staging-settings",
+            "--non-interactive",
+            "--broadcast",
+            "--trigger-index", "0",
+            "--http-payload", inputStr,
+        ], {
+            cwd: projectRoot,
+            stdio: ["ignore", "pipe", "pipe"],
+            shell: isWindows,
+        });
+
+        let stdout = "";
+        let stderr = "";
+
+        child.stdout.on("data", (data) => {
+            const str = data.toString();
+            console.log(`[matching-wf:stdout] ${str.trim()}`);
+            if (onLog) onLog(str);
+            stdout += str;
+        });
+
+        child.stderr.on("data", (data) => {
+            const str = data.toString();
+            console.error(`[matching-wf:stderr] ${str.trim()}`);
+            if (onLog) onLog(str);
+            stderr += str;
+        });
+
+        child.on("close", (code) => {
+            if (code !== 0) {
+                reject(new Error(`Matching workflow failed (exit ${code}): ${stderr || stdout}`));
+                return;
+            }
+            resolve({ output: stdout });
         });
     });
 }

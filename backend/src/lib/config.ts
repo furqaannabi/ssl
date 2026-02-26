@@ -39,6 +39,16 @@ export const config = {
     creGatewayUrl: process.env.CRE_GATEWAY_URL || "https://01.gateway.zone-a.cre.chain.link",
     /** Production-only: 64-char hex workflow ID (no 0x prefix) */
     creWorkflowId: process.env.CRE_WORKFLOW_ID || "",
+
+    /** Convergence private-token vault (ETH Sepolia) */
+    convergenceApiUrl:      process.env.CONVERGENCE_API_URL      || "https://convergence2026-token-api.cldev.cloud",
+    convergenceContract:    process.env.CONVERGENCE_CONTRACT      || "0xE588a6c73933BFD66Af9b4A07d48bcE59c0D2d13",
+    convergenceChainId:     Number(process.env.CONVERGENCE_CHAIN_ID || 11155111),
+
+    /** CRE TEE matching workflow */
+    creCallbackSecret: process.env.CRE_CALLBACK_SECRET || "cre-callback-secret-change-in-production",
+    /** secp256k1 private key — public key published so frontend can encrypt orders for the TEE */
+    creEncryptionKey:  (process.env.CRE_ENCRYPTION_KEY || process.env.EVM_PRIVATE_KEY || "") as `0x${string}`,
 } as const;
 
 /**

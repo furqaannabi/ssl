@@ -1,0 +1,11 @@
+{
+  "authorizedEVMAddress": "0x35134987bB541607Cd45e62Dd1feA4F587607817",
+
+  "creEncryptionPublicKey": "0x0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+
+  "creDecryptionKey": "0x0000000000000000000000000000000000000000000000000000000000000001",
+
+  "backendUrl": "http://localhost:3001",
+
+  "callbackSecret": "cre-callback-secret-change-in-production"
+}
