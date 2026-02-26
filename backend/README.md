@@ -1,75 +1,38 @@
-# SSL Backend API Documentation
+# SSL Backend
 
-Backend service for the Stealth Settlement Layer (SSL). Handles user authentication, World ID verification, order matching, multi-chain vault event listening, withdrawals, CRE integration, **AI financial advisor (Gemini 2.5 Flash via OpenAI-compatible SDK)**, real-time price feeds, and arbitrage detection.
+Bun + Hono HTTP server for the Stealth Settlement Layer. Handles authentication, World ID verification (via CRE), order book management, CRE order matching, Convergence API settlement, AI financial advisor, and real-time price feeds.
 
-## Multi-Chain Architecture
-
-The backend listens for vault events on **all chains with deployed vaults**. Chain configuration is loaded from `addresses.json`:
-
-```json
-{
-  "chains": {
-    "baseSepolia": {
-      "chainId": 84532,
-      "chainSelector": "ethereum-testnet-sepolia-base-1",
-      "ccipChainSelector": "10344971235874465080",
-      "vault": "0x...",
-      "ccipReceiver": "0x...",
-      "usdc": "0x...",
-      "link": "0x...",
-      "ccipRouter": "0x...",
-      "forwarder": "0x...",
-      "wsUrl": "wss://base-sepolia.g.alchemy.com/v2/"
-    },
-    "arbitrumSepolia": { ... }
-  }
-}
-```
-
-Token balances are tracked per-user, per-token, **per-chain** (`chainSelector` in `TokenBalance`). The vault listener spawns one WebSocket connection per active chain and tags all deposits/withdrawals with the chain they occurred on.
+**Chain:** Ethereum Sepolia only.
 
 ---
 
-## Authentication
+## API Reference
 
-The backend uses **SIWE (Sign-In with Ethereum)** and **HttpOnly Cookies** for authentication.
+### Authentication (SIWE)
 
-### 1. Get Nonce
-**GET** `/api/auth/nonce/:address`
+#### Get Nonce
+`GET /api/auth/nonce/:address`
 
-**Response:**
 ```json
-{
-  "nonce": "Sign this message to login to SSL: a1b2c3d4..."
-}
+{ "nonce": "Sign this message to login to SSL: a1b2c3d4..." }
 ```
 
-### 2. Login
-**POST** `/api/auth/login`
+#### Login
+`POST /api/auth/login`
 
-**Request:**
 ```json
-{
-  "address": "0x123...",
-  "signature": "0xabc..."
-}
-```
-
-**Response:**
-```json
-{ "success": true }
+{ "address": "0x123...", "signature": "0xabc..." }
 ```
 
 ---
 
-## User Profile
+### User
 
-### Get Current User
-**GET** `/api/user/me` *(Requires Auth Cookie)*
+#### Get Profile
+`GET /api/user/me` *(auth required)*
 
-Returns user details and token balances across all chains.
+Returns user details and token balances from the Convergence vault.
 
-**Response:**
 ```json
 {
   "success": true,
@@ -77,22 +40,22 @@ Returns user details and token balances across all chains.
     "address": "0x123...",
     "isVerified": true,
     "balances": [
-      { "token": "0xTokenA", "balance": "1000000000000000000", "chainSelector": "ethereum-testnet-sepolia-base-1" },
-      { "token": "0xTokenB", "balance": "500000000", "chainSelector": "ethereum-testnet-sepolia-arbitrum-1" }
+      { "token": "0xTokenA", "balance": "1000000000000000000", "chainSelector": "ethereum-testnet-sepolia" }
     ]
   }
 }
 ```
 
-### Get User Orders
-**GET** `/api/user/orders?status=OPEN` *(Requires Auth Cookie)*
+#### Get User Orders
+`GET /api/user/orders?status=OPEN` *(auth required)*
 
 ---
 
-## Verification
+### World ID Verification
 
-### Verify World ID
-**POST** `/api/verify` *(Requires Auth Cookie)*
+`POST /api/verify` *(auth required)*
+
+Receives the World ID proof from the frontend, forwards it to the CRE `verify-and-order-workflow` via SSE stream. The CRE TEE verifies the proof and calls `onReport(type=0, userAddress)` on the `WorldIDVerifierRegistry` contract.
 
 **Request:**
 ```json
@@ -100,330 +63,160 @@ Returns user details and token balances across all chains.
   "nullifier_hash": "0x...",
   "merkle_root": "0x...",
   "proof": "0x...",
-  "credential_type": "orb",
   "verification_level": "orb",
   "user_address": "0x123..."
 }
 ```
 
-**Response (SSE Stream):**
+**Response (SSE stream):**
 ```json
 {"type": "log", "message": "Starting CRE verification..."}
 {"type": "result", "success": true, "status": "VERIFIED"}
 ```
 
----
-
-## Whitelisted Tokens
-
-### List All Tokens
-**GET** `/api/tokens`
-
-Returns all tokens in the database enriched with RWA metadata and real-time prices (from Finnhub API or mock fallback).
-
-**Response:**
-```json
-{
-  "success": true,
-  "tokens": [
-    {
-      "address": "0x...",
-      "symbol": "tMETA",
-      "name": "SSL Tokenized Meta Platforms",
-      "decimals": 18,
-      "tokenType": "STOCK",
-      "realSymbol": "META",
-      "description": "Meta Platforms Inc.",
-      "price": { "current": 595.20, "change": 3.40, "changePercent": 0.57, "high": 598.10, "low": 591.50 }
-    }
-  ]
-}
-```
-
-### Get Single Token
-**GET** `/api/tokens/:symbol`
+After CRE confirms, the backend sets `User.isVerified = true` in the DB. The on-chain `WorldIDVerifierRegistry` is updated by the CRE TEE forwarder, not the backend directly.
 
 ---
 
-## AI Financial Advisor
+### Tokens
 
-### Chat (Streaming)
-**POST** `/api/chat`
+#### List All Tokens
+`GET /api/tokens`
 
-Streams AI-generated financial advice via SSE. The AI has access to the user's portfolio, live market prices, order book state, and active arbitrage opportunities.
+Returns all RWA tokens with real-time prices (Finnhub API or mock fallback).
 
-**Request:**
-```json
-{
-  "message": "Are there any arbitrage opportunities right now?",
-  "userAddress": "0x123...",
-  "conversationHistory": []
-}
-```
+#### Get Single Token
+`GET /api/tokens/:symbol`
 
-**Response (SSE Stream):**
-```
-data: {"type":"chunk","content":"Looking at the current"}
-data: {"type":"chunk","content":" order book, I found"}
-data: {"type":"chunk","content":" an arbitrage opportunity..."}
-data: {"type":"done","content":"Looking at the current order book, I found an arbitrage opportunity..."}
-```
+#### Get All Prices
+`GET /api/tokens/prices/all`
 
-### Get Arbitrage Opportunities
-**GET** `/api/chat/arbitrage`
-
-Returns active arbitrage opportunities detected by the background monitor (scans every 10s, threshold configurable via `ARBITRAGE_THRESHOLD_PERCENT`).
-
-**Response:**
-```json
-{
-  "success": true,
-  "opportunities": [
-    {
-      "id": "arb-order-uuid",
-      "pairSymbol": "tMETA/USDC",
-      "tokenSymbol": "tMETA",
-      "orderPrice": 290.00,
-      "marketPrice": 300.50,
-      "profitPercent": 3.62,
-      "direction": "BUY",
-      "orderAmount": 10,
-      "potentialProfit": 105.00
-    }
-  ]
-}
-```
-
-### Get All Prices (via chat route)
-**GET** `/api/chat/prices`
-
-### Get Single Price (via chat route)
-**GET** `/api/chat/prices/:symbol`
+#### Get Single Price
+`GET /api/tokens/prices/:symbol`
 
 ---
 
-## RWA Token Prices (standalone)
+### Trading Pairs
 
-Dedicated price endpoints that don't require a database connection -- useful for frontends and external consumers.
+`GET /api/pairs`
 
-### Get All RWA Prices
-**GET** `/api/tokens/prices/all`
-
-Returns all whitelisted RWA token prices with metadata.
-
-**Response:**
-```json
-{
-  "success": true,
-  "prices": [
-    {
-      "symbol": "tMETA",
-      "realSymbol": "META",
-      "name": "Meta Platforms Inc.",
-      "type": "STOCK",
-      "price": 595.20,
-      "change": 3.40,
-      "changePercent": 0.57,
-      "high": 598.10,
-      "low": 591.50,
-      "open": 591.80,
-      "previousClose": 591.80,
-      "timestamp": 1708444800000
-    }
-  ]
-}
-```
-
-### Get Single RWA Price
-**GET** `/api/tokens/prices/:symbol`
-
-Returns price data for a single RWA token by symbol (e.g., `tMETA`, `tAAPL`).
+One pair per RWA symbol (chain-agnostic). Includes base token addresses so the frontend can resolve deposit/withdrawal targets.
 
 ---
 
-## Trading Pairs
+### Orders
 
-### List Pairs
-**GET** `/api/pairs`
+#### Get Order Book
+`GET /api/order/book`
 
-Returns all trading pairs. One pair per RWA symbol (chain-agnostic). Each pair includes available base token addresses per chain so the frontend can let users select which chain to trade on.
+#### Place Order
+`POST /api/order` *(auth required)*
 
-**Response:**
-```json
-{
-  "success": true,
-  "pairs": [
-    {
-      "id": "pair-uuid",
-      "baseSymbol": "tMETA",
-      "quoteSymbol": "USDC",
-      "tokens": [
-        { "address": "0x...", "chainSelector": "ethereum-testnet-sepolia-base-1", "decimals": 18 },
-        { "address": "0x...", "chainSelector": "ethereum-testnet-sepolia-arbitrum-1", "decimals": 18 }
-      ]
-    }
-  ]
-}
-```
+Orders are encrypted with the CRE public key before submission. The CRE TEE decrypts and matches them inside the enclave.
 
----
-
-## Order Management
-
-### Get Orderbook
-**GET** `/api/order/book`
-
-### Place Order
-**POST** `/api/order` *(Requires Auth Cookie)*
-
-**Request:**
 ```json
 {
   "pairId": "pair-uuid",
   "amount": "100",
   "price": "50",
   "side": "BUY",
-  "stealthAddress": "0x1234567890abcdef1234567890abcdef12345678",
+  "stealthAddress": "0x1234...",
   "userAddress": "0x123...",
-  "baseChainSelector": "ethereum-testnet-sepolia-arbitrum-1",
-  "quoteChainSelector": "ethereum-testnet-sepolia-base-1"
+  "encryptedPayload": "<base64 ECIES ciphertext>"
 }
 ```
 
-- `baseChainSelector` -- chain where the RWA token is deposited (used to find vault and resolve base token address)
-- `quoteChainSelector` -- chain where the buyer's USDC is held (may differ from `baseChainSelector` for cross-chain trades)
-- If `quoteChainSelector != baseChainSelector`, the matching engine will initiate a cross-chain CCIP settlement
-
-**Response (SSE Stream):**
+**Response (SSE stream):**
 ```json
-{"type": "log", "message": "Order created. Starting matching engine..."}
+{"type": "log", "message": "Order created. Sending to CRE matching workflow..."}
 {"type": "result", "success": true, "status": "OPEN", "orderId": "order_new_123"}
 ```
 
-### Cancel Order
-**POST** `/api/order/:id/cancel` *(Requires Auth Cookie)*
+#### CRE Settlement Callback
+`POST /api/order/cre-settle` *(CRE-secret required)*
+
+Called by the CRE matching workflow after a match. The backend calls `settleMatch()` on the Convergence API to execute the on-chain transfer to stealth addresses.
+
+#### Cancel Order
+`POST /api/order/:id/cancel` *(auth required)*
 
 ---
 
-## Withdrawals
+### Withdrawals
 
-### Request Withdrawal
-**POST** `/api/withdraw` *(Requires Auth Cookie)*
+#### Request Withdrawal
+`POST /api/withdraw` *(auth required)*
 
-Deducts internal balance, forwards to CRE for on-chain settlement, streams progress. On CRE failure the balance is auto-refunded.
+#### List Withdrawals
+`GET /api/withdraw?status=COMPLETED` *(auth required)*
 
-**Request:**
+---
+
+### AI Financial Advisor
+
+#### Chat (Streaming)
+`POST /api/chat`
+
+Google Gemini 2.5 Flash via OpenAI-compatible SDK. Streams financial advice with context: user portfolio, live market prices, order book, arbitrage opportunities.
+
 ```json
-{
-  "token": "0xTokenA",
-  "amount": "1000000000000000000",
-  "withdrawalId": "42"
-}
+{ "message": "Any arbitrage opportunities?", "userAddress": "0x123...", "conversationHistory": [] }
 ```
 
-**Response (SSE Stream):**
-```json
-{"type": "log", "message": "Balance deducted. Forwarding withdrawal to CRE..."}
-{"type": "result", "success": true, "withdrawalId": "42", "status": "COMPLETED"}
-```
+#### Get Arbitrage Opportunities
+`GET /api/chat/arbitrage`
 
-### List Withdrawals
-**GET** `/api/withdraw?status=COMPLETED` *(Requires Auth Cookie)*
-
----
-
-## Transaction History
-
-### Get Unified History
-**GET** `/api/history` *(Requires Auth Cookie)*
-
-Returns merged, chronologically-sorted orders and on-chain transactions. Each transaction includes a `chainSelector` indicating which chain it occurred on.
-
----
-
-## Price Oracle
-
-### Get Prices
-**GET** `/api/oracle/prices`
-
-Returns simulated live market prices for supported assets.
-
----
-
-## Compliance Dashboard
-
-### Get Stats
-**GET** `/api/compliance/stats`
-
-Returns system-wide compliance metrics: verified user count, ZKP proof stats, and audit log.
-
----
-
-## Multi-Chain Vault Listener
-
-The backend runs WebSocket listeners for **every chain with a vault in `addresses.json`**:
-
-- **`Funded`** -- Upserts user and `Token` record (address + chainSelector); updates `TokenBalance` tagged with `chainSelector`; records a `DEPOSIT` transaction. Trading pairs are **not** auto-created here -- they are seeded at startup by symbol via `seed-tokens.ts`.
-- **`WithdrawalRequested`** -- Validates sufficient balance on the correct chain, atomically deducts balance, forwards to CRE. Skips withdrawals already handled by `/api/withdraw`.
-- **`Settled`** -- Records same-chain settlement in the `Settlement` table.
-- **`CrossChainSettled`** -- Records CCIP bridge initiation (status: `BRIDGING`) with the CCIP message ID. The source vault encodes buyer, seller, rwaToken, and rwaAmount into the CCIP message alongside the USDC transfer so the destination `SSLCCIPReceiver` can atomically complete the full trade.
-- **`TokenReleased`** -- Emitted by the destination chain's `SSLCCIPReceiver` after `ccipSettle` completes (USDC paid to seller, RWA delivered to buyer). Marks settlement as `COMPLETED`.
-
-Each listener reconnects automatically on connection drops (5s backoff).
-
-**Startup sequence:** `seedTokens()` (registers known RWA tokens in DB and upserts one `Pair` per symbol) → `startVaultListener()` (WebSocket event listeners per chain).
+#### Get Prices
+`GET /api/chat/prices`
 
 ---
 
 ## Data Model (Prisma)
 
 ```
-Token (address, name, symbol, decimals, chainSelector)    ← @@unique([address, chainSelector])
-                                                          ← one row per token per chain
-
-Pair (baseSymbol @unique)                                 ← one row per RWA symbol (chain-agnostic)
-  └── Order (pairId, amount, price, side, status,
-             stealthAddress, userAddress,
-             baseChainSelector,                           ← chain where RWA is deposited
-             quoteChainSelector)                          ← chain where buyer's USDC is held
-
-User (address, name, isVerified, nonce)
-  ├── Order[]
-  ├── TokenBalance[] (token, balance, chainSelector)      ← @@unique([userAddress, token, chainSelector])
-  ├── Withdrawal[] (withdrawalId, token, amount, status)
-  ├── Transaction[] (type, token, amount, chainSelector, txHash)
+User (address, isVerified, nonce)
+  ├── Order (pairId, amount, price, side, status, stealthAddress, encryptedPayload)
+  ├── TokenBalance (token, balance, chainSelector)
+  ├── Withdrawal (withdrawalId, token, amount, status)
+  ├── Transaction (type, token, amount, chainSelector, txHash)
   └── Session[]
+
+Token (address, name, symbol, decimals, chainSelector)
+Pair (baseSymbol @unique)
 ```
 
-Order lifecycle: `PENDING` -> `OPEN` -> `MATCHED` -> `SETTLED` (or `CANCELLED`)
-Withdrawal lifecycle: `PENDING` -> `PROCESSING` -> `COMPLETED` | `FAILED`
-
-**Cross-chain detection**: if `quoteChainSelector != baseChainSelector`, the matching engine sends a cross-chain settlement (type=3) via CCIP instead of a same-chain settle (type=1). Token addresses for the base and quote tokens are resolved from the `Token` table by symbol + chainSelector at match time.
+Order lifecycle: `PENDING` → `OPEN` → `MATCHED` → `SETTLED` (or `CANCELLED`)
 
 ---
 
 ## Configuration
 
-### addresses.json
-
-Multi-chain address registry, auto-populated by `contracts/deploy.sh`. Contains per-chain vault, CCIP receiver, USDC, LINK, CCIP router, forwarder, and RPC/WS URLs.
-
-### contracts.json (Legacy)
-
-Single-chain backwards-compat file with `vault`, `bond`, `usdc` for Base Sepolia. Still read by `config.ts` for legacy references.
-
 ### Environment Variables
 
-| Variable | Description |
+| Variable | Description | Required |
+|---|---|---|
+| `EVM_PRIVATE_KEY` | Backend signer — owns the `WorldIDVerifierRegistry` and signs Convergence API calls | Yes |
+| `DATABASE_URL` | PostgreSQL connection string | Yes |
+| `JWT_SECRET` | SIWE session secret | Yes |
+| `CRE_CALLBACK_SECRET` | Shared secret for CRE → backend settlement callback (`X-CRE-Secret`) | Yes |
+| `CRE_ENCRYPTION_KEY` | secp256k1 private key — TEE uses this to decrypt orders | Yes |
+| `CONVERGENCE_API_URL` | Convergence API base URL | Yes |
+| `OPENAI_API_KEY` | Google Gemini API key (via OpenAI-compatible endpoint) | AI chat |
+| `AI_MODEL` | AI model ID (default: `gemini-2.5-flash`) | No |
+| `FINNHUB_API_KEY` | Real-time stock/ETF prices | No (mock used if absent) |
+| `WORLD_ID_REGISTRY` | `WorldIDVerifierRegistry` address (admin helper only) | No |
+
+---
+
+## Key Files
+
+| File | Purpose |
 |---|---|
-| `EVM_PRIVATE_KEY` | Backend signer private key |
-| `ALCHEMY_API_KEY` | Alchemy API key (appended to WS URLs that contain `alchemy.com`) |
-| `JWT_SECRET` | Secret for SIWE session tokens |
-| `DATABASE_URL` | PostgreSQL connection string |
-| `CRE_GATEWAY_URL` | Production CRE gateway (optional) |
-| `CRE_WORKFLOW_ID` | Production CRE workflow ID (optional) |
-| `OPENAI_API_KEY` | API key for AI advisor -- uses Google Gemini via OpenAI-compatible endpoint (required for `/api/chat`) |
-| `AI_MODEL` | AI model ID (default: `gemini-2.5-flash`) |
-| `FINNHUB_API_KEY` | Finnhub API key for real-time stock/ETF prices (optional, mock prices used if absent) |
-| `ARBITRAGE_THRESHOLD_PERCENT` | Min % spread to flag as arbitrage (default: `2.0`) |
-| `ARBITRAGE_CHECK_INTERVAL_MS` | Arbitrage scan interval in ms (default: `10000`) |
+| `src/routes/order.ts` | Order CRUD, CRE settlement callback (`/cre-settle`), encrypted book endpoint |
+| `src/routes/verify.ts` | World ID proof → CRE stream |
+| `src/lib/convergence-client.ts` | Convergence API wrapper (EIP-712 signing, `settleMatch`, `deposit`, `withdraw`) |
+| `src/lib/cre-client.ts` | Sends requests to CRE workflows |
+| `src/lib/matching-engine.ts` | Local plaintext matching fallback (used if CRE unavailable) |
+| `src/lib/config.ts` | Env config |
+| `prisma/schema.prisma` | DB schema |
+| `rwa-tokens.json` | ETH Sepolia token addresses for all 9 RWA tokens + USDC |

@@ -483,85 +483,29 @@ export const Terminal: React.FC = () => {
                             }
                         }}>Max</span>
                      </div>
-                     {/* Chain + balance rows */}
+                     {/* Balance row */}
                      {side === 'BUY' ? (
-                         <div className="space-y-1 mb-1">
-                             {/* RWA receive chain — all supported chains */}
-                             {(() => {
-                                 const selectedPair = pairs.find(p => p.id === selectedPairId);
-                                 if (!selectedPair) return null;
-                                 const toShort = (name: string) => name.replace(' Sepolia','').replace('Arbitrum','Arb');
-                                 return (
-                                     <div className="flex items-center justify-between">
-                                         <div className="flex items-center gap-1 text-[8px] text-slate-500 font-mono uppercase">
-                                             <span>Receive {selectedPair.baseSymbol} on</span>
-                                             <select
-                                                 className="bg-black border border-border-dark text-primary text-[8px] px-1 py-0.5 font-mono rounded-none appearance-none"
-                                                 value={baseChainSelector}
-                                                 onChange={e => setBaseChainSelector(e.target.value)}
-                                             >
-                                                 {Object.values(CHAINS).map(c => (
-                                                     <option key={c.chainSelector} value={c.chainSelector}>
-                                                         {toShort(c.name)}
-                                                     </option>
-                                                 ))}
-                                             </select>
-                                         </div>
-                                     </div>
-                                 );
-                             })()}
-                             {/* USDC pay chain */}
-                             <div className="flex items-center justify-between">
-                                 <div className="flex items-center gap-1 text-[8px] text-slate-500 font-mono uppercase">
-                                     <span>Pay USDC on</span>
-                                     <select
-                                         className="bg-black border border-border-dark text-primary text-[8px] px-1 py-0.5 font-mono rounded-none appearance-none"
-                                         value={quoteChainSelector}
-                                         onChange={e => setQuoteChainSelector(e.target.value)}
-                                     >
-                                         {Object.values(CHAINS).map(c => (
-                                             <option key={c.chainSelector} value={c.chainSelector}>
-                                                 {c.name.replace(' Sepolia','')}
-                                             </option>
-                                         ))}
-                                     </select>
-                                     {quoteChainSelector !== baseChainSelector && <span className="text-yellow-400">⚡</span>}
-                                 </div>
-                                 <span className="text-[9px] text-slate-500 font-mono">
-                                     {(() => {
-                                         const qt = getQuoteToken();
-                                         if (!qt) return "-- USDC";
-                                         const bal = getAvailableBalance(qt.address, qt.decimals || 6, quoteChainSelector);
-                                         return `${bal.toFixed(2)} USDC`;
-                                     })()}
-                                 </span>
-                             </div>
+                         <div className="flex items-center justify-between mb-1">
+                             <span className="text-[8px] text-slate-500 font-mono uppercase">Balance</span>
+                             <span className="text-[9px] text-slate-500 font-mono">
+                                 {(() => {
+                                     const qt = getQuoteToken();
+                                     if (!qt) return "-- USDC";
+                                     const bal = getAvailableBalance(qt.address, qt.decimals || 6, quoteChainSelector);
+                                     return `${bal.toFixed(2)} USDC`;
+                                 })()}
+                             </span>
                          </div>
                      ) : (
-                         /* SELL: chain selector + balance */
                          <div className="flex items-center justify-between mb-1">
                              {(() => {
                                  const selectedPair = pairs.find(p => p.id === selectedPairId);
-                                 if (!selectedPair?.tokens?.length) return null;
-                                 const toShort = (name: string) => name.replace(' Sepolia','').replace('Arbitrum','Arb');
+                                 if (!selectedPair) return null;
                                  const bt = getBaseToken();
                                  const bal = bt ? getAvailableBalance(bt.address, bt.decimals || 18, baseChainSelector) : 0;
                                  return (
                                      <>
-                                         <div className="flex items-center gap-1 text-[8px] text-slate-500 font-mono uppercase">
-                                             <span>{selectedPair.baseSymbol} on</span>
-                                             <select
-                                                 className="bg-black border border-border-dark text-primary text-[8px] px-1 py-0.5 font-mono rounded-none appearance-none"
-                                                 value={baseChainSelector}
-                                                 onChange={e => { setBaseChainSelector(e.target.value); setQuoteChainSelector(e.target.value); }}
-                                             >
-                                                 {selectedPair.tokens.map((t: any) => (
-                                                     <option key={t.chainSelector} value={t.chainSelector}>
-                                                         {toShort(CHAINS[t.chainSelector]?.name || t.chainSelector)}
-                                                     </option>
-                                                 ))}
-                                             </select>
-                                         </div>
+                                         <span className="text-[8px] text-slate-500 font-mono uppercase">Balance</span>
                                          <span className="text-[9px] text-slate-500 font-mono">{bal.toFixed(4)} {selectedPair.baseSymbol}</span>
                                      </>
                                  );

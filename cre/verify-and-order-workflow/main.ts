@@ -29,6 +29,8 @@ type ChainEntry = {
   usdc: string;
   ccipRouter: string;
   forwarder: string;
+  /** WorldIDVerifierRegistry address — when set, verify reports go here instead of vault */
+  worldIdRegistry?: string;
 };
 
 type Config = {
@@ -337,11 +339,15 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
         continue;
       }
 
-      // Step 2: send verification report
+      // Step 2: send verification report.
+      // If a WorldIDVerifierRegistry is configured for this chain, send the report
+      // there (onReport decodes type=0 and sets isVerified[user] = true).
+      // Fall back to the SSL vault for chains that don't have the registry yet.
+      const reportTarget = chainCfg.worldIdRegistry || chainCfg.vault;
       try {
-        const txHash = sendReportToChain(runtime, reportData, chainCfg.chainSelector, chainCfg.vault);
+        const txHash = sendReportToChain(runtime, reportData, chainCfg.chainSelector, reportTarget);
         chainResults[chainName] = txHash;
-        runtime.log(`Verify tx on ${chainName}: ${txHash}`);
+        runtime.log(`Verify tx on ${chainName} → ${reportTarget}: ${txHash}`);
       } catch (err: any) {
         runtime.log(`Verify tx FAILED on ${chainName}: ${err.message}`);
         chainResults[chainName] = "FAILED: " + (err.message || "unknown");

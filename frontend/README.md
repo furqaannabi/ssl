@@ -1,16 +1,16 @@
 # SSL Frontend — Trading Terminal
 
-React + Vite frontend for the Stealth Settlement Layer. A dark-themed trading terminal with World ID verification, stealth address generation, multi-chain order management, and an AI financial advisor chatbot.
+React + Vite frontend for the Stealth Settlement Layer. A dark-themed trading terminal with World ID verification, stealth address generation, order management on **Ethereum Sepolia**, and an AI financial advisor chatbot.
 
 ## Features
 
 - **Wallet Connection** -- RainbowKit (MetaMask, Coinbase Wallet, WalletConnect)
 - **SIWE Authentication** -- Sign-In with Ethereum session management
-- **World ID Verification** -- Sybil-resistant identity proof
+- **World ID Verification** -- Sybil-resistant identity proof (required before depositing via ACE policy)
 - **Stealth Address Generation** -- Client-side one-time addresses for private settlement
 - **Order Entry** -- Limit orders with BUY/SELL on any whitelisted RWA pair
 - **Order Book** -- Real-time obfuscated order book with bid/ask depth
-- **Portfolio** -- Per-chain token balances across Base Sepolia and Arbitrum Sepolia
+- **Portfolio** -- Token balances from the Convergence vault on Ethereum Sepolia
 - **Deposit (Funding)** -- Deposit whitelisted RWA tokens with type badges (STOCK/ETF/BOND/STABLE)
 - **Withdrawal** -- Request withdrawal of deposited tokens
 - **AI Financial Advisor** -- Floating chatbot (bottom-right) powered by Gemini 2.5 Flash:
@@ -23,8 +23,6 @@ React + Vite frontend for the Stealth Settlement Layer. A dark-themed trading te
 - **Transaction History** -- Unified order + on-chain transaction history
 
 ## Whitelisted RWA Tokens
-
-The platform only allows trading of pre-approved tokenized Real World Assets:
 
 | Symbol | Name | Type |
 |---|---|---|
@@ -52,8 +50,6 @@ The app runs at `http://localhost:5173`.
 
 ## Environment
 
-Create a `.env` or configure via Vite env:
-
 | Variable | Description | Default |
 |---|---|---|
 | `VITE_API_URL` | Backend API base URL | `https://arc.furqaannabi.com` |
@@ -66,20 +62,20 @@ frontend/
 ├── components/
 │   ├── AIChatbot.tsx              # AI financial advisor chatbot (floating panel)
 │   ├── Terminal.tsx               # Trading interface with order book
-│   ├── Portfolio.tsx              # Per-chain token balances
-│   ├── FundingModal.tsx           # Token deposit with RWA type badges
+│   ├── Portfolio.tsx              # Token balances from Convergence vault
+│   ├── FundingModal.tsx           # Token deposit (calls Convergence API)
 │   ├── WithdrawalModal.tsx        # Withdrawal request UI
 │   ├── WorldIdKit.tsx             # World ID verification
 │   ├── OracleIndicator.tsx        # Market signal indicator
 │   ├── Compliance.tsx             # Compliance dashboard
 │   ├── History.tsx                # Transaction history
-│   ├── ProfileModal.tsx           # User profile + stealth keys
+│   ├── ProfileModal.tsx           # User profile + shielded address generation
 │   ├── SettingsModal.tsx          # App settings
 │   ├── StealthKeyReveal.tsx       # Stealth key management
 │   └── UI.tsx                     # Shared components (Icon, Button, Modal, Card, Badge, Toast)
 ├── lib/
 │   ├── contracts.ts               # Token addresses, decimals, RWA_TOKENS metadata, ABI fragments
-│   ├── chain-config.ts            # Multi-chain config (Base Sepolia, Arbitrum Sepolia)
+│   ├── chain-config.ts            # Chain config (Ethereum Sepolia)
 │   ├── wagmi.ts                   # Wagmi config
 │   ├── auth.ts                    # SIWE authentication
 │   └── abi/                       # Contract ABIs

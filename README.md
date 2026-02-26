@@ -1,374 +1,207 @@
-# SSL - Stealth Settlement Layer
+# SSL — Stealth Settlement Layer
 
-Private, sybil-resistant, **cross-chain** token settlement using **World ID**, **stealth addresses**, **Chainlink CRE**, and **Chainlink CCIP**.
+Private, sybil-resistant RWA token trading using **World ID**, **stealth addresses**, **Chainlink CRE**, and **Chainlink ACE** — deployed on **Ethereum Sepolia**.
 
 ## How It Works
 
 ```
-User ──> Backend (order book + matching) ──> CRE (settlement reports) ──> Vault (on-chain, per chain)
-         Vault ──> Backend (multi-chain event listener: balances, auto-create pairs)
-         Vault ──CCIP──> CCIP Receiver (dest chain) ──> Dest Vault (accounting)
+User ──> Backend (order book + CRE matching) ──> Convergence Vault (on-chain settlement)
+                                                           │
+                              WorldIDVerifierRegistry ◄─── CRE TEE (World ID verify)
+                                      │
+                              WorldIDPolicy (ACE) ──> blocks unverified deposits
 ```
 
-### Supported Chains
-
-| Chain | Chain ID | CCIP Selector |
-|---|---|---|
-| Base Sepolia | 84532 | `10344971235874465080` |
-| Arbitrum Sepolia | 421614 | `3478487238524512106` |
-
-Chain constants (including LINK token addresses) live in `contracts/script/Config.sol` (`SSLChains` library) and `backend/addresses.json`.
-
-### Phase 1: Identity Verification
-
-```
-User                    Backend                 CRE                     Vault
- │                        │                      │                       │
- │── World ID proof ────> │                      │                       │
- │                        │── HTTP {action:       │                       │
- │                        │   "verify",           │                       │
- │                        │   userAddress} ─────> │                       │
- │                        │                       │── verify proof via    │
- │                        │                       │   World ID cloud API  │
- │                        │                       │── for each chain:     │
- │                        │                       │   read isVerified()   │
- │                        │                       │   (callContract)      │
- │                        │                       │── if not verified:    │
- │                        │                       │   report(type=0) ──> │
- │                        │                       │   encode(uint8=0,    │
- │                        │                       │    address user)     │
- │                        │                       │                      │── isVerified[user]
- │                        │                       │                      │   = true
- │ <── verified ────────  │                       │                       │
-```
-
-- Backend receives World ID proof from frontend (authenticated via SIWE session)
-- CRE calls the World ID cloud API to verify the proof
-- CRE reads `isVerified(userAddress)` on-chain for each target chain via `EVMClient.callContract`
-- Skips chains where the user is already verified; only sends `report(type=0)` to unverified chains
-- Vault marks `isVerified[user] = true`
-- Optional `selectedChains` array in the request limits verification to specific chains
-
-### Phase 2: Funding (Multi-Chain)
-
-```
-User                    Vault (any chain)       Backend Listener
- │                        │                       │
- │── fund(token, amount)─>│                       │
- │                        │── emit Funded ───────────> │
- │                        │                       │── track chainSelector
- │                        │                       │── upsert Token (address, chain)
- │                        │                       │── upsert TokenBalance (per chain)
-```
-
-- User calls `fund(token, amount)` on the vault (requires `isVerified[msg.sender]`)
-- Backend runs a **multi-chain listener** -- one WebSocket connection per chain with a deployed vault
-- Each deposit is tracked with a `chainSelector`, so balances are per-user-per-token-per-chain
-- Trading pairs (one per RWA symbol) are seeded at startup by `seed-tokens.ts`, not auto-created on deposit
-
-### Phase 3: Order Submission
-
-```
-User                    Backend
- │── POST /api/order ──> │── create Order (PENDING)
- │  {pairId, side,       │   with baseChainSelector
- │   baseChainSelector,  │   + quoteChainSelector
- │   quoteChainSelector} │
- │ <── {orderId} ─────── │
- │── POST /confirm ────> │── activate -> OPEN
- │ <── SSE stream ─────  │── run matching engine
-```
-
-- Two-step: create order + confirm with auth cookie
-- Orders include a `stealthAddress` (Ethereum address generated client-side) for private settlement
-- `baseChainSelector` -- the chain where the RWA token is deposited (vault to call for settlement)
-- `quoteChainSelector` -- the chain where the buyer's USDC is held (may differ for cross-chain trades)
-- Matching engine runs immediately on confirmation; matches require the same `baseChainSelector` and `pairId`
-
-### Phase 4: Settlement (Same-Chain & Cross-Chain)
-
-**Same-chain settlement** (`quoteChainSelector == baseChainSelector`):
-```
-Backend ──> CRE ──> report(type=1) ──> Vault (baseChain)
-                    tradeAmount (base wei)              │── transfer baseToken → stealthBuyer  (amountA)
-                    quoteAmount (USDC wei)              └── transfer quoteToken → stealthSeller (amountB)
-```
-
-**Cross-chain settlement** (`quoteChainSelector != baseChainSelector`) via CCIP:
-```
-Backend ──> CRE ──> report(type=3) ──> Source Vault (quoteChain) ──CCIP(USDC + encoded settlement data)──> SSLCCIPReceiver (destChain)
-                                                                                                              │
-                                                                                                              ├── transfers bridged USDC to seller (stealthSeller)
-                                                                                                              └── calls vault.ccipSettle(orderId, buyer, rwaToken, rwaAmount)
-                                                                                                                    └── vault transfers RWA to buyer (stealthBuyer), marks order settled
-```
-
-For cross-chain trades (e.g. buy Token X on Arbitrum using USDC on Base):
-- CRE sends **one report** (type=3) to the source vault (where buyer's USDC is held)
-- Source vault encodes `(orderId, buyer, seller, rwaToken, rwaAmount)` as CCIP message data alongside `quoteAmount` USDC and calls `ccipSend` to the **SSLCCIPReceiver** on the destination chain
-- The receiver atomically pays the seller their USDC and calls `vault.ccipSettle()` so the vault delivers the RWA token to the buyer — one CCIP message, full atomic settlement
-- `tradeAmount` (base token) and `quoteAmount` (USDC) are separate wei values with correct decimal precision
-- CCIP fees are paid in LINK from the vault's balance (vault is seeded with 2 LINK on deploy)
-
-### Phase 5: Withdrawal
-
-```
-User ── requestWithdrawal ──> Vault ── event ──> Backend Listener ──> CRE
-                              Vault <── report(type=2) ── CRE
-                              Vault ── safeTransfer ──> User
-```
-
-### Report Types
-
-| Type | Name | Encoding |
-|---|---|---|
-| 0 | verify | `(uint8, address user)` |
-| 1 | settle | `(uint8, bytes32 orderId, address stealthBuyer, address stealthSeller, address tokenA, address tokenB, uint256 amountA, uint256 amountB)` |
-| 2 | withdraw | `(uint8, address user, uint256 withdrawalId)` |
-| 3 | crossChainSettle | `(uint8, bytes32 orderId, uint64 destChainSelector, address destReceiver, address buyer, address seller, address usdcToken, uint256 usdcAmount, address rwaToken, uint256 rwaAmount)` |
-
-### What's On-Chain vs Off-Chain
-
-| Data | Location | Visible? |
-|---|---|---|
-| User verified status | On-chain (vault) | Yes |
-| Token deposits | On-chain (vault, per chain) | Yes |
-| Trading pairs (Token, Pair) | Backend DB | No |
-| Order book (prices, amounts, sides) | Backend DB (PostgreSQL) | No |
-| Match logic | Backend (matching engine) | No |
-| Stealth addresses | Frontend-generated | Not linked to user |
-| Settlement transfers | On-chain (vault) | Stealth addresses only |
-| Cross-chain bridges | On-chain (CCIP) | Yes, but stealth |
-| User balances | Backend DB (per chain) | No |
-
-## Architecture
+### Components
 
 | Component | Description |
 |---|---|
-| **contracts/** | Solidity -- `StealthSettlementVault` (with token whitelist), `SSLCCIPReceiver`, `SSLChains` config library, `ReceiverTemplate`, `MockRWAToken`, interfaces, mocks |
-| **cre/** | Chainlink CRE workflow -- World ID verification, settlement reports (same-chain + cross-chain) |
-| **backend/** | Bun + Hono -- Auth, order book, matching engine, multi-chain vault listener, CRE bridge, **AI financial advisor (Gemini 2.5 Flash)**, price feed service, arbitrage monitor |
-| **frontend/** | React + Vite trading terminal with World ID integration and **AI chatbot** |
+| **Compliant-Private-Transfer-Demo/** | Solidity contracts — `WorldIDVerifierRegistry`, `WorldIDPolicy` (ACE), deployment scripts |
+| **cre/matching-workflow/** | CRE TEE — decrypts orders, runs private matching, calls Convergence API |
+| **cre/verify-and-order-workflow/** | CRE TEE — verifies World ID proofs, sends on-chain reports to `WorldIDVerifierRegistry` |
+| **backend/** | Bun + Hono — auth, order book, AI advisor, price feeds, CRE bridge |
+| **frontend/** | React + Vite — trading terminal, World ID widget, AI chatbot |
 
-### Contracts
+---
 
-- **StealthSettlementVault** -- Holds deposited tokens. Deployed per chain. Accepts 4 report types from CRE via KeystoneForwarder (see table above). For cross-chain trades, initiates CCIP programmable token transfers of USDC + encoded data to the destination chain. CCIP fees paid in LINK. Enforces **token whitelist** -- only owner-approved RWA tokens can be deposited.
-- **SSLCCIPReceiver** -- Standalone CCIP receiver deployed per chain. Receives USDC + encoded `(orderId, buyer, seller, rwaToken, rwaAmount)` via CCIP, atomically pays the seller their USDC, and calls `vault.ccipSettle()` so the vault delivers the RWA token to the buyer and marks the order settled.
-- **SSLChains** (`Config.sol`) -- Pure helper library with chain constants (CCIP selectors, router addresses, forwarder addresses). No deployment needed -- used by deploy scripts and referenced off-chain.
-- **ReceiverTemplate** -- Abstract base that validates reports come from the trusted forwarder
-- **ISSLVault** -- Vault interface (fund, requestWithdrawal, isVerified, settledOrders, events including `CrossChainSettled`, `TokenReleased`, `TokenWhitelisted`, `TokenRemoved`)
-- **MockRWAToken** -- Generic mock ERC-20 for deploying tokenized stocks, ETFs, and bonds (tMETA, tGOOGL, tAAPL, etc.)
+## Architecture
 
-### CRE Workflow (`cre/verify-and-order-workflow/main.ts`)
+### Chain
 
-Single HTTP trigger with three actions:
+All contracts and vaults are on **Ethereum Sepolia** (chain ID 11155111).
 
-- `verify` -- Validates World ID proof via cloud API, then reads `isVerified(userAddress)` on each target chain via `EVMClient.callContract`. Only writes `report(type=0)` on chains where the user is not yet verified. Supports optional `selectedChains` to restrict which chains are checked.
-- `settle_match` -- Receives matched order data from backend (including separate `tradeAmount` for the base token and `quoteAmount` for USDC, plus `baseChainSelector`). Routes settlement to the vault on `baseChainSelector` via `report(type=1)`. For cross-chain trades, sends `report(type=3)` to the source vault which bridges `quoteAmount` USDC + full settlement data (buyer, seller, rwaToken, rwaAmount) via CCIP to the destination chain's `SSLCCIPReceiver` for atomic settlement.
-- `withdraw` -- Receives withdrawal request, writes withdrawal report `(type=2)` to vault
+### Convergence Vault
 
-### Backend (`backend/`)
+The private token vault is provided by the [Convergence API](https://convergence2026-token-api.cldev.cloud/). It holds deposited RWA tokens and USDC and executes settlement transfers.
 
-Bun + Hono HTTP server with PostgreSQL (Prisma ORM):
+- Vault address: `0xE588a6c73933BFD66Af9b4A07d48bcE59c0D2d13`
+- Tokens are registered in the vault via `IVault.register(token, policyEngine)` with a per-token `PolicyEngine` proxy.
 
-- **Auth** (SIWE) -- `GET /api/auth/nonce/:address` + `POST /api/auth/login`
-- **Verify** -- `POST /api/verify` -- Forwards World ID proof to CRE, streams via SSE
-- **Orders** -- `POST /api/order` + `POST /api/order/:id/confirm` + `POST /api/order/:id/cancel` + `GET /api/order/book`
-- **Pairs** -- `GET /api/pairs` -- Lists all trading pairs with token metadata
-- **Tokens** -- `GET /api/tokens` -- Lists all whitelisted RWA tokens with real-time prices + `GET /api/tokens/:symbol` + `GET /api/tokens/prices/all` + `GET /api/tokens/prices/:symbol`
-- **User** -- `GET /api/user/me` (profile + balances per chain) + `GET /api/user/orders`
-- **Withdrawals** -- `POST /api/withdraw` + `GET /api/withdraw`
-- **AI Chat** -- `POST /api/chat` (SSE streaming GPT-4o financial advisor) + `GET /api/chat/arbitrage` + `GET /api/chat/prices`
-- **Multi-Chain Vault Listener** -- Watches on-chain events on **all chains with deployed vaults**:
-  - `Funded` -- Upserts user + Token record (by address + chainSelector), updates TokenBalance (chain-aware); trading pairs are NOT auto-created here -- they are seeded once at startup by symbol
-  - `WithdrawalRequested` -- Validates balance, deducts, forwards to CRE
-- **Matching Engine** -- Price/time priority matching. On match: resolves token addresses from DB by symbol + chainSelector, computes `tradeAmount` (base token wei) and `quoteAmount` (USDC wei) independently with correct decimals, sends both to CRE
+### Compliance (Chainlink ACE)
 
-#### Data Model (Prisma)
+Every token in the vault has a `PolicyEngine` with a `WorldIDPolicy` attached. Before any `deposit()` call succeeds, the policy checks `WorldIDVerifierRegistry.isVerified(caller)` on-chain.
+
+- **Unverified caller** → `deposit()` reverts: `PolicyRejected("World ID verification required to deposit")`
+- **Verified caller** → deposit proceeds normally
+
+### Phase 1 — Identity Verification
 
 ```
-Token (address, name, symbol, decimals, chainSelector)   ← one row per token per chain
-
-Pair (baseSymbol @unique)                                 ← one row per RWA symbol (chain-agnostic)
-  └── Order (pairId, amount, price, side, status,
-             stealthAddress, userAddress,
-             baseChainSelector, quoteChainSelector)       ← per-order chain context
-
-User (address, name, isVerified, nonce)
-  ├── Order[]
-  ├── TokenBalance[] (token, balance, chainSelector)      ← per-chain
-  ├── Withdrawal[] (withdrawalId, token, amount, status)
-  ├── Transaction[] (type, token, amount, chainSelector)
-  └── Session[]
-Settlement (orderId, type, status, sourceChain, destChain, ccipMessageId, ...)
+User                  Backend                  CRE TEE (verify-and-order-workflow)
+ │                       │                               │
+ │── World ID proof ────>│                               │
+ │                       │── POST {action: "verify"} ───>│
+ │                       │                               │── verify proof via World ID cloud API
+ │                       │                               │── onReport(type=0, userAddress) ──>
+ │                       │                               │         WorldIDVerifierRegistry
+ │                       │                               │               │── isVerified[user] = true
+ │ <── VERIFIED (SSE) ───│                               │
 ```
 
-#### Multi-Chain Configuration
+- Backend updates `User.isVerified = true` in DB after CRE confirms.
+- On-chain registry is updated by the CRE TEE forwarder, not the backend.
 
-All chain addresses are stored in `backend/addresses.json`:
+### Phase 2 — Order Matching (Private)
 
-```json
-{
-    "chains": {
-        "baseSepolia": {
-            "chainId": 84532,
-            "chainSelector": "ethereum-testnet-sepolia-base-1",
-            "ccipChainSelector": "10344971235874465080",
-            "vault": "0x...",
-            "usdc": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-            "link": "0xE4aB69C077896252FAFBD49EFD26B5D171A32410",
-            "ccipRouter": "0xD3b06cEbF099CE7DA4AcCf578aaEBFDBd6e88a93",
-            "forwarder": "0x82300bd7c3958625581cc2F77bC6464dcEcDF3e5",
-            "rpcUrl": "https://base-sepolia.g.alchemy.com/v2/",
-            "wsUrl": "wss://base-sepolia.g.alchemy.com/v2/"
-        },
-        "arbitrumSepolia": { ... }
-    }
-}
+```
+User                  Backend                  CRE TEE (matching-workflow)
+ │                       │                               │
+ │── POST /api/order ───>│── encrypt(order, creKey)      │
+ │                       │── POST {action: "match_order"}─>│
+ │                       │                               │── decrypt incoming order (TEE only)
+ │                       │                               │── fetch encrypted order book
+ │                       │                               │── match in-memory (invisible)
+ │                       │                               │── POST /api/order/cre-settle ──>│
+ │                       │ <── settlement callback        │                                │
+ │                       │── Convergence API settleMatch()│
 ```
 
-The deploy script (`contracts/deploy.sh`) auto-populates this file after each deployment.
+Orders are encrypted client-side with ECIES (secp256k1 + AES-256-GCM). Only the CRE TEE can decrypt them. Matching runs entirely inside the enclave — no operator can see plaintext order data.
+
+### Phase 3 — Settlement
+
+The CRE matching workflow calls back `POST /api/order/cre-settle` with the matched order details. The backend then calls `settleMatch()` via the Convergence API, which executes the on-chain token transfer to stealth addresses.
+
+### Stealth Addresses
+
+Every order includes a **stealth address** generated client-side — a fresh Ethereum address with no on-chain history linked to the user. Settlement transfers go to this address, so the on-chain record never reveals the real trader.
+
+---
+
+## Report Types (verify-and-order-workflow)
+
+| Type | Name | Encoding |
+|---|---|---|
+| 0 | verify | `(uint8, address user)` — sent to `WorldIDVerifierRegistry` |
+| 1 | settle | `(uint8, bytes32 orderId, address stealthBuyer, address stealthSeller, address tokenA, address tokenB, uint256 amountA, uint256 amountB)` |
+| 2 | withdraw | `(uint8, address user, uint256 withdrawalId)` |
+
+---
+
+## Key Addresses (Ethereum Sepolia)
+
+| Contract | Address |
+|---|---|
+| Convergence Vault | `0xE588a6c73933BFD66Af9b4A07d48bcE59c0D2d13` |
+| CRE Forwarder | `0x15fC6ae953E024d975e77382eEeC56A9101f9F88` |
+| WorldIDVerifierRegistry | Deployed via `Compliant-Private-Transfer-Demo/script/03_DeployWorldIDPolicy.s.sol` |
+
+---
+
+## Whitelisted RWA Tokens
+
+| Symbol | Name | Type |
+|---|---|---|
+| tMETA | Meta Platforms | STOCK |
+| tGOOGL | Alphabet Inc. | STOCK |
+| tAAPL | Apple Inc. | STOCK |
+| tTSLA | Tesla Inc. | STOCK |
+| tAMZN | Amazon.com | STOCK |
+| tNVDA | NVIDIA Corp | STOCK |
+| tSPY | S&P 500 ETF | ETF |
+| tQQQ | Nasdaq 100 ETF | ETF |
+| tBOND | US Treasury Bond | BOND |
+| USDC | USD Coin | STABLE |
+
+---
 
 ## Setup
 
 ### Prerequisites
 
-- [Foundry](https://book.getfoundry.sh/) (forge, cast)
-- [Bun](https://bun.sh/) (v1.2+)
-- [CRE CLI](https://docs.chain.link/cre) (`cre`)
+- [Foundry](https://book.getfoundry.sh/) (for compliance contracts)
+- [Bun](https://bun.sh/) v1.2+
+- [CRE CLI](https://docs.chain.link/cre)
 - PostgreSQL
 
-### Contracts
-
-CCIP contracts are installed via npm (`@chainlink/contracts-ccip` in `node_modules`). `remappings.txt` and `foundry.toml` are pre-configured.
+### Compliance Contracts (Compliant-Private-Transfer-Demo)
 
 ```bash
-cd contracts
-npm install        # or: bun install
-forge build
-forge test -vv
+cd Compliant-Private-Transfer-Demo
+forge install
+forge build --via-ir
+
+export PRIVATE_KEY=<0xyour_private_key>
+export RPC_URL=<eth_sepolia_rpc_url>
+
+# Step 1: Register SSL tokens in the Convergence vault
+forge script script/RegisterAllSSLTokens.s.sol \
+  --rpc-url $RPC_URL --broadcast --private-key $PRIVATE_KEY
+
+# Step 2: Deploy World ID compliance layer
+forge script script/03_DeployWorldIDPolicy.s.sol \
+  --rpc-url $RPC_URL --broadcast --private-key $PRIVATE_KEY
 ```
 
-### Deploy (Multi-Chain)
-
-```bash
-cd contracts
-./deploy.sh                     # deploy to all chains
-CHAIN=baseSepolia ./deploy.sh   # deploy to Base Sepolia only
-CHAIN=arbitrumSepolia ./deploy.sh  # deploy to Arb Sepolia only
-```
-
-### Deploy RWA Tokens
-
-After deploying the vault, deploy all tokenized RWA assets and whitelist them (including USDC):
-
-```bash
-cd contracts
-./deploy-rwa.sh                          # deploy to all chains
-CHAIN=baseSepolia ./deploy-rwa.sh        # single chain
-```
-
-Or manually via forge:
-
-```bash
-VAULT_ADDRESS=0x... forge script script/DeployRWATokens.s.sol:DeployRWATokens --rpc-url baseSepolia --broadcast
-```
-
-This deploys 9 tokens (tMETA, tGOOGL, tAAPL, tTSLA, tAMZN, tNVDA, tSPY, tQQQ, tBOND), mints initial supply, whitelists each on the vault, and auto-whitelists USDC (resolved per-chain from `SSLChains`).
-
-The `deploy-rwa.sh` script:
-1. Reads env from `backend/.env`
-2. Reads vault address from `backend/addresses.json`
-3. Runs `forge script` against each chain's RPC
-4. Extracts deployed addresses from broadcast files
-5. Writes `backend/rwa-tokens.json` with per-chain token addresses
-
-Environment variables: `PRIVATE_KEY` (required), `FORWARDER_ADDRESS` / `CCIP_ROUTER` / `LINK_TOKEN` (optional overrides, auto-resolved from `SSLChains`). `LINK_FUND` controls how much LINK to seed the vault with (default 2 LINK).
+Copy the printed `WorldIDVerifierRegistry` address into `cre/verify-and-order-workflow/config.staging.json` → `chains.ethSepolia.worldIdRegistry`.
 
 ### Backend
 
 ```bash
 cd backend
-cp .env.example .env   # configure EVM_PRIVATE_KEY, ALCHEMY_API_KEY, JWT_SECRET, DATABASE_URL
+cp .env.example .env   # set EVM_PRIVATE_KEY, DATABASE_URL, etc.
 bun install
 npx prisma migrate dev
 bun run dev
 ```
 
-Additional env vars for AI advisor and price feeds:
-
-| Variable | Description | Required |
-|---|---|---|
-| `OPENAI_API_KEY` | API key for AI chat advisor (Google Gemini via OpenAI-compatible endpoint) | Yes (for AI chat) |
-| `AI_MODEL` | AI model ID (default: `gemini-2.5-flash`) | No |
-| `FINNHUB_API_KEY` | Finnhub API key for real-time stock prices | No (mock prices used if absent) |
-| `ARBITRAGE_THRESHOLD_PERCENT` | Min % spread to flag as arbitrage (default: `2.0`) | No |
-| `ARBITRAGE_CHECK_INTERVAL_MS` | Arbitrage scan interval in ms (default: `10000`) | No |
-
-### CRE Workflow
+### CRE Workflows
 
 ```bash
-cd cre/verify-and-order-workflow
-bun install
+cd cre/matching-workflow && bun install
+cd cre/verify-and-order-workflow && bun install
 ```
 
-Simulate locally:
-
+Simulate:
 ```bash
-cd cre
+cre workflow simulate matching-workflow --target=staging-settings
 cre workflow simulate verify-and-order-workflow --target=staging-settings
 ```
 
 ### Frontend
 
 ```bash
-cd frontend
-bun install
-bun run dev
+cd frontend && bun install && bun run dev
 ```
+
+---
 
 ## Tech Stack
 
-- **Solidity** (Foundry) -- Smart contracts (vault with token whitelist, config library, receiver, RWA token mocks)
-- **Chainlink CRE** -- Off-chain confidential compute (verification, settlement reports)
-- **Chainlink CCIP** -- Cross-chain token bridging for multi-chain settlement
-- **World ID** (`@worldcoin/idkit`) -- Sybil-resistant identity verification
-- **Stealth Addresses** -- Frontend-generated one-time addresses for private settlement
-- **Google Gemini 2.5 Flash** -- AI financial advisor chatbot (via OpenAI-compatible SDK) with streaming responses, portfolio analysis, and arbitrage detection
-- **Finnhub API** -- Real-time stock/ETF price feeds (maps tokenized RWA symbols to real tickers)
-- **Bun + Hono** -- Backend HTTP server
-- **PostgreSQL + Prisma** -- Order book, user data, per-chain token balances, trading pairs
-- **ethers.js** -- Multi-chain event listening (vault deposits, withdrawals)
-- **viem** -- ABI encoding, keccak256, signature verification
-- **OpenZeppelin** -- SafeERC20, ReentrancyGuard, Ownable
-- **React 19 + Vite + TailwindCSS** -- Frontend trading terminal with AI chatbot
+- **Solidity + Foundry** — WorldIDVerifierRegistry, WorldIDPolicy (Chainlink ACE)
+- **Chainlink CRE** — Confidential order matching, World ID verification reports
+- **Chainlink ACE** — On-chain compliance policy (WorldIDPolicy blocks unverified deposits)
+- **Convergence API** — Private RWA token vault + settlement
+- **World ID** — Sybil-resistant proof-of-humanity
+- **Stealth Addresses** — Client-side one-time addresses for private settlement
+- **Google Gemini 2.5 Flash** — AI financial advisor (OpenAI-compatible SDK)
+- **Finnhub API** — Real-time stock/ETF price feeds
+- **Bun + Hono** — Backend HTTP server
+- **PostgreSQL + Prisma** — Order book, user data, trading pairs
+- **viem** — ABI encoding, signature verification
+- **React 19 + Vite + TailwindCSS** — Frontend trading terminal
 
-## Whitelisted RWA Tokens
-
-Only pre-approved Real World Asset tokens can be deposited and traded. The vault enforces this on-chain via a whitelist.
-
-| Symbol | Name | Type | Real Ticker |
-|---|---|---|---|
-| tMETA | Meta Platforms | STOCK | META |
-| tGOOGL | Alphabet Inc. | STOCK | GOOGL |
-| tAAPL | Apple Inc. | STOCK | AAPL |
-| tTSLA | Tesla Inc. | STOCK | TSLA |
-| tAMZN | Amazon.com | STOCK | AMZN |
-| tNVDA | NVIDIA Corp | STOCK | NVDA |
-| tSPY | S&P 500 ETF | ETF | SPY |
-| tQQQ | Nasdaq 100 ETF | ETF | QQQ |
-| tBOND | US Treasury Bond | BOND | TLT |
-| USDC | USD Coin | STABLE | -- |
-
-## AI Financial Advisor
-
-The platform includes an AI-powered financial advisor chatbot (bottom-right floating button) that:
-
-- Analyzes user portfolio holdings with real-time market prices
-- Detects **arbitrage opportunities** when order book prices differ from real market prices (e.g., sell order at $290 when market is $300)
-- Provides actionable trade suggestions with specific prices and profit calculations
-- Streams responses in real-time via SSE (Server-Sent Events)
-- Uses Gemini 2.5 Flash with dynamic context including portfolio, market data, order book, and active arbitrage opportunities
+---
 
 ## License
 

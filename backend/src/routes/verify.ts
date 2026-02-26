@@ -12,7 +12,6 @@ import { streamText } from 'hono/streaming'
 import { authMiddleware } from "../middleware/auth";
 import prisma from "../clients/prisma";
 
-
 type Variables = {
     user: string;
     sessionId: string;
@@ -74,7 +73,8 @@ verify.post("/", authMiddleware, async (c) => {
                     await stream.writeln(JSON.stringify({ type: 'log', message: log }));
                 });
 
-                // Update User status
+                // Update User status in DB.
+                // On-chain registry is updated by the CRE TEE (via onReport on WorldIDVerifierRegistry).
                 await prisma.user.update({
                     where: { address: userAddress },
                     data: { isVerified: true },
