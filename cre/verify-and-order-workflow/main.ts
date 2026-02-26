@@ -190,9 +190,12 @@ function checkIsVerified(runtime: Runtime<Config>, chainCfg: ChainEntry, userAdd
     args: [userAddress as `0x${string}`],
   });
 
+  // Read from WorldIDVerifierRegistry if configured, fall back to vault (legacy)
+  const registryTarget = (chainCfg.worldIdRegistry || chainCfg.vault) as `0x${string}`;
+
   const reply = evmClient.callContract(runtime, {
     call: {
-      to: hexToBase64(chainCfg.vault as `0x${string}`),
+      to: hexToBase64(registryTarget),
       data: hexToBase64(callData),
     },
   }).result();

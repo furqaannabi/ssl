@@ -67,9 +67,11 @@ User                  Backend                  CRE TEE (verify-and-order-workflo
 User                  Backend                  CRE TEE (matching-workflow)
  │                       │                               │
  │── POST /api/order ───>│── encrypt(order, creKey)      │
- │                       │── POST {action: "match_order"}─>│
+ │  (isVerified required) │── POST {action: "match_order"}─>│
  │                       │                               │── decrypt incoming order (TEE only)
  │                       │                               │── fetch encrypted order book
+ │                       │                               │── check isVerified(buyer) on-chain
+ │                       │                               │── check isVerified(seller) on-chain
  │                       │                               │── match in-memory (invisible)
  │                       │                               │── POST /api/order/cre-settle ──>│
  │                       │ <── settlement callback        │                                │
@@ -78,13 +80,15 @@ User                  Backend                  CRE TEE (matching-workflow)
 
 Orders are encrypted client-side with ECIES (secp256k1 + AES-256-GCM). Only the CRE TEE can decrypt them. Matching runs entirely inside the enclave — no operator can see plaintext order data.
 
+The matching workflow checks `WorldIDVerifierRegistry.isVerified(userAddress)` on-chain for **both buyer and seller** before settlement proceeds. The backend `cre-settle` route also re-checks from the registry as a second guard.
+
 ### Phase 3 — Settlement
 
-The CRE matching workflow calls back `POST /api/order/cre-settle` with the matched order details. The backend then calls `settleMatch()` via the Convergence API, which executes the on-chain token transfer to stealth addresses.
+The CRE matching workflow calls back `POST /api/order/cre-settle` with the matched order details. The backend verifies both parties against the on-chain registry, then calls `settleMatch()` via the Convergence API, which executes the on-chain token transfer to shield addresses.
 
-### Stealth Addresses
+### Shield Addresses
 
-Every order includes a **stealth address** generated client-side — a fresh Ethereum address with no on-chain history linked to the user. Settlement transfers go to this address, so the on-chain record never reveals the real trader.
+Every order includes a **shield address** generated client-side — a fresh Ethereum address with no on-chain history linked to the user. Settlement transfers go to this address, so the on-chain record never reveals the real trader.
 
 ---
 
@@ -104,7 +108,8 @@ Every order includes a **stealth address** generated client-side — a fresh Eth
 |---|---|
 | Convergence Vault | `0xE588a6c73933BFD66Af9b4A07d48bcE59c0D2d13` |
 | CRE Forwarder | `0x15fC6ae953E024d975e77382eEeC56A9101f9F88` |
-| WorldIDVerifierRegistry | Deployed via `Compliant-Private-Transfer-Demo/script/03_DeployWorldIDPolicy.s.sol` |
+| USDC | `0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d` |
+| WorldIDVerifierRegistry | `0xb1eA4506e10e4Be8159ABcC7A7a67C614a13A425` |
 
 ---
 
@@ -153,7 +158,12 @@ forge script script/03_DeployWorldIDPolicy.s.sol \
   --rpc-url $RPC_URL --broadcast --private-key $PRIVATE_KEY
 ```
 
-Copy the printed `WorldIDVerifierRegistry` address into `cre/verify-and-order-workflow/config.staging.json` → `chains.ethSepolia.worldIdRegistry`.
+Copy the printed `WorldIDVerifierRegistry` address into:
+- `cre/verify-and-order-workflow/config.staging.json` → `chains.ethSepolia.worldIdRegistry`
+- `cre/matching-workflow/config.staging.json` → `worldIdRegistry`
+- `backend/.env` → `WORLD_ID_REGISTRY`
+
+The registry is already deployed at `0xb1eA4506e10e4Be8159ABcC7A7a67C614a13A425`.
 
 ### Backend
 

@@ -5,6 +5,7 @@ import { FundingModal } from './FundingModal';
 import { useConnection } from 'wagmi';
 import { CHAINS } from '../lib/chain-config';
 import { auth } from '../lib/auth';
+import { ETH_SEPOLIA_TOKENS } from '../lib/contracts';
 
 export const Terminal: React.FC = () => {
   const { toast } = useToast();
@@ -27,8 +28,8 @@ export const Terminal: React.FC = () => {
   const [logs, setLogs] = useState<string[]>([]);
   const [orderBook, setOrderBook] = useState<{bids: any[], asks: any[]}>({ bids: [], asks: [] });
   const [pairs, setPairs] = useState<any[]>([]);
-  const [baseChainSelector, setBaseChainSelector] = useState<string>('');
-  const [quoteChainSelector, setQuoteChainSelector] = useState<string>('');
+  const [baseChainSelector, setBaseChainSelector] = useState<string>('ethereum-testnet-sepolia');
+  const [quoteChainSelector, setQuoteChainSelector] = useState<string>('ethereum-testnet-sepolia');
   const [balances, setBalances] = useState<Array<{ token: string; chainSelector: string; balance: string }>>([]); // Raw balance entries from backend
   const [tokenLookup, setTokenLookup] = useState<Record<string, any>>({}); // address -> token metadata (symbol, decimals)
   // Fetch Data
@@ -39,15 +40,18 @@ export const Terminal: React.FC = () => {
             fetch(`${API_URL}/api/tokens`),
         ]);
 
-        // Build address->metadata lookup from /api/tokens
+        // Build address->metadata lookup from /api/tokens, falling back to hardcoded list
+        const lookup: Record<string, any> = {};
+        // Seed with hardcoded ETH Sepolia tokens so USDC + RWA always resolve
+        ETH_SEPOLIA_TOKENS.forEach(t => { lookup[t.address.toLowerCase()] = t; });
         if (tokensRes.ok) {
             const data = await tokensRes.json();
             if (data.success) {
-                const lookup: Record<string, any> = {};
+                // DB entries override hardcoded ones (may have richer metadata)
                 data.tokens.forEach((t: any) => { lookup[t.address.toLowerCase()] = t; });
-                setTokenLookup(lookup);
             }
         }
+        setTokenLookup(lookup);
 
         if (user && user.balances) {
             setBalances(user.balances.map((b: any) => ({
@@ -70,17 +74,19 @@ export const Terminal: React.FC = () => {
       return total;
   };
 
-  /** Find base token entry (address+decimals) for the currently selected base chain. */
+  /** Find base token entry (address+decimals) for the currently selected base chain.
+   *  Prefers ETH Sepolia chain match; falls back to first token in pair so stale
+   *  DB chainSelector values (e.g. 'base-1') don't break token resolution. */
   const getBaseToken = (pairArg?: any): { address: string; decimals: number; chainSelector: string } | undefined => {
       const pair = pairArg ?? pairs.find(p => p.id === selectedPairId);
-      return pair?.tokens?.find((t: any) => t.chainSelector === baseChainSelector);
+      if (!pair?.tokens?.length) return undefined;
+      return pair.tokens.find((t: any) => t.chainSelector === 'ethereum-testnet-sepolia')
+          ?? pair.tokens[0];
   };
 
-  /** Find USDC token entry for the currently selected quote chain. */
+  /** Find USDC token entry (ETH Sepolia only — chain-agnostic lookup). */
   const getQuoteToken = (): { address: string; decimals: number; symbol: string } | undefined => {
-      return Object.values(tokenLookup).find(
-          (t: any) => t.symbol === 'USDC' && t.chainSelector === quoteChainSelector
-      ) as any;
+      return Object.values(tokenLookup).find((t: any) => t.symbol === 'USDC') as any;
   };
   const fetchPairs = async () => {
     try {
@@ -92,9 +98,9 @@ export const Terminal: React.FC = () => {
                 if (!selectedPairId) {
                     const first = data.pairs[0];
                     setSelectedPairId(first.id);
-                    const firstChain = first.tokens?.[0]?.chainSelector || '';
-                    setBaseChainSelector(firstChain);
-                    setQuoteChainSelector(firstChain);
+                    // Always keep ETH Sepolia — don't let stale DB chainSelector values override
+                    setBaseChainSelector('ethereum-testnet-sepolia');
+                    setQuoteChainSelector('ethereum-testnet-sepolia');
                 }
             }
         }
@@ -216,7 +222,7 @@ export const Terminal: React.FC = () => {
     }
     
     if (!stealthAddress || !/^0x[0-9a-fA-F]{40}$/.test(stealthAddress)) {
-        toast.error("Invalid Stealth Address. Generate in Profile.");
+        toast.error("Invalid Shield Address. Generate in Profile.");
         return;
     }
 
@@ -375,7 +381,7 @@ export const Terminal: React.FC = () => {
                {/* Stealth Key Input */}
                <div className="bg-obsidian/50 p-3 rounded border border-border-dark space-y-2">
                    <div className="flex justify-between items-center">
-                        <label className="text-[10px] text-primary font-mono uppercase tracking-wider">Stealth Address</label>
+                        <label className="text-[10px] text-primary font-mono uppercase tracking-wider">Shield Address</label>
                         <Button 
                             variant="ghost" 
                             className="text-[8px] h-5 px-2 text-primary border border-primary/20 hover:bg-primary/10"
@@ -391,7 +397,7 @@ export const Terminal: React.FC = () => {
 
                                     if(/^0x[0-9a-fA-F]{40}$/.test(cleanedText)) {
                                         setStealthAddress(cleanedText);
-                                        toast.success("Stealth Address Pasted");
+                                        toast.success("Shield Address Pasted");
                                     } else {
                                         toast.error("Invalid Address Format (0x + 40 hex chars)");
                                     }
@@ -613,7 +619,7 @@ export const Terminal: React.FC = () => {
                   status === 'MATCHING' ? "Matching Engine..." :
                   status === 'SETTLED' ? "Order Settled!" :
                   (Number(amount) * Number(price)) < 5 ? "Min Order Value: 5 USDC" :
-                  stealthAddress ? "Place Order" : "Enter Stealth Address"}
+                  stealthAddress ? "Place Order" : "Enter Shield Address"}
                 </Button>
                <div className="text-[9px] text-slate-600 text-center font-mono uppercase tracking-wide mt-2">
                   TEE Verification: <span className="text-slate-400">{stealthAddress ? "READY" : "WAITING FOR ADDRESS"}</span>
@@ -649,7 +655,7 @@ export const Terminal: React.FC = () => {
                    { id: '01', title: 'Order Placement', desc: 'Submitting order to secure enclave.', active: status === 'SENDING' },
                    { id: '02', title: 'Dark Pool Match', desc: 'Searching for counterparty liquidity.', active: status === 'MATCHING' },
                    { id: '03', title: 'Settlement Report', desc: 'CRE submitting on-chain report to Vault.', active: status === 'SETTLED' },
-                   { id: '04', title: 'Confirmed', desc: 'Assets routed to stealth address.', active: status === 'SETTLED' }
+                   { id: '04', title: 'Confirmed', desc: 'Assets routed to shield address.', active: status === 'SETTLED' }
                  ].map((step, i) => (
                     <div key={i} className={`flex items-center gap-4 group transition-all duration-500 ${step.active ? 'scale-105' : 'opacity-40'}`}>
                        <div className={`w-8 h-8 border flex items-center justify-center text-xs font-mono font-bold transition-all ${step.active ? 'bg-primary/10 border-primary text-primary shadow-glow' : 'bg-black border-border-dark text-slate-500'}`}>

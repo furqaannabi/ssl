@@ -19,6 +19,7 @@ import { sendToMatchingWorkflow, type MatchOrderPayload } from "../lib/cre-clien
 import { settleMatch } from "../lib/convergence-client";
 import { config }     from "../lib/config";
 import { authMiddleware } from "../middleware/auth";
+import { checkWorldIDVerified } from "../lib/world-id-registry";
 import { NLParserService }  from "../services/nl-parser.service";
 import { PriceFeedService } from "../services/price-feed.service";
 import { OrderSide, OrderStatus } from "../../generated/prisma/client";
@@ -104,10 +105,31 @@ order.post("/cre-settle", async (c) => {
     console.log(`[cre-settle] buyer=${body.buyerOrderId} seller=${body.sellerOrderId}`);
 
     try {
-        const buyerOrder = await prisma.order.findUnique({
-            where:   { id: body.buyerOrderId },
-            include: { pair: true },
-        });
+        const [buyerOrder, sellerOrder] = await Promise.all([
+            prisma.order.findUnique({
+                where:   { id: body.buyerOrderId },
+                include: { pair: true },
+            }),
+            prisma.order.findUnique({
+                where:   { id: body.sellerOrderId },
+                select:  { userAddress: true },
+            }),
+        ]);
+
+        // Both parties must be verified in the on-chain WorldIDVerifierRegistry
+        const [buyerVerified, sellerVerified] = await Promise.all([
+            buyerOrder?.userAddress  ? checkWorldIDVerified(buyerOrder.userAddress)  : Promise.resolve(false),
+            sellerOrder?.userAddress ? checkWorldIDVerified(sellerOrder.userAddress) : Promise.resolve(false),
+        ]);
+
+        if (!buyerVerified) {
+            console.warn(`[cre-settle] Rejected: buyer (${buyerOrder?.userAddress}) not verified on-chain`);
+            return c.json({ error: "Settlement rejected: buyer is not World ID verified" }, 403);
+        }
+        if (!sellerVerified) {
+            console.warn(`[cre-settle] Rejected: seller (${sellerOrder?.userAddress}) not verified on-chain`);
+            return c.json({ error: "Settlement rejected: seller is not World ID verified" }, 403);
+        }
 
         const baseSymbol = buyerOrder?.pair?.baseSymbol ?? "";
         const [exactBaseToken, quoteToken] = await Promise.all([
@@ -226,6 +248,12 @@ order.post("/", authMiddleware, async (c) => {
     }
     if (!/^0x[0-9a-fA-F]{40}$/.test(body.stealthAddress)) {
         return c.json({ error: "Invalid stealthAddress" }, 400);
+    }
+
+    // Require World ID verification before placing orders
+    const userRecord = await prisma.user.findUnique({ where: { address: userAddress }, select: { isVerified: true } });
+    if (!userRecord?.isVerified) {
+        return c.json({ error: "World ID verification required. Complete verification in the Compliance tab." }, 403);
     }
 
     const hasEncrypted = !!body.encrypted;

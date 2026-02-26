@@ -1,18 +1,18 @@
 # SSL Frontend — Trading Terminal
 
-React + Vite frontend for the Stealth Settlement Layer. A dark-themed trading terminal with World ID verification, stealth address generation, order management on **Ethereum Sepolia**, and an AI financial advisor chatbot.
+React + Vite frontend for the Stealth Settlement Layer. A dark-themed trading terminal with World ID verification, shield address generation, order management on **Ethereum Sepolia**, and an AI financial advisor chatbot.
 
 ## Features
 
 - **Wallet Connection** -- RainbowKit (MetaMask, Coinbase Wallet, WalletConnect)
 - **SIWE Authentication** -- Sign-In with Ethereum session management
-- **World ID Verification** -- Sybil-resistant identity proof (required before depositing via ACE policy)
-- **Stealth Address Generation** -- Client-side one-time addresses for private settlement
-- **Order Entry** -- Limit orders with BUY/SELL on any whitelisted RWA pair
+- **World ID Verification** -- Sybil-resistant identity proof (required before depositing or trading; enforced by ACE `WorldIDPolicy` on-chain)
+- **Shield Address Generation** -- Client-side one-time addresses for private settlement; settlement transfers go to this address so the on-chain record never reveals the real trader
+- **Order Entry** -- Limit orders with BUY/SELL on any whitelisted RWA pair (World ID verified users only)
 - **Order Book** -- Real-time obfuscated order book with bid/ask depth
 - **Portfolio** -- Token balances from the Convergence vault on Ethereum Sepolia
-- **Deposit (Funding)** -- Deposit whitelisted RWA tokens with type badges (STOCK/ETF/BOND/STABLE)
-- **Withdrawal** -- Request withdrawal of deposited tokens
+- **Deposit (Funding)** -- Deposit any of the 10 whitelisted tokens (9 RWA + USDC) into the Convergence vault; uses `depositWithPermit` (EIP-2612, 1 tx) with fallback to `approve + deposit` (2 tx)
+- **Withdrawal** -- Request withdrawal of deposited tokens (World ID verified users only)
 - **AI Financial Advisor** -- Floating chatbot (bottom-right) powered by Gemini 2.5 Flash:
   - Portfolio analysis with real-time prices
   - Arbitrage opportunity detection and alerts
@@ -74,11 +74,12 @@ frontend/
 │   ├── StealthKeyReveal.tsx       # Stealth key management
 │   └── UI.tsx                     # Shared components (Icon, Button, Modal, Card, Badge, Toast)
 ├── lib/
-│   ├── contracts.ts               # Token addresses, decimals, RWA_TOKENS metadata, ABI fragments
+│   ├── contracts.ts               # ETH_SEPOLIA_TOKENS (hardcoded fallback), RWA_TOKENS metadata, ABI fragments
 │   ├── chain-config.ts            # Chain config (Ethereum Sepolia)
 │   ├── wagmi.ts                   # Wagmi config
 │   ├── auth.ts                    # SIWE authentication
-│   └── abi/                       # Contract ABIs
+│   └── abi/
+│       └── convergence_vault_abi.ts  # Convergence vault ABI (deposit, depositWithPermit, register, …)
 └── index.html
 ```
 

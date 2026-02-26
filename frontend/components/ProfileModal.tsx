@@ -110,7 +110,7 @@ const ShieldedAddressGenerator: React.FC = () => {
                 <Icon name="check_circle" className="text-lg" />
                 <div className="flex-1">
                     <strong className="block mb-0.5 text-green-500">Shield address ready</strong>
-                    Paste this into the Stealth Address field when placing an order.
+                    Paste this into the Shield Address field when placing an order.
                 </div>
             </div>
 
@@ -140,7 +140,7 @@ const ShieldedAddressGenerator: React.FC = () => {
                     <div className="flex gap-3 items-start">
                         <span className="w-5 h-5 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[10px] font-bold border border-primary/50 shrink-0">1</span>
                         <p className="text-[10px] text-slate-300">
-                            <strong className="text-primary">Copy the Shield Address</strong> above and paste it into the <strong className="text-white">Stealth Address</strong> field when placing an order.
+                            <strong className="text-primary">Copy the Shield Address</strong> above and paste it into the <strong className="text-white">Shield Address</strong> field when placing an order.
                         </p>
                     </div>
                     <div className="flex gap-3 items-start">

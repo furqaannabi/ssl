@@ -9,7 +9,8 @@ Chainlink CRE workflow for confidential order matching. Runs inside a Trusted Ex
 3. **Fetches** all open encrypted orders from the backend's `/api/order/encrypted-book` endpoint via Confidential HTTP.
 4. **Decrypts** every resting order inside the TEE.
 5. **Matches** using price-time priority (fully in-memory, invisible to operators).
-6. **On match**: calls `POST /api/order/cre-settle` on the backend (authenticated via `X-CRE-Secret`). The backend then calls `settleMatch()` on the Convergence API to execute the on-chain transfer to stealth addresses.
+6. **Checks** both buyer and seller `userAddress` (EOA, not shield address) against `WorldIDVerifierRegistry.isVerified()` on-chain. Aborts to `pending` if either party is unverified.
+7. **On match**: calls `POST /api/order/cre-settle` on the backend (authenticated via `X-CRE-Secret`). The backend then calls `settleMatch()` on the Convergence API to execute the on-chain transfer to shield addresses.
 
 ## Encryption Scheme
 
@@ -62,6 +63,13 @@ X-CRE-Secret: <callbackSecret>
 
 The backend calls `settleMatch()` on the Convergence API which executes the on-chain RWA/USDC swap to the stealth addresses.
 
+## WorldID Registry Check
+
+Before calling the settlement callback, the TEE reads `isVerified(userAddress)` from the `WorldIDVerifierRegistry` on-chain (via `EVMClient.callContract`). This uses the **normal EOA address** from the decrypted order — not the shield address.
+
+- If `worldIdRegistry` is not set in config, the check is skipped and settlement proceeds (allows operation before the registry is deployed).
+- If either party is not verified, the workflow returns `{ status: "pending", reason: "buyer_not_verified" | "seller_not_verified" }` without calling the backend.
+
 ## Configuration (`config.staging.json`)
 
 ```json
@@ -70,7 +78,9 @@ The backend calls `settleMatch()` on the Convergence API which executes the on-c
   "creEncryptionPublicKey": "<compressed secp256k1 pubkey hex>",
   "creDecryptionKey": "<secp256k1 private key hex — use secrets.yaml in production>",
   "backendUrl": "http://localhost:3001",
-  "callbackSecret": "<shared secret>"
+  "callbackSecret": "<shared secret>",
+  "ethSepoliaChainSelector": "ethereum-testnet-sepolia",
+  "worldIdRegistry": "0xb1eA4506e10e4Be8159ABcC7A7a67C614a13A425"
 }
 ```
 

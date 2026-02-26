@@ -19,7 +19,7 @@ import { chat } from "./routes/chat";
 import { tokens } from "./routes/tokens";
 import { compliance } from "./routes/compliance";
 import { ArbitrageMonitorService } from "./services/arbitrage-monitor.service";
-import { seedTokens } from "./lib/seed-tokens";
+
 
 const app = new Hono();
 
@@ -70,9 +70,6 @@ console.log(`
 ║   Port: ${String(config.port).padEnd(28)}║
 ╚══════════════════════════════════════╝`
 );
-
-// Seed RWA tokens + pairs (idempotent)
-seedTokens();
 
 // Start Arbitrage Monitor
 ArbitrageMonitorService.startMonitor(

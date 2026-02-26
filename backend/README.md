@@ -110,7 +110,9 @@ One pair per RWA symbol (chain-agnostic). Includes base token addresses so the f
 `GET /api/order/book`
 
 #### Place Order
-`POST /api/order` *(auth required)*
+`POST /api/order` *(auth required, World ID verified)*
+
+Requires `user.isVerified = true` in DB. Returns `403` if unverified.
 
 Orders are encrypted with the CRE public key before submission. The CRE TEE decrypts and matches them inside the enclave.
 
@@ -135,7 +137,7 @@ Orders are encrypted with the CRE public key before submission. The CRE TEE decr
 #### CRE Settlement Callback
 `POST /api/order/cre-settle` *(CRE-secret required)*
 
-Called by the CRE matching workflow after a match. The backend calls `settleMatch()` on the Convergence API to execute the on-chain transfer to stealth addresses.
+Called by the CRE matching workflow after a match. Before settling, the backend reads `isVerified(address)` from the `WorldIDVerifierRegistry` on-chain for **both buyer and seller**. Returns `403` if either party is unverified. If both are verified, calls `settleMatch()` on the Convergence API to execute the on-chain transfer to shield addresses.
 
 #### Cancel Order
 `POST /api/order/:id/cancel` *(auth required)*
@@ -204,7 +206,7 @@ Order lifecycle: `PENDING` → `OPEN` → `MATCHED` → `SETTLED` (or `CANCELLED
 | `OPENAI_API_KEY` | Google Gemini API key (via OpenAI-compatible endpoint) | AI chat |
 | `AI_MODEL` | AI model ID (default: `gemini-2.5-flash`) | No |
 | `FINNHUB_API_KEY` | Real-time stock/ETF prices | No (mock used if absent) |
-| `WORLD_ID_REGISTRY` | `WorldIDVerifierRegistry` address (admin helper only) | No |
+| `WORLD_ID_REGISTRY` | `WorldIDVerifierRegistry` address — used to call `setVerified()` after World ID proof and to read `isVerified()` at settlement | Yes |
 
 ---
 
@@ -212,8 +214,9 @@ Order lifecycle: `PENDING` → `OPEN` → `MATCHED` → `SETTLED` (or `CANCELLED
 
 | File | Purpose |
 |---|---|
-| `src/routes/order.ts` | Order CRUD, CRE settlement callback (`/cre-settle`), encrypted book endpoint |
-| `src/routes/verify.ts` | World ID proof → CRE stream |
+| `src/routes/order.ts` | Order CRUD (isVerified gate), CRE settlement callback with on-chain registry check, encrypted book |
+| `src/routes/verify.ts` | World ID proof → CRE stream → DB + on-chain registry update |
+| `src/lib/world-id-registry.ts` | `markWorldIDVerified()` (write) + `checkWorldIDVerified()` (read) for `WorldIDVerifierRegistry` |
 | `src/lib/convergence-client.ts` | Convergence API wrapper (EIP-712 signing, `settleMatch`, `deposit`, `withdraw`) |
 | `src/lib/cre-client.ts` | Sends requests to CRE workflows |
 | `src/lib/matching-engine.ts` | Local plaintext matching fallback (used if CRE unavailable) |

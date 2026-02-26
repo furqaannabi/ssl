@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Button, Icon } from './UI';
-import { TOKEN_DECIMALS, ERC20_ABI, RWA_TOKENS } from '../lib/contracts';
+import { TOKEN_DECIMALS, ERC20_ABI, RWA_TOKENS, ETH_SEPOLIA_TOKENS } from '../lib/contracts';
 import { CONVERGENCE_VAULT_ABI, CONVERGENCE_VAULT_ADDRESS, CONVERGENCE_CHAIN_ID } from '../lib/abi/convergence_vault_abi';
 import { useConnection, useWaitForTransactionReceipt, useSwitchChain } from 'wagmi';
+import { auth } from '../lib/auth';
 import { simulateContract, writeContract, getGasPrice } from '@wagmi/core';
 import { parseUnits } from 'viem';
 import { config } from '../lib/wagmi';
@@ -22,7 +23,6 @@ interface TokenEntry {
 }
 
 const ETH_SEPOLIA_CHAIN_SELECTOR = 'ethereum-testnet-sepolia';
-const USDC_ETH_SEPOLIA = '0x75faf114eafb1bDbe2F0316DF893fd58CE46AA4d';
 
 export const FundingModal: React.FC<FundingModalProps> = ({
     isOpen,
@@ -37,6 +37,7 @@ export const FundingModal: React.FC<FundingModalProps> = ({
     const [allTokens, setAllTokens] = useState<TokenEntry[]>([]);
     const [selectedTokenAddress, setSelectedTokenAddress] = useState<string>('');
     const [tokensLoading, setTokensLoading] = useState(false);
+    const [isVerified, setIsVerified] = useState<boolean | null>(null);
 
     const { isConnected, address: eoaAddress, chain } = useConnection();
     const { switchChainAsync } = useSwitchChain();
@@ -60,24 +61,21 @@ export const FundingModal: React.FC<FundingModalProps> = ({
         if (isOpen) fetchTokens();
     }, [isOpen]);
 
-    // ETH Sepolia tokens only
-    const ethSepoliaTokens = allTokens.filter(t => t.chainSelector === ETH_SEPOLIA_CHAIN_SELECTOR);
+    // Check verification status when modal opens
+    useEffect(() => {
+        if (isOpen) {
+            auth.getMe().then(user => setIsVerified(user?.isVerified ?? false));
+        }
+    }, [isOpen]);
 
-    // Inject USDC if missing from DB (may be keyed to a different chain selector)
-    const tokensForChain: TokenEntry[] = ethSepoliaTokens.find(
-        t => t.address.toLowerCase() === USDC_ETH_SEPOLIA.toLowerCase()
-    )
-        ? ethSepoliaTokens
-        : [
-              ...ethSepoliaTokens,
-              {
-                  address: USDC_ETH_SEPOLIA.toLowerCase(),
-                  symbol: 'USDC',
-                  name: 'USD Coin',
-                  decimals: 6,
-                  chainSelector: ETH_SEPOLIA_CHAIN_SELECTOR,
-              },
-          ];
+    // Start with hardcoded list so all 10 tokens (incl. USDC) are always present.
+    // DB entries for ETH Sepolia override with richer metadata when available.
+    const tokenMap: Record<string, TokenEntry> = {};
+    ETH_SEPOLIA_TOKENS.forEach(t => { tokenMap[t.address.toLowerCase()] = t; });
+    allTokens
+        .filter(t => t.chainSelector === ETH_SEPOLIA_CHAIN_SELECTOR)
+        .forEach(t => { tokenMap[t.address.toLowerCase()] = t; });
+    const tokensForChain: TokenEntry[] = Object.values(tokenMap);
 
     // Auto-select first available token
     useEffect(() => {
@@ -116,6 +114,13 @@ export const FundingModal: React.FC<FundingModalProps> = ({
         }
 
         setError(null);
+
+        // Require World ID verification before depositing
+        const user = await auth.getMe();
+        if (!user?.isVerified) {
+            setError("World ID verification required before depositing. Go to the Compliance tab to verify.");
+            return;
+        }
 
         try {
             // Switch to ETH Sepolia if needed
@@ -294,13 +299,20 @@ export const FundingModal: React.FC<FundingModalProps> = ({
                             </div>
                         </div>
 
+                        {isVerified === false && (
+                            <div className="bg-yellow-500/10 border border-yellow-500/30 p-3 rounded flex items-center gap-3 text-yellow-400 text-xs">
+                                <Icon name="verified_user" className="text-sm shrink-0" />
+                                <p>World ID verification required to deposit. Go to the <strong>Compliance</strong> tab to verify.</p>
+                            </div>
+                        )}
+
                         <div className="pt-2">
                             <Button
                                 fullWidth
                                 variant="primary"
                                 icon="account_balance_wallet"
                                 onClick={handleDeposit}
-                                disabled={!isConnected || !selectedToken || !amount || parseFloat(amount) <= 0}
+                                disabled={!isConnected || !selectedToken || !amount || parseFloat(amount) <= 0 || isVerified === false}
                             >
                                 Approve & Deposit
                             </Button>

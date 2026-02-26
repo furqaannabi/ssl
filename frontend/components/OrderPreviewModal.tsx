@@ -357,7 +357,7 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
                 {/* Stealth Address Input */}
                 <div className="space-y-2">
                     <label className="text-slate-400 text-xs uppercase">
-                        Stealth Address <span className="text-red-400">*</span>
+                        Shield Address <span className="text-red-400">*</span>
                     </label>
                     <input
                         type="text"
@@ -367,7 +367,7 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
                         className="w-full bg-black border border-border-dark text-white text-sm px-3 py-2 rounded font-mono focus:border-primary outline-none"
                     />
                     <p className="text-slate-500 text-[10px]">
-                        Generate a stealth address in the Profile tab
+                        Generate a shield address in the Profile tab
                     </p>
                 </div>
 

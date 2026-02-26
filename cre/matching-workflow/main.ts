@@ -24,8 +24,12 @@ import {
   HTTPClient,
   HTTPSendRequester,
   consensusIdenticalAggregation,
+  EVMClient,
+  getNetwork,
+  hexToBase64,
 } from "@chainlink/cre-sdk";
 
+import { encodeFunctionData, decodeAbiParameters } from "viem";
 import { secp256k1 } from "@noble/curves/secp256k1";
 import { gcm }       from "@noble/ciphers/aes";
 import { sha256 }    from "@noble/hashes/sha256";
@@ -47,7 +51,69 @@ type Config = {
   backendUrl: string;
   /** Shared secret for CRE → backend settlement callback authentication. */
   callbackSecret: string;
+  /**
+   * WorldIDVerifierRegistry address on ETH Sepolia.
+   * Set after running 03_DeployWorldIDPolicy.s.sol.
+   * When set, both buyer and seller userAddresses are checked before settlement.
+   */
+  worldIdRegistry?: string;
+  /** ETH Sepolia chain selector name for EVMClient registry reads. */
+  ethSepoliaChainSelector?: string;
 };
+
+// ─── WorldID registry check ──────────────────────────────────────────────────
+
+const IS_VERIFIED_ABI = [{
+  name: "isVerified",
+  type: "function",
+  inputs: [{ name: "", type: "address" }],
+  outputs: [{ name: "", type: "bool" }],
+  stateMutability: "view",
+}] as const;
+
+/**
+ * Read isVerified(userAddress) from the WorldIDVerifierRegistry on-chain.
+ * Always checks the NORMAL (EOA) address — NOT the shield/stealth address.
+ * Returns true if verified, false on any error or if registry not configured.
+ */
+function checkIsVerifiedOnChain(runtime: Runtime<Config>, userAddress: string): boolean {
+  const registryAddress = runtime.config.worldIdRegistry;
+  if (!registryAddress) {
+    runtime.log("[TEE] worldIdRegistry not configured — skipping isVerified check");
+    return true; // allow if not configured (registry not yet deployed)
+  }
+
+  const chainSelector = runtime.config.ethSepoliaChainSelector || "ethereum-testnet-sepolia";
+  const network = getNetwork({
+    chainFamily: "evm",
+    chainSelectorName: chainSelector,
+    isTestnet: true,
+  });
+
+  if (!network) {
+    runtime.log("[TEE] Network not found for isVerified check — skipping");
+    return true;
+  }
+
+  const evmClient = new EVMClient(network.chainSelector.selector);
+
+  const callData = encodeFunctionData({
+    abi: IS_VERIFIED_ABI,
+    functionName: "isVerified",
+    args: [userAddress as `0x${string}`],
+  });
+
+  const reply = evmClient.callContract(runtime, {
+    call: {
+      to: hexToBase64(registryAddress as `0x${string}`),
+      data: hexToBase64(callData),
+    },
+  }).result();
+
+  const hexData = ("0x" + Buffer.from(reply.data).toString("hex")) as `0x${string}`;
+  const [verified] = decodeAbiParameters([{ type: "bool" }], hexData);
+  return verified;
+}
 
 // ─── Domain Types ─────────────────────────────────────────────────────────────
 
@@ -210,6 +276,20 @@ const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string =
   }
 
   runtime.log("[TEE] Match: " + newOrder.id + " <-> " + matchedOrder.id);
+
+  // ── 3b. Verify both parties against WorldIDVerifierRegistry ──────────────────
+  // Check the NORMAL (EOA) userAddress — NOT the shield/stealth address.
+  const buyerAddr  = (newOrder.side === "BUY"  ? newOrder : matchedOrder).userAddress;
+  const sellerAddr = (newOrder.side === "SELL" ? newOrder : matchedOrder).userAddress;
+
+  if (!checkIsVerifiedOnChain(runtime, buyerAddr)) {
+    runtime.log("[TEE] Buyer " + buyerAddr + " not World ID verified — aborting match");
+    return JSON.stringify({ status: "pending", orderId: input.orderId, reason: "buyer_not_verified" });
+  }
+  if (!checkIsVerifiedOnChain(runtime, sellerAddr)) {
+    runtime.log("[TEE] Seller " + sellerAddr + " not World ID verified — aborting match");
+    return JSON.stringify({ status: "pending", orderId: input.orderId, reason: "seller_not_verified" });
+  }
 
   // ── 4. Compute fill amounts ───────────────────────────────────────────────────
   const tradeAmt  = Math.min(parseFloat(newOrder.amount), parseFloat(matchedOrder.amount));

@@ -7,5 +7,9 @@
 
   "backendUrl": "http://localhost:3001",
 
-  "callbackSecret": "cre-callback-secret-change-in-production"
+  "callbackSecret": "cre-callback-secret-change-in-production",
+
+  "ethSepoliaChainSelector": "ethereum-testnet-sepolia",
+
+  "worldIdRegistry": "0xb1eA4506e10e4Be8159ABcC7A7a67C614a13A425"
 }

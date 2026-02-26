@@ -43,6 +43,32 @@ function getRegistryAddress(): `0x${string}` | null {
 }
 
 /**
+ * Read `isVerified(userAddress)` from the on-chain WorldIDVerifierRegistry.
+ * Falls back to `false` (with a warning) if WORLD_ID_REGISTRY is not configured.
+ */
+export async function checkWorldIDVerified(userAddress: string): Promise<boolean> {
+    const registryAddress = getRegistryAddress();
+    if (!registryAddress) {
+        console.warn("[WorldIDRegistry] WORLD_ID_REGISTRY not set — cannot check on-chain isVerified");
+        return false;
+    }
+
+    const publicClient = createPublicClient({
+        chain: sepolia,
+        transport: http(process.env.ETH_SEPOLIA_RPC_URL || "https://rpc.sepolia.org"),
+    });
+
+    const verified = await publicClient.readContract({
+        address: registryAddress,
+        abi: REGISTRY_ABI,
+        functionName: "isVerified",
+        args: [userAddress as `0x${string}`],
+    });
+
+    return verified as boolean;
+}
+
+/**
  * Mark `userAddress` as World ID verified in the on-chain registry.
  * No-ops with a warning if WORLD_ID_REGISTRY is not configured.
  */

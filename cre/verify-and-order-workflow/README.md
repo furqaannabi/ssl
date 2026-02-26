@@ -114,15 +114,15 @@ encodeAbiParameters("uint8, address, uint256", [2, userAddress, withdrawalId])
     "ethSepolia": {
       "chainId": 11155111,
       "chainSelector": "ethereum-testnet-sepolia",
-      "vault": "0x<Convergence vault or SSL vault>",
+      "vault": "0xE588a6c73933BFD66Af9b4A07d48bcE59c0D2d13",
       "forwarder": "0x15fC6ae953E024d975e77382eEeC56A9101f9F88",
-      "worldIdRegistry": "0x<WorldIDVerifierRegistry address>"
+      "worldIdRegistry": "0xb1eA4506e10e4Be8159ABcC7A7a67C614a13A425"
     }
   }
 }
 ```
 
-Fill in `worldIdRegistry` after deploying `Compliant-Private-Transfer-Demo/script/03_DeployWorldIDPolicy.s.sol`.
+The `WorldIDVerifierRegistry` is deployed at `0xb1eA4506e10e4Be8159ABcC7A7a67C614a13A425`. The `isVerified` check reads from this address; the verify report (`type=0`) is also sent here so `onReport()` can set `isVerified[user] = true`.
 
 ---
 

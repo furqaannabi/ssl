@@ -13,8 +13,8 @@ interface StealthKeyRevealProps {
 export const StealthKeyReveal: React.FC<StealthKeyRevealProps> = ({ 
     isOpen, 
     onClose, 
-    title = "Reveal Stealth Key",
-    description = "This private key controls the funds at the stealth address below. Importing it into a wallet like MetaMask will give you full control.",
+    title = "Reveal Shield Key",
+    description = "This private key controls the funds at the shield address below. Importing it into a wallet like MetaMask will give you full control.",
     privateKey,
     address
 }) => {
@@ -36,7 +36,7 @@ export const StealthKeyReveal: React.FC<StealthKeyRevealProps> = ({
                 </div>
 
                 <div>
-                    <label className="text-[10px] text-slate-500 uppercase tracking-widest font-mono mb-2 block">Stealth Address</label>
+                    <label className="text-[10px] text-slate-500 uppercase tracking-widest font-mono mb-2 block">Shield Address</label>
                     <div className="bg-black border border-border-dark p-3 rounded font-mono text-xs text-white break-all flex justify-between items-center group">
                         {address}
                         <button onClick={() => navigator.clipboard.writeText(address)} className="text-primary opacity-0 group-hover:opacity-100 transition-opacity">
