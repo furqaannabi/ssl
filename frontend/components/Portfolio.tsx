@@ -1,322 +1,333 @@
-import React, { useState, useEffect } from 'react';
-import { Asset } from '../types';
-import { Icon, Badge, Card, Button } from './UI';
-import { StealthKeyReveal } from './StealthKeyReveal';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Icon, Card, Button } from './UI';
 import { FundingModal } from './FundingModal';
 import { WithdrawalModal } from './WithdrawalModal';
-import { auth } from '../lib/auth';
-import { TOKEN_DECIMALS, RWA_TOKENS } from '../lib/contracts';
+import { TOKEN_DECIMALS, RWA_TOKENS, ETH_SEPOLIA_TOKENS } from '../lib/contracts';
 import { formatUnits } from 'viem';
+import { signTypedData } from '@wagmi/core';
+import { useConnection } from 'wagmi';
+import { config } from '../lib/wagmi';
 
-// Icon mapping for token types
+const CONVERGENCE_VAULT: `0x${string}` = '0xE588a6c73933BFD66Af9b4A07d48bcE59c0D2d13';
+
+const CONVERGENCE_DOMAIN = {
+    name:              'CompliantPrivateTokenDemo',
+    version:           '0.0.1',
+    chainId:           11155111,
+    verifyingContract: CONVERGENCE_VAULT,
+} as const;
+
+const RETRIEVE_BALANCES_TYPES = {
+    'Retrieve Balances': [
+        { name: 'account',   type: 'address' },
+        { name: 'timestamp', type: 'uint256' },
+    ],
+} as const;
+
 const TYPE_ICONS: Record<string, { icon: string; colorClass: string }> = {
-    STOCK: { icon: 'show_chart', colorClass: 'text-blue-400' },
-    ETF: { icon: 'pie_chart', colorClass: 'text-purple-400' },
-    BOND: { icon: 'account_balance', colorClass: 'text-amber-400' },
-    STABLE: { icon: 'account_balance_wallet', colorClass: 'text-slate-400' },
-    UNKNOWN: { icon: 'token', colorClass: 'text-slate-500' },
+    STOCK:   { icon: 'show_chart',             colorClass: 'text-blue-400'   },
+    ETF:     { icon: 'pie_chart',              colorClass: 'text-purple-400' },
+    BOND:    { icon: 'account_balance',        colorClass: 'text-amber-400'  },
+    STABLE:  { icon: 'account_balance_wallet', colorClass: 'text-slate-400'  },
+    UNKNOWN: { icon: 'token',                  colorClass: 'text-slate-500'  },
 };
 
+interface VaultBalance { token: string; amount: string; }
+
 export const Portfolio: React.FC = () => {
-  const [isFundingOpen, setIsFundingOpen] = useState(false);
-  const [isWithdrawalOpen, setIsWithdrawalOpen] = useState(false);
-  const [assets, setAssets] = useState<Asset[]>([]);
-  const [totalValue, setTotalValue] = useState<number>(0);
+    const [isFundingOpen, setIsFundingOpen]       = useState(false);
+    const [isWithdrawalOpen, setIsWithdrawalOpen] = useState(false);
 
-  const fetchBalances = async () => {
-    try {
-        // Fetch tokens (with prices) and user profile in parallel
-        const [user, tokensRes] = await Promise.all([
-            auth.getMe(),
-            fetch(`/api/tokens`)
-        ]);
+    const [vaultBalances, setVaultBalances] = useState<VaultBalance[]>([]);
+    const [balanceChecked, setBalanceChecked] = useState(false);
+    const [isChecking, setIsChecking]         = useState(false);
+    const [checkError, setCheckError]          = useState<string | null>(null);
 
-        // Build symbol->token map from backend /api/tokens
-        const tokenMap: Record<string, any> = {}; // address -> token data
-        const symbolMap: Record<string, any> = {}; // symbol -> token data
-        if (tokensRes.ok) {
-            const data = await tokensRes.json();
-            if (data.success) {
-                data.tokens.forEach((t: any) => {
-                    tokenMap[t.address.toLowerCase()] = t;
-                    symbolMap[t.symbol] = t;
-                });
-            }
-        }
+    const [prices, setPrices] = useState<Record<string, { current: number; changePercent?: number }>>({});
 
-        if (user && user.balances) {
-            // Aggregate balances by symbol (across chains)
-            const balancesBySymbol: Record<string, { total: number, breakdown: Record<string, number> }> = {};
+    const { address: eoaAddress, isConnected } = useConnection();
 
-            user.balances.forEach((b: any) => {
-                const tokenData = tokenMap[b.token.toLowerCase()];
-                const symbol = tokenData?.symbol || 'UNKNOWN';
+    // Fetch live prices from backend every 15s
+    useEffect(() => {
+        const load = async () => {
+            try {
+                const res = await fetch('/api/tokens');
+                if (!res.ok) return;
+                const data = await res.json();
+                if (data.success) {
+                    const map: Record<string, { current: number; changePercent?: number }> = {};
+                    data.tokens.forEach((t: any) => {
+                        if (t.price) map[t.symbol] = { current: t.price.current, changePercent: t.price.changePercent };
+                    });
+                    setPrices(map);
+                }
+            } catch {}
+        };
+        load();
+        const id = setInterval(load, 15000);
+        return () => clearInterval(id);
+    }, []);
 
-                if (!balancesBySymbol[symbol]) balancesBySymbol[symbol] = { total: 0, breakdown: {} };
+    // Sign EIP-712, then POST to backend proxy → Convergence /balances
+    const checkVaultBalances = useCallback(async () => {
+        if (!isConnected || !eoaAddress) { setCheckError('Connect your wallet first.'); return; }
+        setIsChecking(true);
+        setCheckError(null);
+        try {
+            const timestamp = Math.floor(Date.now() / 1000);
 
-                const decimals = tokenData?.decimals || TOKEN_DECIMALS[symbol] || 18;
-                const amount = parseFloat(formatUnits(BigInt(b.balance), decimals));
-
-                balancesBySymbol[symbol].total += amount;
-
-                const chainSelector = b.chainSelector || 'unknown';
-                balancesBySymbol[symbol].breakdown[chainSelector] = (balancesBySymbol[symbol].breakdown[chainSelector] || 0) + amount;
+            const sig = await signTypedData(config, {
+                domain:      CONVERGENCE_DOMAIN,
+                types:       RETRIEVE_BALANCES_TYPES,
+                primaryType: 'Retrieve Balances',
+                message: {
+                    account:   eoaAddress as `0x${string}`,
+                    timestamp: BigInt(timestamp),
+                },
             });
 
-            // Build asset list from user's actual holdings
-            const updatedAssets: Asset[] = Object.entries(balancesBySymbol)
-                .filter(([_, agg]) => agg.total > 0) // Only show tokens with balance
-                .map(([symbol, agg]) => {
-                    const tokenData = symbolMap[symbol];
-                    const meta = RWA_TOKENS[symbol];
-                    const typeInfo = TYPE_ICONS[tokenData?.tokenType || meta?.type || 'UNKNOWN'] || TYPE_ICONS.UNKNOWN;
+            // Backend proxy: POST /api/user/vault-balances
+            const res = await fetch('/api/user/vault-balances', {
+                method:      'POST',
+                headers:     { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body:        JSON.stringify({ timestamp, auth: sig }),
+            });
 
-                    // Price from backend token data
-                    const price = tokenData?.price?.current || (symbol === 'USDC' || symbol === 'mUSDC' ? 1 : 0);
-                    const changePercent = tokenData?.price?.changePercent;
-                    const value = agg.total * price;
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error((err as any).error || 'Failed to fetch vault balances');
+            }
 
-                    return {
-                        symbol,
-                        name: meta?.name || tokenData?.name || symbol,
-                        type: tokenData?.tokenType || meta?.type || 'Unknown',
-                        allocation: 0, // Calculated below
-                        value: `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-                        status: 'Active' as const,
-                        icon: typeInfo.icon,
-                        colorClass: typeInfo.colorClass,
-                        address: tokenData?.address,
-                        rawValue: value,
-                        price,
-                        change24h: changePercent != null ? `${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%` : undefined,
-                        balance: agg.total,
-                        breakdown: agg.breakdown,
-                    };
-                });
-
-            const total = updatedAssets.reduce((acc, curr) => acc + (curr.rawValue || 0), 0);
-            setTotalValue(total);
-
-            // Calculate allocations
-            const finalAssets = updatedAssets.map(asset => ({
-                ...asset,
-                allocation: total > 0 ? Math.round(((asset.rawValue || 0) / total) * 100) : 0
-            }));
-
-            setAssets(finalAssets);
-        } else {
-            setAssets([]);
-            setTotalValue(0);
+            const data = await res.json();
+            setVaultBalances(data.balances ?? []);
+            setBalanceChecked(true);
+        } catch (err: any) {
+            setCheckError(err.shortMessage || err.message || 'Balance check failed');
+        } finally {
+            setIsChecking(false);
         }
-    } catch (e) {
-        console.error('Failed to fetch balances', e);
-    }
-  };
+    }, [isConnected, eoaAddress]);
 
-  useEffect(() => {
-    fetchBalances();
-    // Poll for updates every 10s
-    const interval = setInterval(fetchBalances, 10000);
-    return () => clearInterval(interval);
-  }, []);
+    // address → formatted balance
+    const balanceMap: Record<string, number> = {};
+    vaultBalances.forEach(b => {
+        const addr    = b.token.toLowerCase();
+        const token   = ETH_SEPOLIA_TOKENS.find(t => t.address.toLowerCase() === addr);
+        const decimals = token?.decimals ?? TOKEN_DECIMALS[token?.symbol ?? ''] ?? 18;
+        balanceMap[addr] = parseFloat(formatUnits(BigInt(b.amount), decimals));
+    });
 
-  return (
-    <div className="h-full flex flex-col gap-6 p-6 overflow-y-auto bg-background-light dark:bg-background-dark">
+    const totalValue = ETH_SEPOLIA_TOKENS.reduce((sum, t) => {
+        const bal   = balanceMap[t.address.toLowerCase()] ?? 0;
+        const price = t.symbol === 'USDC' ? 1 : (prices[t.symbol]?.current ?? 0);
+        return sum + bal * price;
+    }, 0);
 
-      <div className="flex justify-between items-center shrink-0">
-        <div>
-          <h2 className="text-xl font-bold text-white font-display tracking-tight uppercase">Portfolio Overview</h2>
-          <p className="text-[10px] text-slate-500 font-mono tracking-widest mt-1">CONFIDENTIAL ASSET MANAGEMENT SYSTEM</p>
+    // Rows sorted by vault balance desc
+    const rows = ETH_SEPOLIA_TOKENS.map(t => {
+        const meta     = RWA_TOKENS[t.symbol];
+        const typeKey  = meta?.type ?? 'UNKNOWN';
+        const typeInfo = TYPE_ICONS[typeKey] ?? TYPE_ICONS.UNKNOWN;
+        const bal      = balanceMap[t.address.toLowerCase()] ?? 0;
+        const price    = t.symbol === 'USDC' ? 1 : (prices[t.symbol]?.current ?? 0);
+        const value    = bal * price;
+        const change   = prices[t.symbol]?.changePercent;
+        return { token: t, meta, typeInfo, bal, price, value, change };
+    }).sort((a, b) => b.bal - a.bal);
+
+    const withdrawalAssets = rows.filter(r => r.bal > 0).map(r => ({
+        symbol:     r.token.symbol,
+        name:       r.meta?.name ?? r.token.name,
+        type:       r.meta?.type ?? 'Unknown',
+        allocation: 0,
+        value:      `$${r.value.toFixed(2)}`,
+        status:     'Active' as const,
+        icon:       r.typeInfo.icon,
+        colorClass: r.typeInfo.colorClass,
+        address:    r.token.address,
+        rawValue:   r.value,
+        price:      r.price,
+        balance:    r.bal,
+    }));
+
+    return (
+        <div className="h-full flex flex-col gap-6 p-6 overflow-y-auto bg-background-light dark:bg-background-dark">
+
+            {/* Header */}
+            <div className="flex justify-between items-center shrink-0">
+                <div>
+                    <h2 className="text-xl font-bold text-white font-display tracking-tight uppercase">Portfolio Overview</h2>
+                    <p className="text-[10px] text-slate-500 font-mono tracking-widest mt-1">CONFIDENTIAL ASSET MANAGEMENT · CONVERGENCE VAULT</p>
+                </div>
+                <div className="flex gap-3">
+                    <Button
+                        variant="ghost"
+                        icon={isChecking ? 'hourglass_empty' : 'account_balance'}
+                        onClick={checkVaultBalances}
+                        disabled={isChecking || !isConnected}
+                        className="border border-primary/40 text-primary hover:bg-primary/10"
+                    >
+                        {isChecking ? 'Signing…' : (balanceChecked ? 'Refresh Balances' : 'Check Balances')}
+                    </Button>
+                    <Button variant="ghost" icon="remove_circle_outline" onClick={() => setIsWithdrawalOpen(true)} className="border border-red-500/30 text-red-400 hover:bg-red-500/10">
+                        Withdraw
+                    </Button>
+                    <Button variant="primary" icon="add" onClick={() => setIsFundingOpen(true)}>
+                        Deposit Assets
+                    </Button>
+                </div>
+            </div>
+
+            {/* Error */}
+            {checkError && (
+                <div className="bg-red-500/10 border border-red-500/20 p-3 rounded flex items-center gap-3 text-red-400 text-xs font-mono shrink-0">
+                    <Icon name="error" className="text-sm shrink-0" />
+                    {checkError}
+                </div>
+            )}
+
+            {/* Prompt to check */}
+            {!balanceChecked && !isChecking && (
+                <div className="bg-primary/5 border border-primary/20 p-3 rounded flex items-center gap-3 text-slate-400 text-xs shrink-0">
+                    <Icon name="lock" className="text-primary text-sm shrink-0" />
+                    <span>Balances are private. Click <strong className="text-primary">Check Balances</strong> — your wallet will sign an EIP-712 message to authenticate with the Convergence vault.</span>
+                </div>
+            )}
+
+            {/* Metrics */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 shrink-0">
+                <Card className="p-5 group">
+                    <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                        <Icon name="account_balance" className="text-4xl text-slate-500" />
+                    </div>
+                    <h3 className="text-slate-500 text-xs uppercase font-semibold tracking-widest mb-2">Total Value Locked</h3>
+                    <div className="text-2xl lg:text-3xl font-mono font-medium text-white tracking-tight">
+                        {balanceChecked
+                            ? `$${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            : <span className="text-slate-600 blur-sm select-none">$0.00</span>
+                        }
+                    </div>
+                    <div className="mt-2 text-xs text-slate-500">{balanceChecked ? 'Live · Convergence vault' : 'Sign to reveal'}</div>
+                </Card>
+
+                <Card className="p-5 relative overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-primary/5 to-transparent animate-scan pointer-events-none"></div>
+                    <div className="absolute top-0 right-0 p-4 opacity-10">
+                        <Icon name="trending_up" className="text-4xl text-primary" />
+                    </div>
+                    <h3 className="text-slate-500 text-xs uppercase font-semibold tracking-widest mb-2">Holdings</h3>
+                    <div className="text-2xl lg:text-3xl font-mono font-medium text-primary tracking-tight">
+                        {balanceChecked ? rows.filter(r => r.bal > 0).length : <span className="text-slate-600">—</span>}
+                        <span className="text-slate-500 text-lg ml-2">/ {ETH_SEPOLIA_TOKENS.length}</span>
+                    </div>
+                    <div className="mt-2 text-xs text-slate-500">Tokens with vault balance</div>
+                </Card>
+
+                <Card className="p-5">
+                    <div className="absolute top-0 right-0 p-4 opacity-10">
+                        <Icon name="shield" className="text-4xl text-slate-500" />
+                    </div>
+                    <h3 className="text-slate-500 text-xs uppercase font-semibold tracking-widest mb-2">Vault Contract</h3>
+                    <div className="text-xs font-mono text-primary mt-1 break-all">0xE588…0D2d13</div>
+                    <div className="mt-2 text-xs text-slate-500 font-mono">Ethereum Sepolia · chainId 11155111</div>
+                </Card>
+            </div>
+
+            {/* Token Table */}
+            <div className="pb-6">
+                <Card className="flex flex-col">
+                    <div className="p-5 border-b border-border-dark flex justify-between items-center bg-surface-lighter">
+                        <h2 className="text-lg font-medium text-white flex items-center gap-2">
+                            <Icon name="table_chart" className="text-slate-500" />
+                            All Vault Tokens
+                        </h2>
+                        {balanceChecked && (
+                            <span className="text-[10px] font-mono text-primary bg-primary/10 border border-primary/20 px-2 py-1 rounded flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 bg-primary rounded-full inline-block animate-pulse"></span>
+                                Live · Convergence API
+                            </span>
+                        )}
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                            <thead>
+                                <tr className="text-xs uppercase tracking-wider text-slate-500 border-b border-border-dark bg-black/20 font-mono">
+                                    <th className="px-6 py-4 font-semibold">Asset</th>
+                                    <th className="px-6 py-4 font-semibold">Type</th>
+                                    <th className="px-6 py-4 font-semibold text-right">Price</th>
+                                    <th className="px-6 py-4 font-semibold text-right">Vault Balance</th>
+                                    <th className="px-6 py-4 font-semibold text-right">Value</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border-dark text-sm font-mono">
+                                {rows.map(({ token, meta, typeInfo, bal, price, value, change }) => {
+                                    const hasBalance = balanceChecked && bal > 0;
+                                    return (
+                                        <tr key={token.address} className="group hover:bg-white/5 transition-colors">
+                                            <td className="px-6 py-4">
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`h-8 w-8 rounded bg-slate-800 flex items-center justify-center border border-slate-700 ${typeInfo.colorClass}`}>
+                                                        <Icon name={typeInfo.icon} className="text-sm" />
+                                                    </div>
+                                                    <div>
+                                                        <div className="font-medium text-white font-display uppercase">
+                                                            {meta?.name ?? token.name}
+                                                        </div>
+                                                        <div className="text-xs text-slate-500 flex gap-2 items-center">
+                                                            <span>{token.symbol}</span>
+                                                            {change != null && (
+                                                                <span className={change >= 0 ? 'text-primary' : 'text-red-500'}>
+                                                                    {change >= 0 ? '+' : ''}{change.toFixed(2)}%
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-4 text-slate-400">{meta?.type ?? 'Unknown'}</td>
+                                            <td className="px-6 py-4 text-right text-slate-300">
+                                                {price > 0 ? `$${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+                                            </td>
+                                            <td className="px-6 py-4 text-right">
+                                                {!balanceChecked ? (
+                                                    <span className="text-slate-700 select-none blur-sm">0.0000</span>
+                                                ) : isChecking ? (
+                                                    <span className="w-3 h-3 border border-primary border-t-transparent rounded-full animate-spin inline-block"></span>
+                                                ) : (
+                                                    <span className={hasBalance ? 'text-primary' : 'text-slate-600'}>
+                                                        {bal.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                                                    </span>
+                                                )}
+                                            </td>
+                                            <td className="px-6 py-4 text-right">
+                                                {!balanceChecked ? (
+                                                    <span className="text-slate-700 blur-sm select-none">$0.00</span>
+                                                ) : (
+                                                    <span className={hasBalance ? 'text-white' : 'text-slate-600'}>
+                                                        ${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                    </span>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </Card>
+            </div>
+
+            <FundingModal
+                isOpen={isFundingOpen}
+                onClose={() => { setIsFundingOpen(false); if (balanceChecked) checkVaultBalances(); }}
+                context="portfolio"
+            />
+            <WithdrawalModal
+                isOpen={isWithdrawalOpen}
+                onClose={() => { setIsWithdrawalOpen(false); if (balanceChecked) checkVaultBalances(); }}
+                assets={withdrawalAssets}
+            />
         </div>
-        <div className="flex gap-3">
-            <Button variant="ghost" icon="remove_circle_outline" onClick={() => setIsWithdrawalOpen(true)} className="border border-red-500/30 text-red-400 hover:bg-red-500/10">
-              Withdraw
-            </Button>
-            <Button variant="primary" icon="add" onClick={() => setIsFundingOpen(true)}>
-              Deposit Assets
-            </Button>
-        </div>
-      </div>
-
-      {/* Metrics Row */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 shrink-0">
-        <Card className="p-5 group">
-          <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-            <Icon name="account_balance" className="text-4xl text-slate-500" />
-          </div>
-          <h3 className="text-slate-500 text-xs uppercase font-semibold tracking-widest mb-2">Total Value Locked</h3>
-          <div className="flex items-end space-x-3">
-            <span className="text-2xl lg:text-3xl font-mono font-medium text-white tracking-tight">
-                ${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </span>
-          </div>
-          <div className="mt-2 text-xs text-slate-500">
-            <span className="text-primary font-mono">+0.0%</span> vs last month
-          </div>
-        </Card>
-
-        <Card className="p-5 relative overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-primary/5 to-transparent animate-scan pointer-events-none"></div>
-          <div className="absolute top-0 right-0 p-4 opacity-10">
-            <Icon name="trending_up" className="text-4xl text-primary" />
-          </div>
-          <h3 className="text-slate-500 text-xs uppercase font-semibold tracking-widest mb-2">24h PnL</h3>
-          <div className="flex items-end space-x-3">
-            <span className="text-2xl lg:text-3xl font-mono font-medium text-primary tracking-tight">+$0.00</span>
-            <span className="text-sm font-mono text-primary bg-primary/10 px-1.5 py-0.5 rounded mb-1">0.0%</span>
-          </div>
-          <div className="mt-2 text-xs text-slate-500">Realized & Unrealized</div>
-        </Card>
-
-        <Card className="p-5">
-          <div className="absolute top-0 right-0 p-4 opacity-10">
-            <Icon name="visibility_off" className="text-4xl text-slate-500" />
-          </div>
-          <h3 className="text-slate-500 text-xs uppercase font-semibold tracking-widest mb-2">Stealth Yield</h3>
-          <div className="flex items-end space-x-3">
-            <span className="text-2xl lg:text-3xl font-mono font-medium text-white tracking-tight">4.5%</span>
-            <span className="text-sm text-slate-500 mb-1">APY</span>
-          </div>
-          <div className="mt-2 w-full bg-slate-700 h-1 rounded-full overflow-hidden">
-            <div className="bg-primary h-full w-3/4 rounded-full"></div>
-          </div>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-12 gap-6 pb-6">
-        {/* Asset Table */}
-        <div className="col-span-12 lg:col-span-9 flex flex-col gap-6">
-          <Card className="flex flex-col">
-            <div className="p-5 border-b border-border-dark flex justify-between items-center bg-surface-lighter">
-              <h2 className="text-lg font-medium text-white flex items-center gap-2">
-                <Icon name="table_chart" className="text-slate-500" />
-                Confidential Asset Breakdown
-              </h2>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="text-xs uppercase tracking-wider text-slate-500 border-b border-border-dark bg-black/20 font-mono">
-                    <th className="px-6 py-4 font-semibold text-center">Privacy Shield</th>
-                    <th className="px-6 py-4 font-semibold">Asset</th>
-                    <th className="px-6 py-4 font-semibold">Type</th>
-                    <th className="px-6 py-4 font-semibold">Chain</th>
-                    <th className="px-6 py-4 font-semibold text-right">Quantity</th>
-                    <th className="px-6 py-4 font-semibold text-right">Allocation</th>
-                    <th className="px-6 py-4 font-semibold text-right">Position Size</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border-dark text-sm font-mono">
-                  {assets.map((asset, idx) => (
-                    <tr key={idx} className="group hover:bg-white/5 transition-colors">
-                      <td className="px-6 py-4 text-center">
-                        <Badge 
-                          label={asset.status} 
-                          color={asset.status === 'Active' ? 'primary' : 'slate'} 
-                          pulse={asset.status === 'Active'} 
-                          icon={asset.status === 'Encrypted' ? 'lock' : undefined}
-                        />
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center">
-                          <div className={`h-8 w-8 rounded bg-slate-800 flex items-center justify-center mr-3 border border-slate-700 ${asset.colorClass}`}>
-                            <Icon name={asset.icon} className="text-sm" />
-                          </div>
-                          <div>
-                            <div className="font-medium text-white font-display uppercase">{asset.name}</div>
-                            <div className="text-xs text-slate-500 flex gap-2">
-                                <span>{asset.symbol}</span>
-                                {(asset as any).change24h && (
-                                    <span className={`${(asset as any).change24h.startsWith('-') ? 'text-red-500' : 'text-primary'}`}>
-                                        {(asset as any).change24h}
-                                    </span>
-                                )}
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-slate-400">{asset.type}</td>
-                      <td className="px-6 py-4">
-                        <div className="flex gap-2">
-                            {asset.breakdown && Object.keys(asset.breakdown).map(chain => (
-                                <span key={chain} className="px-2 py-1 bg-slate-800 text-slate-300 rounded text-xs border border-slate-700 font-mono">
-                                    {chain.toLowerCase().includes('base') ? 'Base' : chain.toLowerCase().includes('arbitrum') ? 'Arbitrum' : 'Unknown'}
-                                </span>
-                            ))}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-right text-slate-300 font-mono">
-                        {asset.balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) || "0.00"}
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <div className="flex items-center justify-end space-x-2">
-                          <span className="text-white">{asset.allocation}%</span>
-                          <div className="w-16 h-1 bg-slate-700 rounded-full overflow-hidden">
-                            <div className={`h-full ${asset.symbol === 'US-Gov-042' ? 'bg-blue-500' : 'bg-primary'} w-[${asset.allocation}%]`} style={{ width: `${asset.allocation}%` }}></div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-right text-slate-200">
-                        <span className="blur-[2px] group-hover:blur-none transition-all cursor-crosshair block">{asset.value}</span>
-                         <div className="text-[9px] text-slate-500 group-hover:text-primary transition-colors">@ ${(asset as any).price?.toFixed(2)}</div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-
-          {/* ... (rest of component) ... */}
-
-        </div>
-
-        {/* Sidebar Widgets */}
-        <div className="col-span-12 lg:col-span-3 flex flex-col gap-6">
-          <Card className="p-5">
-            <h3 className="text-slate-500 text-xs uppercase font-semibold tracking-widest mb-4">Yield Projections</h3>
-            <div className="h-32 mb-4 w-full rounded bg-black/40 border border-border-dark overflow-hidden relative flex items-center justify-center">
-              <div className="text-center">
-                <Icon name="trending_up" className="text-2xl text-slate-700 mb-1" />
-                <p className="text-[10px] text-slate-600 font-mono">Yield data will appear once settlements accrue interest.</p>
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-5 flex-1 flex flex-col justify-center border-primary/30">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-slate-500 text-xs uppercase font-semibold tracking-widest">Accrued Interest</h3>
-              <Icon name="bolt" className="text-primary animate-pulse text-sm" />
-            </div>
-            <div className="text-3xl font-mono text-primary font-medium tracking-tight mb-1">
-              $0.00<span className="text-slate-600 text-lg">00</span>
-            </div>
-            <p className="text-xs text-slate-500">
-              No private yield accrued yet.
-            </p>
-            <div className="mt-6 pt-6 border-t border-border-dark">
-              <Button fullWidth icon="download" disabled>Claim Yield</Button>
-            </div>
-          </Card>
-        </div>
-      </div>
-
-      <FundingModal 
-        isOpen={isFundingOpen} 
-        onClose={() => {
-            setIsFundingOpen(false);
-            fetchBalances(); // Refresh balances on close
-        }} 
-        context="portfolio"
-      />
-      <WithdrawalModal 
-        isOpen={isWithdrawalOpen} 
-        onClose={() => {
-            setIsWithdrawalOpen(false);
-            fetchBalances(); // Refresh balances on close
-        }} 
-        assets={assets}
-      />
-    </div>
-  );
+    );
 };

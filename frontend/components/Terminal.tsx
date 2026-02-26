@@ -1,11 +1,27 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Icon, Card, Button, Badge, useToast } from './UI';
 import { OracleIndicator } from './OracleIndicator';
 import { FundingModal } from './FundingModal';
 import { useConnection } from 'wagmi';
+import { signTypedData } from '@wagmi/core';
 import { CHAINS } from '../lib/chain-config';
 import { auth } from '../lib/auth';
 import { ETH_SEPOLIA_TOKENS } from '../lib/contracts';
+import { config } from '../lib/wagmi';
+
+const CONVERGENCE_VAULT: `0x${string}` = '0xE588a6c73933BFD66Af9b4A07d48bcE59c0D2d13';
+const CONVERGENCE_DOMAIN = {
+    name:              'CompliantPrivateTokenDemo',
+    version:           '0.0.1',
+    chainId:           11155111,
+    verifyingContract: CONVERGENCE_VAULT,
+} as const;
+const RETRIEVE_BALANCES_TYPES = {
+    'Retrieve Balances': [
+        { name: 'account',   type: 'address' },
+        { name: 'timestamp', type: 'uint256' },
+    ],
+} as const;
 
 export const Terminal: React.FC = () => {
   const { toast } = useToast();
@@ -32,13 +48,13 @@ export const Terminal: React.FC = () => {
   const [quoteChainSelector, setQuoteChainSelector] = useState<string>('ethereum-testnet-sepolia');
   const [balances, setBalances] = useState<Array<{ token: string; chainSelector: string; balance: string }>>([]); // Raw balance entries from backend
   const [tokenLookup, setTokenLookup] = useState<Record<string, any>>({}); // address -> token metadata (symbol, decimals)
+  const [vaultChecked, setVaultChecked]   = useState(false);
+  const [vaultChecking, setVaultChecking] = useState(false);
+  const [vaultCheckError, setVaultCheckError] = useState<string | null>(null);
   // Fetch Data
   const fetchBalances = async () => {
       try {
-        const [user, tokensRes] = await Promise.all([
-            import('../lib/auth').then(({ auth }) => auth.getMe()),
-            fetch(`${API_URL}/api/tokens`),
-        ]);
+        const tokensRes = await fetch(`${API_URL}/api/tokens`);
 
         // Build address->metadata lookup from /api/tokens, falling back to hardcoded list
         const lookup: Record<string, any> = {};
@@ -52,16 +68,50 @@ export const Terminal: React.FC = () => {
             }
         }
         setTokenLookup(lookup);
-
-        if (user && user.balances) {
-            setBalances(user.balances.map((b: any) => ({
-                token: b.token.toLowerCase(),
-                chainSelector: b.chainSelector,
-                balance: b.balance,
-            })));
-        }
-      } catch (e) { console.error("Failed to fetch balances", e); }
+      } catch (e) { console.error("Failed to fetch token metadata", e); }
   };
+
+  /** Sign EIP-712 and fetch live vault balances from Convergence via backend proxy. */
+  const checkVaultBalances = useCallback(async () => {
+      if (!isConnected || !eoaAddress) { setVaultCheckError('Connect your wallet first.'); return; }
+      setVaultChecking(true);
+      setVaultCheckError(null);
+      try {
+          const timestamp = Math.floor(Date.now() / 1000);
+          const sig = await signTypedData(config, {
+              domain:      CONVERGENCE_DOMAIN,
+              types:       RETRIEVE_BALANCES_TYPES,
+              primaryType: 'Retrieve Balances',
+              message: {
+                  account:   eoaAddress as `0x${string}`,
+                  timestamp: BigInt(timestamp),
+              },
+          });
+          const res = await fetch('/api/user/vault-balances', {
+              method:      'POST',
+              headers:     { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body:        JSON.stringify({ timestamp, auth: sig }),
+          });
+          if (!res.ok) {
+              const err = await res.json().catch(() => ({}));
+              throw new Error((err as any).error || 'Failed to fetch vault balances');
+          }
+          const data = await res.json();
+          const vaultBals: Array<{ token: string; amount: string }> = data.balances ?? [];
+          // Map into the balances[] format: balance = raw amount (same units Convergence returns)
+          setBalances(vaultBals.map(b => ({
+              token:         b.token.toLowerCase(),
+              chainSelector: 'ethereum-testnet-sepolia',
+              balance:       b.amount,
+          })));
+          setVaultChecked(true);
+      } catch (err: any) {
+          setVaultCheckError(err.shortMessage || err.message || 'Balance check failed');
+      } finally {
+          setVaultChecking(false);
+      }
+  }, [isConnected, eoaAddress]);
 
   /** Get available balance filtered by token address and optionally by chain. */
   const getAvailableBalance = (tokenAddress: string, decimals: number, chainSel?: string): number => {
@@ -161,14 +211,14 @@ export const Terminal: React.FC = () => {
       fetchPairs();
       if (isConnected) {
           fetchMyOrders();
-          fetchBalances();
+          fetchBalances(); // loads tokenLookup metadata only
       }
       if (selectedPairId) fetchOrderBook();
 
       const interval = setInterval(() => {
           if (isConnected) {
               if (activeTab === 'MY_ORDERS') fetchMyOrders();
-              fetchBalances();
+              fetchBalances(); // periodically refresh token metadata
           }
           if (activeTab === 'BOOK' && selectedPairId) fetchOrderBook();
       }, 3000);
@@ -490,33 +540,43 @@ export const Terminal: React.FC = () => {
                         }}>Max</span>
                      </div>
                      {/* Balance row */}
-                     {side === 'BUY' ? (
-                         <div className="flex items-center justify-between mb-1">
-                             <span className="text-[8px] text-slate-500 font-mono uppercase">Balance</span>
-                             <span className="text-[9px] text-slate-500 font-mono">
-                                 {(() => {
-                                     const qt = getQuoteToken();
-                                     if (!qt) return "-- USDC";
-                                     const bal = getAvailableBalance(qt.address, qt.decimals || 6, quoteChainSelector);
-                                     return `${bal.toFixed(2)} USDC`;
-                                 })()}
-                             </span>
+                     <div className="flex items-center justify-between mb-1">
+                         <div className="flex items-center gap-1.5">
+                             <span className="text-[8px] text-slate-500 font-mono uppercase">Vault Balance</span>
+                             <button
+                                 onClick={checkVaultBalances}
+                                 disabled={vaultChecking || !isConnected}
+                                 className="text-[8px] text-primary border border-primary/30 px-1 py-0.5 font-mono hover:bg-primary/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                             >
+                                 {vaultChecking ? '…' : vaultChecked ? '↻' : 'CHECK'}
+                             </button>
                          </div>
-                     ) : (
-                         <div className="flex items-center justify-between mb-1">
-                             {(() => {
+                         {side === 'BUY' ? (
+                             <span className="text-[9px] font-mono" style={{ color: vaultChecked ? undefined : '#475569' }}>
+                                 {!vaultChecked ? (
+                                     <span className="text-slate-600">-- USDC</span>
+                                 ) : (
+                                     (() => {
+                                         const qt = getQuoteToken();
+                                         if (!qt) return <span className="text-slate-600">-- USDC</span>;
+                                         const bal = getAvailableBalance(qt.address, qt.decimals || 6, quoteChainSelector);
+                                         return <span className={bal > 0 ? 'text-primary' : 'text-slate-500'}>{bal.toFixed(2)} USDC</span>;
+                                     })()
+                                 )}
+                             </span>
+                         ) : (
+                             (() => {
                                  const selectedPair = pairs.find(p => p.id === selectedPairId);
                                  if (!selectedPair) return null;
+                                 if (!vaultChecked) return <span className="text-[9px] text-slate-600 font-mono">-- {selectedPair.baseSymbol}</span>;
                                  const bt = getBaseToken();
                                  const bal = bt ? getAvailableBalance(bt.address, bt.decimals || 18, baseChainSelector) : 0;
-                                 return (
-                                     <>
-                                         <span className="text-[8px] text-slate-500 font-mono uppercase">Balance</span>
-                                         <span className="text-[9px] text-slate-500 font-mono">{bal.toFixed(4)} {selectedPair.baseSymbol}</span>
-                                     </>
-                                 );
-                             })()}
-                         </div>
+                                 return <span className={`text-[9px] font-mono ${bal > 0 ? 'text-primary' : 'text-slate-500'}`}>{bal.toFixed(4)} {selectedPair.baseSymbol}</span>;
+                             })()
+                         )}
+                     </div>
+                     {vaultCheckError && (
+                         <div className="text-[8px] text-red-400 font-mono mb-1">{vaultCheckError}</div>
                      )}
                      <div className="relative">
                         <input 
@@ -861,7 +921,7 @@ export const Terminal: React.FC = () => {
             </Card>
         </div>
 
-        <FundingModal isOpen={isFundingOpen} onClose={() => setIsFundingOpen(false)} context="terminal" />
+        <FundingModal isOpen={isFundingOpen} onClose={() => { setIsFundingOpen(false); if (vaultChecked) checkVaultBalances(); }} context="terminal" />
     </div>
   );
 };

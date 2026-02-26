@@ -49,7 +49,7 @@ export const ETH_SEPOLIA_TOKENS: Array<{ address: string; symbol: string; name: 
     { address: '0x6dd00c4598dfac984ac25671437a77170f96a57d', symbol: 'tSPY',   name: 'S&P 500 ETF',     decimals: 18, chainSelector: 'ethereum-testnet-sepolia' },
     { address: '0xc34f4bb995c2d185b0aa88a7cad7a56def4aae57', symbol: 'tQQQ',   name: 'Nasdaq 100 ETF',  decimals: 18, chainSelector: 'ethereum-testnet-sepolia' },
     { address: '0xec07e587b64ef0e678cd7d747aa6bf2fb505c335', symbol: 'tBOND',  name: 'US Treasury Bond', decimals: 18, chainSelector: 'ethereum-testnet-sepolia' },
-    { address: '0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d', symbol: 'USDC',   name: 'USD Coin',         decimals: 6,  chainSelector: 'ethereum-testnet-sepolia' },
+    { address: '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238', symbol: 'USDC',   name: 'USD Coin',         decimals: 6,  chainSelector: 'ethereum-testnet-sepolia' },
 ];
 
 // RWA Token metadata for UI display

@@ -64,7 +64,7 @@ contract DeployWorldIDPolicy is Script {
     address constant tSPY   = 0x6dD00c4598dfAc984aC25671437A77170f96A57D;
     address constant tQQQ   = 0xC34f4bB995C2D185b0AA88a7caD7a56DEF4aaE57;
     address constant tBOND  = 0xeC07E587b64ef0E678CD7d747AA6bf2fB505C335;
-    address constant USDC   = 0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d;
+    address constant USDC   = 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
 
     function _deployPolicyProxy(
         address impl,

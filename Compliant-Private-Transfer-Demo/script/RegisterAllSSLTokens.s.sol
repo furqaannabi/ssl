@@ -39,8 +39,8 @@ contract RegisterAllSSLTokens is Script {
     address constant tQQQ   = 0xC34f4bB995C2D185b0AA88a7caD7a56DEF4aaE57;
     address constant tBOND  = 0xeC07E587b64ef0E678CD7d747AA6bf2fB505C335;
 
-    // ── USDC on ETH Sepolia (from addresses.json) ─────────────────────────────
-    address constant USDC   = 0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d;
+    // ── USDC on ETH Sepolia (Circle official) ────────────────────────────────
+    address constant USDC   = 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
 
     function _deployProxy(address impl, address owner) internal returns (address) {
         bytes memory initData = abi.encodeWithSelector(

@@ -108,7 +108,7 @@ Every order includes a **shield address** generated client-side — a fresh Ethe
 |---|---|
 | Convergence Vault | `0xE588a6c73933BFD66Af9b4A07d48bcE59c0D2d13` |
 | CRE Forwarder | `0x15fC6ae953E024d975e77382eEeC56A9101f9F88` |
-| USDC | `0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d` |
+| USDC | `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238` |
 | WorldIDVerifierRegistry | `0xb1eA4506e10e4Be8159ABcC7A7a67C614a13A425` |
 
 ---

@@ -45,7 +45,7 @@ export const CHAINS: Record<string, ChainConfig> = {
         chainSelector: "ethereum-testnet-sepolia",
         ccipChainSelector: "16015286601757825753",
         vault: "0xf68f3db7d381f6e8994445f8b6bcbe81e32820f2",
-        usdc: "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
+        usdc: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
         ccipRouter: "0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59",
         forwarder: "0x15fC6ae953E024d975e77382eEeC56A9101f9F88",
         rpcUrl: "https://sepolia.infura.io/v3/",

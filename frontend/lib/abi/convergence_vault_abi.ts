@@ -16,6 +16,17 @@ export const CONVERGENCE_VAULT_ABI = [
     },
     {
         inputs: [
+            { internalType: "address", name: "token",  type: "address" },
+            { internalType: "uint256", name: "amount", type: "uint256" },
+            { internalType: "bytes",   name: "ticket", type: "bytes"   },
+        ],
+        name: "withdrawWithTicket",
+        outputs: [],
+        stateMutability: "nonpayable",
+        type: "function",
+    },
+    {
+        inputs: [
             { internalType: "address", name: "token",         type: "address" },
             { internalType: "address", name: "policyEngine",  type: "address" },
         ],

@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Modal, Button, Icon } from './UI';
 import { TOKEN_DECIMALS, ERC20_ABI, RWA_TOKENS, ETH_SEPOLIA_TOKENS } from '../lib/contracts';
 import { CONVERGENCE_VAULT_ABI, CONVERGENCE_VAULT_ADDRESS, CONVERGENCE_CHAIN_ID } from '../lib/abi/convergence_vault_abi';
 import { useConnection, useWaitForTransactionReceipt, useSwitchChain } from 'wagmi';
 import { auth } from '../lib/auth';
-import { simulateContract, writeContract, getGasPrice } from '@wagmi/core';
-import { parseUnits } from 'viem';
+import { simulateContract, writeContract, getGasPrice, readContract } from '@wagmi/core';
+import { parseUnits, formatUnits } from 'viem';
 import { config } from '../lib/wagmi';
 
 interface FundingModalProps {
@@ -38,6 +38,8 @@ export const FundingModal: React.FC<FundingModalProps> = ({
     const [selectedTokenAddress, setSelectedTokenAddress] = useState<string>('');
     const [tokensLoading, setTokensLoading] = useState(false);
     const [isVerified, setIsVerified] = useState<boolean | null>(null);
+    const [walletBalance, setWalletBalance] = useState<string | null>(null);
+    const [balanceLoading, setBalanceLoading] = useState(false);
 
     const { isConnected, address: eoaAddress, chain } = useConnection();
     const { switchChainAsync } = useSwitchChain();
@@ -98,6 +100,31 @@ export const FundingModal: React.FC<FundingModalProps> = ({
     const { isLoading: isWaitingForReceipt, isSuccess: isTxSuccess } = useWaitForTransactionReceipt({
         hash: txHash,
     });
+
+    const checkWalletBalance = useCallback(async () => {
+        if (!selectedToken || !eoaAddress) return;
+        setBalanceLoading(true);
+        setWalletBalance(null);
+        try {
+            const raw = await readContract(config, {
+                abi: ERC20_ABI,
+                address: selectedToken.address as `0x${string}`,
+                functionName: 'balanceOf',
+                args: [eoaAddress as `0x${string}`],
+                chainId: CONVERGENCE_CHAIN_ID,
+            });
+            const decimals = selectedToken.decimals || TOKEN_DECIMALS[selectedToken.symbol] || 18;
+            setWalletBalance(formatUnits(raw as bigint, decimals));
+        } catch (err) {
+            console.error('Balance check failed:', err);
+            setWalletBalance('0');
+        } finally {
+            setBalanceLoading(false);
+        }
+    }, [selectedToken, eoaAddress]);
+
+    // Clear balance when token changes
+    useEffect(() => { setWalletBalance(null); }, [selectedTokenAddress]);
 
     const handleDeposit = async () => {
         if (!isConnected) {
@@ -282,7 +309,36 @@ export const FundingModal: React.FC<FundingModalProps> = ({
 
                             {/* Amount */}
                             <div>
-                                <label className="text-[10px] text-slate-500 uppercase tracking-widest font-mono mb-2 block">Amount</label>
+                                <div className="flex justify-between items-center mb-2">
+                                    <label className="text-[10px] text-slate-500 uppercase tracking-widest font-mono">Amount</label>
+                                    <div className="flex items-center gap-2">
+                                        {walletBalance !== null && (
+                                            <span className="text-[10px] font-mono text-slate-400">
+                                                Wallet: <span className="text-primary">{parseFloat(walletBalance).toLocaleString(undefined, { maximumFractionDigits: 4 })}</span> {selectedToken?.symbol}
+                                            </span>
+                                        )}
+                                        <button
+                                            type="button"
+                                            onClick={checkWalletBalance}
+                                            disabled={balanceLoading || !isConnected || !selectedToken}
+                                            className="text-[10px] font-mono text-primary border border-primary/30 px-2 py-0.5 rounded hover:bg-primary/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+                                        >
+                                            {balanceLoading
+                                                ? <><span className="w-2 h-2 border border-primary border-t-transparent rounded-full animate-spin inline-block"></span> Checking…</>
+                                                : <><Icon name="account_balance_wallet" className="text-[10px]" /> Check Balance</>
+                                            }
+                                        </button>
+                                        {walletBalance !== null && parseFloat(walletBalance) > 0 && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setAmount(parseFloat(walletBalance).toString())}
+                                                className="text-[10px] font-mono text-slate-400 border border-slate-600 px-2 py-0.5 rounded hover:bg-slate-700 transition-colors"
+                                            >
+                                                Max
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
                                 <div className="relative">
                                     <input
                                         type="number"
