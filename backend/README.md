@@ -55,7 +55,7 @@ Returns user details and token balances from the Convergence vault.
 
 `POST /api/verify` *(auth required)*
 
-Receives the World ID proof from the frontend, forwards it to the CRE `verify-and-order-workflow` via SSE stream. The CRE TEE verifies the proof and calls `onReport(type=0, userAddress)` on the `WorldIDVerifierRegistry` contract.
+Receives the World ID proof from the frontend, forwards it to the CRE `verify-workflow` via SSE stream. The CRE TEE verifies the proof and calls `onReport(type=0, userAddress)` on the `WorldIDVerifierRegistry` contract.
 
 **Request:**
 ```json
@@ -141,16 +141,6 @@ Called by the CRE matching workflow after a match. Before settling, the backend 
 
 #### Cancel Order
 `POST /api/order/:id/cancel` *(auth required)*
-
----
-
-### Withdrawals
-
-#### Request Withdrawal
-`POST /api/withdraw` *(auth required)*
-
-#### List Withdrawals
-`GET /api/withdraw?status=COMPLETED` *(auth required)*
 
 ---
 

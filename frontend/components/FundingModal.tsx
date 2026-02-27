@@ -161,8 +161,53 @@ export const FundingModal: React.FC<FundingModalProps> = ({
                 }
             }
 
+            // Pre-check: token must be registered in the Convergence vault
+            const policyEngine = await readContract(config, {
+                abi: CONVERGENCE_VAULT_ABI,
+                address: CONVERGENCE_VAULT_ADDRESS,
+                functionName: 'sPolicyEngines',
+                args: [selectedToken.address as `0x${string}`],
+                chainId: CONVERGENCE_CHAIN_ID,
+            }) as `0x${string}`;
+
+            if (!policyEngine || policyEngine === '0x0000000000000000000000000000000000000000') {
+                setError(
+                    `${selectedToken.symbol} is not registered in the Convergence vault. ` +
+                    `Run: forge script script/RegisterAllSSLTokens.s.sol --rpc-url $RPC_URL --broadcast --private-key $PRIVATE_KEY`
+                );
+                return;
+            }
+
             const decimals = selectedToken.decimals || TOKEN_DECIMALS[selectedToken.symbol] || 18;
             const amountUnits = parseUnits(amount, decimals);
+
+            // Check existing allowance — skip approve if already sufficient
+            const allowance = await readContract(config, {
+                abi: ERC20_ABI,
+                address: selectedToken.address as `0x${string}`,
+                functionName: 'allowance',
+                args: [eoaAddress as `0x${string}`, CONVERGENCE_VAULT_ADDRESS],
+                chainId: CONVERGENCE_CHAIN_ID,
+            }) as bigint;
+
+            if (allowance >= amountUnits) {
+                // Allowance already covers this deposit — go straight to depositing
+                setStep('DEPOSITING');
+                const gasPrice = await getGasPrice(config, { chainId: CONVERGENCE_CHAIN_ID });
+                const gasPriceWithBuffer = (gasPrice * 120n) / 100n;
+                const { request } = await simulateContract(config, {
+                    abi: CONVERGENCE_VAULT_ABI,
+                    address: CONVERGENCE_VAULT_ADDRESS,
+                    functionName: 'deposit',
+                    args: [selectedToken.address as `0x${string}`, amountUnits],
+                    account: eoaAddress as `0x${string}`,
+                    chainId: CONVERGENCE_CHAIN_ID,
+                    gasPrice: gasPriceWithBuffer,
+                });
+                const depositHash = await writeContract(config, request);
+                setTxHash(depositHash);
+                return;
+            }
 
             // Step 1 — Approve Convergence vault to spend the token
             setStep('APPROVING');

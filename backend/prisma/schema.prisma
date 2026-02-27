@@ -21,6 +21,7 @@ model Order {
   baseChainSelector  String      // chain where the RWA token lives
   quoteChainSelector String      // chain where USDC is (buyer chooses)
   bridgeTxHash       String?     // Cross-chain: CCIP bridge tx hash on source chain
+  encryptedPayload   String?     // ECIES-encrypted order payload for CRE TEE
   pair               Pair        @relation(fields: [pairId], references: [id])
   user               User?       @relation(fields: [userAddress], references: [address])
 }

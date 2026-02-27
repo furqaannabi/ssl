@@ -1,9 +1,9 @@
 {
   "authorizedEVMAddress": "0x35134987bB541607Cd45e62Dd1feA4F587607817",
 
-  "creEncryptionPublicKey": "0x0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+  "creEncryptionPublicKey": "0x0250d47e83eea51653c8910635f58e39e2d6442d27c245674ad39f63e554f53f9e",
 
-  "creDecryptionKey": "0x0000000000000000000000000000000000000000000000000000000000000001",
+  "creDecryptionKey": "0x2dec0e09713b70f5bf4f7a3bb70a0a3e2f7de51ff76039d5bf90a8148cdf0e46",
 
   "backendUrl": "http://localhost:3001",
 

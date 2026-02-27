@@ -14,44 +14,6 @@ export interface VerifyPayload {
     selectedChains?: string[];
 }
 
-export interface OrderPayload {
-    action: "order";
-    pairId: string;
-    amount: string;
-    price: string;
-    side: "BUY" | "SELL";
-    stealthAddress: string;
-}
-
-export interface MatchPayload {
-    action: "settle_match";
-    baseTokenAddress: string;
-    quoteTokenAddress: string;
-    tradeAmount: string;        // base token amount in wei (buyer receives)
-    quoteAmount: string;        // quote token amount in wei (seller receives)
-    baseChainSelector: string;  // chain where RWA lives — vault to call for type=1
-    crossChain?: boolean;
-    sourceChainSelector?: string;
-    destChainSelector?: string;
-    ccipDestSelector?: string;
-    buyer: {
-        orderId: string;
-        stealthAddress: string;
-    };
-    seller: {
-        orderId: string;
-        stealthAddress: string;
-    };
-}
-
-export interface WithdrawPayload {
-    action: "withdraw";
-    withdrawalId: string;
-    userAddress: string;
-    amount: string;
-    token: string;
-}
-
 export interface MatchOrderPayload {
     action:         "match_order";
     encryptedOrder: string;  // base64 ECIES ciphertext
@@ -60,7 +22,7 @@ export interface MatchOrderPayload {
     orderId:        string;
 }
 
-export type CREPayload = VerifyPayload | OrderPayload | MatchPayload | WithdrawPayload | MatchOrderPayload;
+export type CREPayload = VerifyPayload;
 
 // ─── Helpers for production JWT auth (CRE HTTP trigger) ───
 
@@ -182,7 +144,7 @@ async function sendToCREProduction(payload: CREPayload, onLog?: (log: string) =>
 // ─── Non-production: local CLI simulation ───
 
 function sendToCRESimulate(payload: CREPayload, onLog?: (log: string) => void): Promise<unknown> {
-    const workflowPath = path.resolve(__dirname, "../../../cre/verify-and-order-workflow");
+    const workflowPath = path.resolve(__dirname, "../../../cre/verify-workflow");
     const projectRoot = path.resolve(__dirname, "../../../cre");
 
     return new Promise((resolve, reject) => {

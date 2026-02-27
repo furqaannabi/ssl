@@ -18,7 +18,7 @@ User ──> Backend (order book + CRE matching) ──> Convergence Vault (on-c
 |---|---|
 | **Compliant-Private-Transfer-Demo/** | Solidity contracts — `WorldIDVerifierRegistry`, `WorldIDPolicy` (ACE), deployment scripts |
 | **cre/matching-workflow/** | CRE TEE — decrypts orders, runs private matching, calls Convergence API |
-| **cre/verify-and-order-workflow/** | CRE TEE — verifies World ID proofs, sends on-chain reports to `WorldIDVerifierRegistry` |
+| **cre/verify-workflow/** | CRE TEE — verifies World ID proofs, sends on-chain reports to `WorldIDVerifierRegistry` |
 | **backend/** | Bun + Hono — auth, order book, AI advisor, price feeds, CRE bridge |
 | **frontend/** | React + Vite — trading terminal, World ID widget, AI chatbot |
 
@@ -47,7 +47,7 @@ Every token in the vault has a `PolicyEngine` with a `WorldIDPolicy` attached. B
 ### Phase 1 — Identity Verification
 
 ```
-User                  Backend                  CRE TEE (verify-and-order-workflow)
+User                  Backend                  CRE TEE (verify-workflow)
  │                       │                               │
  │── World ID proof ────>│                               │
  │                       │── POST {action: "verify"} ───>│
@@ -92,13 +92,11 @@ Every order includes a **shield address** generated client-side — a fresh Ethe
 
 ---
 
-## Report Types (verify-and-order-workflow)
+## Report Types (verify-workflow)
 
 | Type | Name | Encoding |
 |---|---|---|
 | 0 | verify | `(uint8, address user)` — sent to `WorldIDVerifierRegistry` |
-| 1 | settle | `(uint8, bytes32 orderId, address stealthBuyer, address stealthSeller, address tokenA, address tokenB, uint256 amountA, uint256 amountB)` |
-| 2 | withdraw | `(uint8, address user, uint256 withdrawalId)` |
 
 ---
 
@@ -159,7 +157,7 @@ forge script script/03_DeployWorldIDPolicy.s.sol \
 ```
 
 Copy the printed `WorldIDVerifierRegistry` address into:
-- `cre/verify-and-order-workflow/config.staging.json` → `chains.ethSepolia.worldIdRegistry`
+- `cre/verify-workflow/config.staging.json` → `chains.ethSepolia.worldIdRegistry`
 - `cre/matching-workflow/config.staging.json` → `worldIdRegistry`
 - `backend/.env` → `WORLD_ID_REGISTRY`
 
@@ -179,13 +177,13 @@ bun run dev
 
 ```bash
 cd cre/matching-workflow && bun install
-cd cre/verify-and-order-workflow && bun install
+cd cre/verify-workflow && bun install
 ```
 
 Simulate:
 ```bash
 cre workflow simulate matching-workflow --target=staging-settings
-cre workflow simulate verify-and-order-workflow --target=staging-settings
+cre workflow simulate verify-workflow --target=staging-settings
 ```
 
 ### Frontend

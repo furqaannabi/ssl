@@ -2,12 +2,14 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Icon, Card, Button, Badge, useToast } from './UI';
 import { OracleIndicator } from './OracleIndicator';
 import { FundingModal } from './FundingModal';
-import { useConnection } from 'wagmi';
+import { useConnection, useSignMessage } from 'wagmi';
 import { signTypedData } from '@wagmi/core';
 import { CHAINS } from '../lib/chain-config';
 import { auth } from '../lib/auth';
 import { ETH_SEPOLIA_TOKENS } from '../lib/contracts';
 import { config } from '../lib/wagmi';
+import { encryptOrder } from '../lib/crypto';
+import { fetchCREPublicKey, signEncryptedOrder } from '../lib/cre-client';
 
 const CONVERGENCE_VAULT: `0x${string}` = '0xE588a6c73933BFD66Af9b4A07d48bcE59c0D2d13';
 const CONVERGENCE_DOMAIN = {
@@ -35,6 +37,7 @@ export const Terminal: React.FC = () => {
   const logEndRef = useRef<HTMLDivElement>(null);
   
   const { address: eoaAddress, isConnected } = useConnection();
+  const { signMessageAsync } = useSignMessage();
 
   const API_URL = ""; // Use Vite proxy for CORS/cookie consistency
   // Order State
@@ -312,6 +315,20 @@ export const Terminal: React.FC = () => {
         setLogs([]); // Clear previous logs
         setStatus('SENDING');
 
+        // ── Encrypt order for CRE TEE ──────────────────────────────────────────
+        let encrypted: string | undefined;
+        let signature: string | undefined;
+        try {
+            setLogs(['Encrypting order for CRE TEE...']);
+            const crePublicKey = await fetchCREPublicKey();
+            encrypted = await encryptOrder({ pairId: pair.id, side, amount: String(amount), price: String(price), stealthAddress }, crePublicKey);
+            signature = await signEncryptedOrder(encrypted, signMessageAsync as any);
+            setLogs(prev => [...prev, 'Order encrypted. Submitting to TEE...']);
+        } catch (encErr: any) {
+            console.warn('[Terminal] Encryption failed, using plaintext fallback:', encErr?.message);
+            setLogs(prev => [...prev, '[Fallback] Encryption unavailable — submitting plaintext order.']);
+        }
+
         const payload = {
             pairId: pair.id,
             amount: String(amount),
@@ -321,9 +338,8 @@ export const Terminal: React.FC = () => {
             userAddress: eoaAddress,
             baseChainSelector,
             quoteChainSelector,
+            ...(encrypted ? { encrypted, signature, fallbackEnabled: true } : {}),
         };
-
-        console.log("Placing order:", payload);
 
         const response = await fetch(`${API_URL}/api/order`, {
             method: "POST",

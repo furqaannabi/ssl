@@ -13,12 +13,12 @@ import { order } from "./routes/order";
 import { auth } from "./routes/auth";
 import { user } from "./routes/user";
 import { pairs } from "./routes/pairs";
-import { withdraw } from "./routes/withdraw";
 import oracle from "./routes/oracle";
 import { chat } from "./routes/chat";
 import { tokens } from "./routes/tokens";
 import { compliance } from "./routes/compliance";
 import { ArbitrageMonitorService } from "./services/arbitrage-monitor.service";
+import { seedTokens } from "./lib/seed-tokens";
 
 
 const app = new Hono();
@@ -41,7 +41,6 @@ app.route("/api/order", order);
 app.route("/api/auth", auth);
 app.route("/api/user", user);
 app.route("/api/pairs", pairs);
-app.route("/api/withdraw", withdraw);
 app.route("/api/oracle", oracle);
 app.route("/api/chat", chat);
 app.route("/api/tokens", tokens);
@@ -70,6 +69,9 @@ console.log(`
 ║   Port: ${String(config.port).padEnd(28)}║
 ╚══════════════════════════════════════╝`
 );
+
+// Seed tokens + pairs from rwa-tokens.json and addresses.json
+seedTokens();
 
 // Start Arbitrage Monitor
 ArbitrageMonitorService.startMonitor(
