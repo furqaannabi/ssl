@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Icon, Card, Button, Badge, useToast } from './UI';
 import { OracleIndicator } from './OracleIndicator';
 import { FundingModal } from './FundingModal';
-import { useConnection, useSignMessage } from 'wagmi';
+import { useAccount, useSignMessage } from 'wagmi';
 import { signTypedData } from '@wagmi/core';
 import { CHAINS } from '../lib/chain-config';
 import { auth } from '../lib/auth';
@@ -37,7 +37,7 @@ export const Terminal: React.FC = () => {
     const [price, setPrice] = useState('100.00');
     const logEndRef = useRef<HTMLDivElement>(null);
 
-    const { address: eoaAddress, isConnected } = useConnection();
+    const { address: eoaAddress, isConnected } = useAccount();
     const { signMessageAsync } = useSignMessage();
 
     const API_URL = ""; // Use Vite proxy for CORS/cookie consistency
@@ -718,10 +718,10 @@ export const Terminal: React.FC = () => {
                         {(() => {
                             const stepIndex = status === 'IDLE' ? -1 : status === 'SENDING' ? 0 : status === 'MATCHING' ? 1 : 3;
                             const steps = [
-                                { id: '01', title: 'Order Placement',   desc: 'Submitting order to secure enclave.'        },
-                                { id: '02', title: 'Dark Pool Match',   desc: 'Searching for counterparty liquidity.'      },
-                                { id: '03', title: 'Settlement Report', desc: 'CRE submitting on-chain report to Vault.'   },
-                                { id: '04', title: 'Confirmed',         desc: 'Assets routed to shield address.'           },
+                                { id: '01', title: 'Order Placement',   desc: 'Encrypted order forwarded to CRE TEE.'         },
+                                { id: '02', title: 'Dark Pool Match',   desc: 'CRE TEE matching against dark pool liquidity.' },
+                                { id: '03', title: 'Settlement Report', desc: 'CRE TEE reporting settlement to Convergence Vault.' },
+                                { id: '04', title: 'Confirmed',         desc: 'Assets settled to your shielded address.'      },
                             ];
                             return steps.map((step, i) => {
                                 const isCompleted = i < stepIndex;

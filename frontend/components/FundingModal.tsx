@@ -2,9 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Modal, Button, Icon } from './UI';
 import { TOKEN_DECIMALS, ERC20_ABI, RWA_TOKENS, ETH_SEPOLIA_TOKENS } from '../lib/contracts';
 import { CONVERGENCE_VAULT_ABI, CONVERGENCE_VAULT_ADDRESS, CONVERGENCE_CHAIN_ID } from '../lib/abi/convergence_vault_abi';
-import { useConnection, useWaitForTransactionReceipt, useSwitchChain } from 'wagmi';
+import { useAccount, useWaitForTransactionReceipt, useSwitchChain } from 'wagmi';
 import { auth } from '../lib/auth';
-import { simulateContract, writeContract, getGasPrice, readContract } from '@wagmi/core';
+import { simulateContract, writeContract, getGasPrice, readContract, getBalance } from '@wagmi/core';
 import { parseUnits, formatUnits } from 'viem';
 import { config } from '../lib/wagmi';
 
@@ -41,7 +41,7 @@ export const FundingModal: React.FC<FundingModalProps> = ({
     const [walletBalance, setWalletBalance] = useState<string | null>(null);
     const [balanceLoading, setBalanceLoading] = useState(false);
 
-    const { isConnected, address: eoaAddress, chain } = useConnection();
+    const { isConnected, address: eoaAddress, chain } = useAccount();
     const { switchChainAsync } = useSwitchChain();
 
     // Fetch tokens from backend on open
@@ -192,6 +192,11 @@ export const FundingModal: React.FC<FundingModalProps> = ({
 
             if (allowance >= amountUnits) {
                 // Allowance already covers this deposit — go straight to depositing
+                const ethBal = await getBalance(config, { address: eoaAddress as `0x${string}`, chainId: CONVERGENCE_CHAIN_ID });
+                if (ethBal.value < 1000000000000000n) {
+                    setError(`Insufficient Sepolia ETH for gas. Get some from faucets.chain.link or sepoliafaucet.com.`);
+                    return;
+                }
                 setStep('DEPOSITING');
                 const gasPrice = await getGasPrice(config, { chainId: CONVERGENCE_CHAIN_ID });
                 const gasPriceWithBuffer = (gasPrice * 120n) / 100n;
@@ -203,9 +208,24 @@ export const FundingModal: React.FC<FundingModalProps> = ({
                     account: eoaAddress as `0x${string}`,
                     chainId: CONVERGENCE_CHAIN_ID,
                     gasPrice: gasPriceWithBuffer,
+                    gas: 500_000n,
                 });
                 const depositHash = await writeContract(config, request);
                 setTxHash(depositHash);
+                return;
+            }
+
+            // Pre-check: ensure wallet has enough ETH for gas
+            const ethBalance = await getBalance(config, {
+                address: eoaAddress as `0x${string}`,
+                chainId: CONVERGENCE_CHAIN_ID,
+            });
+            if (ethBalance.value < 1000000000000000n) { // < 0.001 ETH
+                setError(
+                    `Insufficient Sepolia ETH for gas fees. ` +
+                    `Your wallet has ${formatUnits(ethBalance.value, 18)} ETH. ` +
+                    `Get Sepolia ETH from a faucet (e.g. faucets.chain.link or sepoliafaucet.com).`
+                );
                 return;
             }
 
@@ -223,6 +243,7 @@ export const FundingModal: React.FC<FundingModalProps> = ({
                 account: eoaAddress as `0x${string}`,
                 chainId: CONVERGENCE_CHAIN_ID,
                 gasPrice: gasPriceWithBuffer,
+                gas: 100_000n,
             });
 
             const approveHash = await writeContract(config, approveRequest);
@@ -265,6 +286,7 @@ export const FundingModal: React.FC<FundingModalProps> = ({
                             account: eoaAddress as `0x${string}`,
                             chainId: CONVERGENCE_CHAIN_ID,
                             gasPrice: gasPriceWithBuffer,
+                            gas: 500_000n,
                         });
 
                         const depositHash = await writeContract(config, request);
