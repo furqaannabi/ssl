@@ -212,4 +212,4 @@ Order lifecycle: `PENDING` → `OPEN` → `MATCHED` → `SETTLED` (or `CANCELLED
 | `src/lib/matching-engine.ts` | Local plaintext matching fallback (used if CRE unavailable) |
 | `src/lib/config.ts` | Env config |
 | `prisma/schema.prisma` | DB schema |
-| `rwa-tokens.json` | ETH Sepolia token addresses for all 9 RWA tokens + USDC |
+| `rwa-tokens.json` | ETH Sepolia token addresses for the 9 RWA tokens (USDC seeded from `addresses.json`) |

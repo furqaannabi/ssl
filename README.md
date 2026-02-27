@@ -169,7 +169,7 @@ The registry is already deployed at `0xb1eA4506e10e4Be8159ABcC7A7a67C614a13A425`
 cd backend
 cp .env.example .env   # set EVM_PRIVATE_KEY, DATABASE_URL, etc.
 bun install
-npx prisma migrate dev
+bun run db:push
 bun run dev
 ```
 

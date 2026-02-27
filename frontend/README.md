@@ -11,7 +11,7 @@ React + Vite frontend for the Stealth Settlement Layer. A dark-themed trading te
 - **Order Entry** -- Limit orders with BUY/SELL on any whitelisted RWA pair (World ID verified users only)
 - **Order Book** -- Real-time obfuscated order book with bid/ask depth
 - **Portfolio** -- Token balances from the Convergence vault on Ethereum Sepolia
-- **Deposit (Funding)** -- Deposit any of the 10 whitelisted tokens (9 RWA + USDC) into the Convergence vault; uses `depositWithPermit` (EIP-2612, 1 tx) with fallback to `approve + deposit` (2 tx)
+- **Deposit (Funding)** -- Deposit any of the 10 whitelisted tokens (9 RWA + USDC) into the Convergence vault; skips `approve` if allowance is already sufficient, otherwise does `approve` → `deposit` (2 tx)
 - **Withdrawal** -- Request withdrawal of deposited tokens (World ID verified users only)
 - **AI Financial Advisor** -- Floating chatbot (bottom-right) powered by Gemini 2.5 Flash:
   - Portfolio analysis with real-time prices

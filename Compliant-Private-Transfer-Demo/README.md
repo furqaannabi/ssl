@@ -101,7 +101,7 @@ Wired : tGOOGL ...
 
 ### Step 3 — Configure the CRE workflow
 
-Fill in the registry address in `cre/verify-and-order-workflow/config.staging.json`:
+Fill in the registry address in `cre/verify-workflow/config.staging.json`:
 
 ```json
 "ethSepolia": {
