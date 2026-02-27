@@ -12,7 +12,7 @@ model Order {
   amount             String
   price              String
   side               OrderSide
-  stealthAddress     String
+  shieldAddress      String
   status             OrderStatus
   createdAt          DateTime    @default(now())
   userAddress        String?
@@ -104,8 +104,8 @@ model Settlement {
   status            SettlementStatus @default(PENDING)
   sourceChain       String?
   destChain         String?
-  stealthBuyer      String?
-  stealthSeller     String?
+  shieldBuyer       String?
+  shieldSeller      String?
   ccipMessageId     String?
   destChainSelector String?
   token             String?

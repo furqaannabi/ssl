@@ -3,49 +3,110 @@ import { Icon, Card, Button } from './UI';
 import { FundingModal } from './FundingModal';
 import { WithdrawalModal } from './WithdrawalModal';
 import { TOKEN_DECIMALS, RWA_TOKENS, ETH_SEPOLIA_TOKENS } from '../lib/contracts';
-import { formatUnits } from 'viem';
-import { signTypedData } from '@wagmi/core';
-import { useConnection } from 'wagmi';
-import { config } from '../lib/wagmi';
+import { formatUnits, getAddress } from 'viem';
+import { useConnection, useSignTypedData } from 'wagmi';
 
-const CONVERGENCE_VAULT: `0x${string}` = '0xE588a6c73933BFD66Af9b4A07d48bcE59c0D2d13';
-
+const CONVERGENCE_VAULT = '0xE588a6c73933BFD66Af9b4A07d48bcE59c0D2d13' as const;
 const CONVERGENCE_DOMAIN = {
-    name:              'CompliantPrivateTokenDemo',
-    version:           '0.0.1',
-    chainId:           11155111,
+    name: 'CompliantPrivateTokenDemo',
+    version: '0.0.1',
+    chainId: 11155111,
     verifyingContract: CONVERGENCE_VAULT,
 } as const;
 
 const RETRIEVE_BALANCES_TYPES = {
     'Retrieve Balances': [
-        { name: 'account',   type: 'address' },
+        { name: 'account', type: 'address' },
         { name: 'timestamp', type: 'uint256' },
     ],
 } as const;
 
 const TYPE_ICONS: Record<string, { icon: string; colorClass: string }> = {
-    STOCK:   { icon: 'show_chart',             colorClass: 'text-blue-400'   },
-    ETF:     { icon: 'pie_chart',              colorClass: 'text-purple-400' },
-    BOND:    { icon: 'account_balance',        colorClass: 'text-amber-400'  },
-    STABLE:  { icon: 'account_balance_wallet', colorClass: 'text-slate-400'  },
-    UNKNOWN: { icon: 'token',                  colorClass: 'text-slate-500'  },
+    STOCK: { icon: 'show_chart', colorClass: 'text-blue-400' },
+    ETF: { icon: 'pie_chart', colorClass: 'text-purple-400' },
+    BOND: { icon: 'account_balance', colorClass: 'text-amber-400' },
+    STABLE: { icon: 'account_balance_wallet', colorClass: 'text-slate-400' },
+    UNKNOWN: { icon: 'token', colorClass: 'text-slate-500' },
 };
 
 interface VaultBalance { token: string; amount: string; }
 
 export const Portfolio: React.FC = () => {
-    const [isFundingOpen, setIsFundingOpen]       = useState(false);
+    const [isFundingOpen, setIsFundingOpen] = useState(false);
     const [isWithdrawalOpen, setIsWithdrawalOpen] = useState(false);
 
-    const [vaultBalances, setVaultBalances] = useState<VaultBalance[]>([]);
-    const [balanceChecked, setBalanceChecked] = useState(false);
-    const [isChecking, setIsChecking]         = useState(false);
-    const [checkError, setCheckError]          = useState<string | null>(null);
+    const [contextBalances, setBalances] = useState<VaultBalance[]>([]);
+    const [isChecking, setIsLoading] = useState(false);
+    const [checkError, setError] = useState<string | null>(null);
+
+    const { signTypedDataAsync } = useSignTypedData();
+    const { address: eoaAddress, isConnected } = useConnection();
+
+    const refreshBalances = useCallback(async () => {
+        if (!isConnected || !eoaAddress) {
+            setBalances([]);
+            return;
+        }
+
+        setIsLoading(true);
+        setError(null);
+
+        try {
+            const timestamp = Math.floor(Date.now() / 1000);
+
+            const signature = await signTypedDataAsync({
+                account: getAddress(eoaAddress),
+                domain: CONVERGENCE_DOMAIN,
+                types: RETRIEVE_BALANCES_TYPES,
+                primaryType: 'Retrieve Balances',
+                message: {
+                    account: getAddress(eoaAddress),
+                    timestamp: BigInt(timestamp),
+                },
+            });
+
+            // Proxy to backend which calls Convergence API
+            const res = await fetch('/api/user/vault-balances', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ timestamp, auth: signature }),
+            });
+
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.error || 'Failed to fetch vault balances');
+            }
+
+            const data = await res.json();
+            if (data.success && data.balances) {
+                const mappedAssets = data.balances.map((b: any) => {
+                    const addr = b.token.toLowerCase();
+                    const tokenMeta = ETH_SEPOLIA_TOKENS.find(t => t.address.toLowerCase() === addr);
+                    const decimals = tokenMeta?.decimals ?? TOKEN_DECIMALS[tokenMeta?.symbol ?? ''] ?? 18;
+                    const parsedBalance = parseFloat(formatUnits(BigInt(b.amount), decimals));
+
+                    return {
+                        contractAddress: b.token,
+                        token: b.token,
+                        balance: parsedBalance,
+                    };
+                });
+                setBalances(mappedAssets);
+            }
+        } catch (err: any) {
+            console.error('Failed to fetch vault balances:', err);
+            if (err.message && (err.message.includes('User rejected') || err.message.includes('rejected'))) {
+                setError('Signature rejected for balance retrieval.');
+            } else {
+                setError(err.message || 'Failed to fetch vault balances');
+            }
+        } finally {
+            setIsLoading(false);
+        }
+    }, [isConnected, eoaAddress, signTypedDataAsync]);
 
     const [prices, setPrices] = useState<Record<string, { current: number; changePercent?: number }>>({});
-
-    const { address: eoaAddress, isConnected } = useConnection();
 
     // Fetch live prices from backend every 15s
     useEffect(() => {
@@ -61,94 +122,51 @@ export const Portfolio: React.FC = () => {
                     });
                     setPrices(map);
                 }
-            } catch {}
+            } catch { }
         };
         load();
         const id = setInterval(load, 15000);
         return () => clearInterval(id);
     }, []);
 
-    // Sign EIP-712, then POST to backend proxy → Convergence /balances
-    const checkVaultBalances = useCallback(async () => {
-        if (!isConnected || !eoaAddress) { setCheckError('Connect your wallet first.'); return; }
-        setIsChecking(true);
-        setCheckError(null);
-        try {
-            const timestamp = Math.floor(Date.now() / 1000);
-
-            const sig = await signTypedData(config, {
-                domain:      CONVERGENCE_DOMAIN,
-                types:       RETRIEVE_BALANCES_TYPES,
-                primaryType: 'Retrieve Balances',
-                message: {
-                    account:   eoaAddress as `0x${string}`,
-                    timestamp: BigInt(timestamp),
-                },
-            });
-
-            // Backend proxy: POST /api/user/vault-balances
-            const res = await fetch('/api/user/vault-balances', {
-                method:      'POST',
-                headers:     { 'Content-Type': 'application/json' },
-                credentials: 'include',
-                body:        JSON.stringify({ timestamp, auth: sig }),
-            });
-
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                throw new Error((err as any).error || 'Failed to fetch vault balances');
-            }
-
-            const data = await res.json();
-            setVaultBalances(data.balances ?? []);
-            setBalanceChecked(true);
-        } catch (err: any) {
-            setCheckError(err.shortMessage || err.message || 'Balance check failed');
-        } finally {
-            setIsChecking(false);
-        }
-    }, [isConnected, eoaAddress]);
-
     // address → formatted balance
     const balanceMap: Record<string, number> = {};
-    vaultBalances.forEach(b => {
-        const addr    = b.token.toLowerCase();
-        const token   = ETH_SEPOLIA_TOKENS.find(t => t.address.toLowerCase() === addr);
-        const decimals = token?.decimals ?? TOKEN_DECIMALS[token?.symbol ?? ''] ?? 18;
-        balanceMap[addr] = parseFloat(formatUnits(BigInt(b.amount), decimals));
+    contextBalances.forEach(b => {
+        const addr = b.contractAddress?.toLowerCase() || '';
+        balanceMap[addr] = b.balance;
     });
 
     const totalValue = ETH_SEPOLIA_TOKENS.reduce((sum, t) => {
-        const bal   = balanceMap[t.address.toLowerCase()] ?? 0;
+        const bal = balanceMap[t.address.toLowerCase()] ?? 0;
         const price = t.symbol === 'USDC' ? 1 : (prices[t.symbol]?.current ?? 0);
         return sum + bal * price;
     }, 0);
 
     // Rows sorted by vault balance desc
     const rows = ETH_SEPOLIA_TOKENS.map(t => {
-        const meta     = RWA_TOKENS[t.symbol];
-        const typeKey  = meta?.type ?? 'UNKNOWN';
+        const meta = RWA_TOKENS[t.symbol];
+        const typeKey = meta?.type ?? 'UNKNOWN';
         const typeInfo = TYPE_ICONS[typeKey] ?? TYPE_ICONS.UNKNOWN;
-        const bal      = balanceMap[t.address.toLowerCase()] ?? 0;
-        const price    = t.symbol === 'USDC' ? 1 : (prices[t.symbol]?.current ?? 0);
-        const value    = bal * price;
-        const change   = prices[t.symbol]?.changePercent;
+        const bal = balanceMap[t.address.toLowerCase()] ?? 0;
+        const price = t.symbol === 'USDC' ? 1 : (prices[t.symbol]?.current ?? 0);
+        const value = bal * price;
+        const change = prices[t.symbol]?.changePercent;
         return { token: t, meta, typeInfo, bal, price, value, change };
     }).sort((a, b) => b.bal - a.bal);
 
     const withdrawalAssets = rows.filter(r => r.bal > 0).map(r => ({
-        symbol:     r.token.symbol,
-        name:       r.meta?.name ?? r.token.name,
-        type:       r.meta?.type ?? 'Unknown',
+        symbol: r.token.symbol,
+        name: r.meta?.name ?? r.token.name,
+        type: r.meta?.type ?? 'Unknown',
         allocation: 0,
-        value:      `$${r.value.toFixed(2)}`,
-        status:     'Active' as const,
-        icon:       r.typeInfo.icon,
+        value: `$${r.value.toFixed(2)}`,
+        status: 'Active' as const,
+        icon: r.typeInfo.icon,
         colorClass: r.typeInfo.colorClass,
-        address:    r.token.address,
-        rawValue:   r.value,
-        price:      r.price,
-        balance:    r.bal,
+        address: r.token.address,
+        rawValue: r.value,
+        price: r.price,
+        balance: r.bal,
     }));
 
     return (
@@ -164,11 +182,11 @@ export const Portfolio: React.FC = () => {
                     <Button
                         variant="ghost"
                         icon={isChecking ? 'hourglass_empty' : 'account_balance'}
-                        onClick={checkVaultBalances}
+                        onClick={refreshBalances}
                         disabled={isChecking || !isConnected}
                         className="border border-primary/40 text-primary hover:bg-primary/10"
                     >
-                        {isChecking ? 'Signing…' : (balanceChecked ? 'Refresh Balances' : 'Check Balances')}
+                        {isChecking ? 'Checking…' : 'Refresh Balances'}
                     </Button>
                     <Button variant="ghost" icon="remove_circle_outline" onClick={() => setIsWithdrawalOpen(true)} className="border border-red-500/30 text-red-400 hover:bg-red-500/10">
                         Withdraw
@@ -188,10 +206,10 @@ export const Portfolio: React.FC = () => {
             )}
 
             {/* Prompt to check */}
-            {!balanceChecked && !isChecking && (
+            {!isConnected && !isChecking && (
                 <div className="bg-primary/5 border border-primary/20 p-3 rounded flex items-center gap-3 text-slate-400 text-xs shrink-0">
                     <Icon name="lock" className="text-primary text-sm shrink-0" />
-                    <span>Balances are private. Click <strong className="text-primary">Check Balances</strong> — your wallet will sign an EIP-712 message to authenticate with the Convergence vault.</span>
+                    <span>Balances are private. <strong className="text-primary">Connect your wallet</strong> to view your Convergence vault balance.</span>
                 </div>
             )}
 
@@ -203,12 +221,12 @@ export const Portfolio: React.FC = () => {
                     </div>
                     <h3 className="text-slate-500 text-xs uppercase font-semibold tracking-widest mb-2">Total Value Locked</h3>
                     <div className="text-2xl lg:text-3xl font-mono font-medium text-white tracking-tight">
-                        {balanceChecked
+                        {isConnected && !isChecking
                             ? `$${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                             : <span className="text-slate-600 blur-sm select-none">$0.00</span>
                         }
                     </div>
-                    <div className="mt-2 text-xs text-slate-500">{balanceChecked ? 'Live · Convergence vault' : 'Sign to reveal'}</div>
+                    <div className="mt-2 text-xs text-slate-500">{isConnected && !isChecking ? 'Live · Convergence vault' : 'Checking…'}</div>
                 </Card>
 
                 <Card className="p-5 relative overflow-hidden">
@@ -218,7 +236,7 @@ export const Portfolio: React.FC = () => {
                     </div>
                     <h3 className="text-slate-500 text-xs uppercase font-semibold tracking-widest mb-2">Holdings</h3>
                     <div className="text-2xl lg:text-3xl font-mono font-medium text-primary tracking-tight">
-                        {balanceChecked ? rows.filter(r => r.bal > 0).length : <span className="text-slate-600">—</span>}
+                        {isConnected && !isChecking ? rows.filter(r => r.bal > 0).length : <span className="text-slate-600">—</span>}
                         <span className="text-slate-500 text-lg ml-2">/ {ETH_SEPOLIA_TOKENS.length}</span>
                     </div>
                     <div className="mt-2 text-xs text-slate-500">Tokens with vault balance</div>
@@ -242,7 +260,7 @@ export const Portfolio: React.FC = () => {
                             <Icon name="table_chart" className="text-slate-500" />
                             All Vault Tokens
                         </h2>
-                        {balanceChecked && (
+                        {isConnected && !isChecking && (
                             <span className="text-[10px] font-mono text-primary bg-primary/10 border border-primary/20 px-2 py-1 rounded flex items-center gap-1">
                                 <span className="w-1.5 h-1.5 bg-primary rounded-full inline-block animate-pulse"></span>
                                 Live · Convergence API
@@ -262,7 +280,7 @@ export const Portfolio: React.FC = () => {
                             </thead>
                             <tbody className="divide-y divide-border-dark text-sm font-mono">
                                 {rows.map(({ token, meta, typeInfo, bal, price, value, change }) => {
-                                    const hasBalance = balanceChecked && bal > 0;
+                                    const hasBalance = isConnected && !isChecking && bal > 0;
                                     return (
                                         <tr key={token.address} className="group hover:bg-white/5 transition-colors">
                                             <td className="px-6 py-4">
@@ -290,7 +308,7 @@ export const Portfolio: React.FC = () => {
                                                 {price > 0 ? `$${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
                                             </td>
                                             <td className="px-6 py-4 text-right">
-                                                {!balanceChecked ? (
+                                                {!isConnected ? (
                                                     <span className="text-slate-700 select-none blur-sm">0.0000</span>
                                                 ) : isChecking ? (
                                                     <span className="w-3 h-3 border border-primary border-t-transparent rounded-full animate-spin inline-block"></span>
@@ -301,7 +319,7 @@ export const Portfolio: React.FC = () => {
                                                 )}
                                             </td>
                                             <td className="px-6 py-4 text-right">
-                                                {!balanceChecked ? (
+                                                {!isConnected ? (
                                                     <span className="text-slate-700 blur-sm select-none">$0.00</span>
                                                 ) : (
                                                     <span className={hasBalance ? 'text-white' : 'text-slate-600'}>
@@ -320,12 +338,12 @@ export const Portfolio: React.FC = () => {
 
             <FundingModal
                 isOpen={isFundingOpen}
-                onClose={() => { setIsFundingOpen(false); if (balanceChecked) checkVaultBalances(); }}
+                onClose={() => { setIsFundingOpen(false); refreshBalances(); }}
                 context="portfolio"
             />
             <WithdrawalModal
                 isOpen={isWithdrawalOpen}
-                onClose={() => { setIsWithdrawalOpen(false); if (balanceChecked) checkVaultBalances(); }}
+                onClose={() => { setIsWithdrawalOpen(false); refreshBalances(); }}
                 assets={withdrawalAssets}
             />
         </div>

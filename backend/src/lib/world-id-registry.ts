@@ -20,7 +20,7 @@ const REGISTRY_ABI = [
     {
         inputs: [
             { name: "account", type: "address" },
-            { name: "verified", type: "bool"    },
+            { name: "verified", type: "bool" },
         ],
         name: "setVerified",
         outputs: [],
@@ -53,9 +53,10 @@ export async function checkWorldIDVerified(userAddress: string): Promise<boolean
         return false;
     }
 
+    const rpcUrl = process.env.ETH_SEPOLIA_RPC_URL || "https://eth-sepolia.g.alchemy.com/v2/demo";
     const publicClient = createPublicClient({
         chain: sepolia,
-        transport: http(process.env.ETH_SEPOLIA_RPC_URL || "https://rpc.sepolia.org"),
+        transport: http(rpcUrl),
     });
 
     const verified = await publicClient.readContract({
@@ -81,15 +82,17 @@ export async function markWorldIDVerified(userAddress: string): Promise<void> {
 
     const account = privateKeyToAccount(config.evmPrivateKey);
 
+    const rpcUrl = process.env.ETH_SEPOLIA_RPC_URL || "https://eth-sepolia.g.alchemy.com/v2/demo";
+
     const publicClient = createPublicClient({
         chain: sepolia,
-        transport: http(process.env.ETH_SEPOLIA_RPC_URL || "https://rpc.sepolia.org"),
+        transport: http(rpcUrl),
     });
 
     const walletClient = createWalletClient({
         account,
         chain: sepolia,
-        transport: http(process.env.ETH_SEPOLIA_RPC_URL || "https://rpc.sepolia.org"),
+        transport: http(rpcUrl),
     });
 
     const { request } = await publicClient.simulateContract({

@@ -1,15 +1,11 @@
 {
   "authorizedEVMAddress": "0x35134987bB541607Cd45e62Dd1feA4F587607817",
-
   "creEncryptionPublicKey": "0x0250d47e83eea51653c8910635f58e39e2d6442d27c245674ad39f63e554f53f9e",
-
   "creDecryptionKey": "0x2dec0e09713b70f5bf4f7a3bb70a0a3e2f7de51ff76039d5bf90a8148cdf0e46",
-
   "backendUrl": "http://localhost:3001",
-
   "callbackSecret": "cre-callback-secret-change-in-production",
-
   "ethSepoliaChainSelector": "ethereum-testnet-sepolia",
-
-  "worldIdRegistry": "0xb1eA4506e10e4Be8159ABcC7A7a67C614a13A425"
+  "worldIdRegistry": "0xb1eA4506e10e4Be8159ABcC7A7a67C614a13A425",
+  "convergenceApiUrl": "https://convergence2026-token-api.cldev.cloud",
+  "servicePrivateKey": "0x2dec0e09713b70f5bf4f7a3bb70a0a3e2f7de51ff76039d5bf90a8148cdf0e46"
 }

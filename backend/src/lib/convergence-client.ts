@@ -206,27 +206,27 @@ export async function privateTransferFromService(params: {
  * Returns the transaction IDs from the Convergence API.
  */
 export async function settleMatch(params: {
-    buyerStealthAddress:  string;
-    sellerStealthAddress: string;
+    buyerShieldAddress:  string;
+    sellerShieldAddress: string;
     baseTokenAddress:     string;
     quoteTokenAddress:    string;
     baseAmountWei:        string;
     quoteAmountWei:       string;
 }, onLog?: (log: string) => void): Promise<{ buyerTxId: string; sellerTxId: string }> {
-    onLog?.(`[convergence] Transferring ${params.baseAmountWei} base token → buyer ${params.buyerStealthAddress.slice(0, 8)}...`);
+    onLog?.(`[convergence] Transferring ${params.baseAmountWei} base token → buyer ${params.buyerShieldAddress.slice(0, 8)}...`);
 
     const buyerResult = await privateTransferFromService({
-        recipient: params.buyerStealthAddress,
+        recipient: params.buyerShieldAddress,
         token:     params.baseTokenAddress,
         amount:    params.baseAmountWei,
         flags:     ["hide-sender"],
     });
 
     onLog?.(`[convergence] Buyer tx: ${buyerResult.transaction_id}`);
-    onLog?.(`[convergence] Transferring ${params.quoteAmountWei} USDC → seller ${params.sellerStealthAddress.slice(0, 8)}...`);
+    onLog?.(`[convergence] Transferring ${params.quoteAmountWei} USDC → seller ${params.sellerShieldAddress.slice(0, 8)}...`);
 
     const sellerResult = await privateTransferFromService({
-        recipient: params.sellerStealthAddress,
+        recipient: params.sellerShieldAddress,
         token:     params.quoteTokenAddress,
         amount:    params.quoteAmountWei,
         flags:     ["hide-sender"],

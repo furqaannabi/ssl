@@ -193,7 +193,7 @@ export const AIChatbot: React.FC = () => {
         amount: string;
         price: string;
         side: 'BUY' | 'SELL';
-        stealthAddress: string;
+        shieldAddress: string;
         baseChainSelector: string;
         quoteChainSelector: string;
     }, onLog?: (log: string) => void): Promise<{ success: boolean; logs?: string[]; error?: string }> => {

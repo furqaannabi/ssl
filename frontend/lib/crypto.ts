@@ -29,7 +29,7 @@ export async function encryptOrder(data: object, crePublicKeyHex: string): Promi
     // 2. ECDH: derive shared point with the CRE's public key
     //    computeSharedSecret returns compressed point: 0x02/0x03 | x (33 bytes)
     const pubkeyHex   = crePublicKeyHex.startsWith("0x") ? crePublicKeyHex : "0x" + crePublicKeyHex;
-    const sharedPoint = SigningKey.computeSharedSecret(ephemeralWallet.privateKey, pubkeyHex);
+    const sharedPoint = ephemeralKey.computeSharedSecret(pubkeyHex);
     const sharedX     = getBytes(sharedPoint).slice(1, 33); // x-coordinate only
 
     // 3. Derive AES-256 key: SHA-256(x)

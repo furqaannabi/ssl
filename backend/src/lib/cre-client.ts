@@ -225,19 +225,19 @@ export async function sendToMatchingWorkflow(
         const requestId = crypto.randomUUID();
         const body = {
             jsonrpc: "2.0",
-            id:      requestId,
-            method:  "workflows.execute",
-            params:  {
-                input:    payload,
+            id: requestId,
+            method: "workflows.execute",
+            params: {
+                input: payload,
                 workflow: { workflowID: workflowId },
             },
         };
 
         const jwt = await createCREJwt(body, config.evmPrivateKey);
         const res = await fetch(config.creGatewayUrl, {
-            method:  "POST",
+            method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
-            body:    JSON.stringify(body),
+            body: JSON.stringify(body),
         });
 
         const json = await res.json();
@@ -255,11 +255,11 @@ function sendToMatchingWorkflowSimulate(
     onLog?: (log: string) => void
 ): Promise<unknown> {
     const workflowPath = path.resolve(__dirname, "../../../cre/matching-workflow");
-    const projectRoot  = path.resolve(__dirname, "../../../cre");
+    const projectRoot = path.resolve(__dirname, "../../../cre");
 
     return new Promise((resolve, reject) => {
         const isWindows = process.platform === "win32";
-        const inputStr  = isWindows
+        const inputStr = isWindows
             ? JSON.stringify(payload).replace(/"/g, '\\"')
             : JSON.stringify(payload);
 

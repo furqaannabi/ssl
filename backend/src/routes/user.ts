@@ -4,6 +4,7 @@ import prisma from "../clients/prisma";
 import { authMiddleware } from "../middleware/auth";
 import { contractService } from "../services/contract.service";
 import { generateUserShieldedAddress, CONVERGENCE_API } from "../lib/convergence-client";
+import { getAddress } from "viem";
 
 type Variables = {
     user: string;
@@ -101,8 +102,8 @@ user.post("/shield-address", authMiddleware, async (c) => {
 
     try {
         const address = await generateUserShieldedAddress({
-            account:   userAddress,
-            auth:      body.auth,
+            account: getAddress(userAddress),
+            auth: body.auth,
             timestamp: body.timestamp,
         });
         return c.json({ address });
@@ -131,11 +132,11 @@ user.post("/withdraw-ticket", authMiddleware, async (c) => {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                account:   userAddress,
-                token:     body.token,
-                amount:    body.amount,
+                account: getAddress(userAddress),
+                token: body.token,
+                amount: body.amount,
                 timestamp: body.timestamp,
-                auth:      body.auth,
+                auth: body.auth,
             }),
         });
 
@@ -172,9 +173,9 @@ user.post("/vault-balances", authMiddleware, async (c) => {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                account:   userAddress,
+                account: getAddress(userAddress),
                 timestamp: body.timestamp,
-                auth:      body.auth,
+                auth: body.auth,
             }),
         });
 

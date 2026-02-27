@@ -4,39 +4,39 @@ import { TOKEN_DECIMALS, RWA_TOKENS, ETH_SEPOLIA_TOKENS } from '../lib/contracts
 import { CONVERGENCE_VAULT_ABI, CONVERGENCE_VAULT_ADDRESS, CONVERGENCE_CHAIN_ID } from '../lib/abi/convergence_vault_abi';
 import { useConnection, useWaitForTransactionReceipt, useSwitchChain } from 'wagmi';
 import { simulateContract, writeContract, getGasPrice, signTypedData } from '@wagmi/core';
-import { parseUnits } from 'viem';
+import { parseUnits, getAddress } from 'viem';
 import { config } from '../lib/wagmi';
 import { Asset } from '../types';
 
 const CONVERGENCE_VAULT: `0x${string}` = CONVERGENCE_VAULT_ADDRESS;
 
 const CONVERGENCE_DOMAIN = {
-    name:              'CompliantPrivateTokenDemo',
-    version:           '0.0.1',
-    chainId:           11155111,
+    name: 'CompliantPrivateTokenDemo',
+    version: '0.0.1',
+    chainId: 11155111,
     verifyingContract: CONVERGENCE_VAULT,
 } as const;
 
 const WITHDRAW_TYPES = {
     'Withdraw Tokens': [
-        { name: 'account',   type: 'address' },
-        { name: 'token',     type: 'address' },
-        { name: 'amount',    type: 'uint256' },
+        { name: 'account', type: 'address' },
+        { name: 'token', type: 'address' },
+        { name: 'amount', type: 'uint256' },
         { name: 'timestamp', type: 'uint256' },
     ],
 } as const;
 
 interface WithdrawalModalProps {
-    isOpen:   boolean;
-    onClose:  () => void;
-    assets:   Asset[];  // vault balances from Portfolio (after Check Balances)
+    isOpen: boolean;
+    onClose: () => void;
+    assets: Asset[];  // vault balances from Portfolio (after Check Balances)
 }
 
 export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({ isOpen, onClose, assets }) => {
-    const [step, setStep]       = useState<'DETAILS' | 'SIGNING' | 'CONFIRMING' | 'SUCCESS'>('DETAILS');
-    const [amount, setAmount]   = useState('');
-    const [error, setError]     = useState<string | null>(null);
-    const [txHash, setTxHash]   = useState<`0x${string}` | undefined>();
+    const [step, setStep] = useState<'DETAILS' | 'SIGNING' | 'CONFIRMING' | 'SUCCESS'>('DETAILS');
+    const [amount, setAmount] = useState('');
+    const [error, setError] = useState<string | null>(null);
+    const [txHash, setTxHash] = useState<`0x${string}` | undefined>();
     const [deadline, setDeadline] = useState<number | null>(null);
     const [selectedTokenAddress, setSelectedTokenAddress] = useState<string>('');
 
@@ -64,8 +64,8 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({ isOpen, onClos
         }
     }, [isOpen]);
 
-    const selectedToken  = ETH_SEPOLIA_TOKENS.find(t => t.address === selectedTokenAddress);
-    const vaultBalance   = assets.find(a => a.symbol === selectedToken?.symbol)?.balance ?? 0;
+    const selectedToken = ETH_SEPOLIA_TOKENS.find(t => t.address === selectedTokenAddress);
+    const vaultBalance = assets.find(a => a.symbol === selectedToken?.symbol)?.balance ?? 0;
 
     const { isLoading: isWaitingForReceipt, isSuccess: isTxSuccess } = useWaitForTransactionReceipt({ hash: txHash });
 
@@ -92,34 +92,34 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({ isOpen, onClos
                 catch { setError('Please switch to Ethereum Sepolia in your wallet.'); return; }
             }
 
-            const decimals  = selectedToken.decimals || TOKEN_DECIMALS[selectedToken.symbol] || 18;
+            const decimals = selectedToken.decimals || TOKEN_DECIMALS[selectedToken.symbol] || 18;
             const amountWei = parseUnits(amount, decimals);
             const timestamp = Math.floor(Date.now() / 1000);
 
             // Step 1 — sign EIP-712 "Withdraw Tokens"
             setStep('SIGNING');
             const sig = await signTypedData(config, {
-                domain:      CONVERGENCE_DOMAIN,
-                types:       WITHDRAW_TYPES,
+                domain: CONVERGENCE_DOMAIN,
+                types: WITHDRAW_TYPES,
                 primaryType: 'Withdraw Tokens',
                 message: {
-                    account:   eoaAddress as `0x${string}`,
-                    token:     selectedToken.address as `0x${string}`,
-                    amount:    amountWei,
+                    account: getAddress(eoaAddress),
+                    token: selectedToken.address as `0x${string}`,
+                    amount: amountWei,
                     timestamp: BigInt(timestamp),
                 },
             });
 
             // Step 2 — backend proxy → Convergence /withdraw → receive ticket
             const ticketRes = await fetch('/api/user/withdraw-ticket', {
-                method:      'POST',
-                headers:     { 'Content-Type': 'application/json' },
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
-                body:        JSON.stringify({
-                    token:     selectedToken.address,
-                    amount:    amountWei.toString(),
+                body: JSON.stringify({
+                    token: selectedToken.address,
+                    amount: amountWei.toString(),
                     timestamp,
-                    auth:      sig,
+                    auth: sig,
                 }),
             });
 
@@ -136,13 +136,13 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({ isOpen, onClos
             const gasPrice = await getGasPrice(config, { chainId: CONVERGENCE_CHAIN_ID });
 
             const { request } = await simulateContract(config, {
-                abi:          CONVERGENCE_VAULT_ABI,
-                address:      CONVERGENCE_VAULT_ADDRESS,
+                abi: CONVERGENCE_VAULT_ABI,
+                address: CONVERGENCE_VAULT_ADDRESS,
                 functionName: 'withdrawWithTicket',
-                args:         [selectedToken.address as `0x${string}`, amountWei, ticket as `0x${string}`],
-                account:      eoaAddress as `0x${string}`,
-                chainId:      CONVERGENCE_CHAIN_ID,
-                gasPrice:     (gasPrice * 120n) / 100n,
+                args: [selectedToken.address as `0x${string}`, amountWei, ticket as `0x${string}`],
+                account: eoaAddress as `0x${string}`,
+                chainId: CONVERGENCE_CHAIN_ID,
+                gasPrice: (gasPrice * 120n) / 100n,
             });
 
             const hash = await writeContract(config, request);
@@ -206,7 +206,7 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({ isOpen, onClos
                                 >
                                     {ETH_SEPOLIA_TOKENS.map(t => {
                                         const meta = RWA_TOKENS[t.symbol];
-                                        const bal  = assets.find(a => a.symbol === t.symbol)?.balance ?? 0;
+                                        const bal = assets.find(a => a.symbol === t.symbol)?.balance ?? 0;
                                         return (
                                             <option key={t.address} value={t.address}>
                                                 {t.symbol}{meta ? ` [${meta.type}]` : ''} — {meta?.name || t.name}

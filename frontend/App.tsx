@@ -35,191 +35,200 @@ const navItems = [
 ];
 
 function AppContent() {
-   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-   const [isProfileOpen, setIsProfileOpen] = useState(false);
-   const [isHumanVerified, setIsHumanVerified] = useState(false);
-   const { address: eoaAddress, isConnected } = useConnection();
-   const { signMessageAsync } = useSignMessage();
- 
-   const formattedEOA = eoaAddress ? eoaAddress.slice(0, 6) + "..." + eoaAddress.slice(-4) : "Connect Wallet";
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isHumanVerified, setIsHumanVerified] = useState(false);
+  const { address: eoaAddress, isConnected } = useConnection();
+  const { signMessageAsync } = useSignMessage();
 
-   // Auth & Verification Sync
-   useEffect(() => {
-        if (!isConnected || !eoaAddress) {
-            setIsHumanVerified(false);
-            return;
+  const formattedEOA = eoaAddress ? eoaAddress.slice(0, 6) + "..." + eoaAddress.slice(-4) : "Connect Wallet";
+
+  // Auth & Verification Sync
+  useEffect(() => {
+    if (!isConnected || !eoaAddress) {
+      setIsHumanVerified(false);
+      return;
+    }
+
+    const initAuth = async () => {
+      // 2. Try to get current user session
+      let user = await auth.getMe();
+      console.log("User", user);
+
+      // 3. Security Check: if there's a user but the address doesn't match the new connection,
+      // it means they switched wallets in MetaMask but still have the old cookie.
+      if (user && user.address.toLowerCase() !== eoaAddress.toLowerCase()) {
+        console.log("Wallet address mismatch. Logging out stale session.");
+        await auth.logout();
+        user = null; // Clear so we prompt for login
+      }
+
+      // 4. If not logged in (or just logged out), try to login
+      if (!user) {
+        try {
+          const success = await auth.login(eoaAddress, async ({ message }) => {
+            return await signMessageAsync({
+              message,
+              account: eoaAddress
+            });
+          });
+          if (success) {
+            user = await auth.getMe();
+          }
+        } catch (e) {
+          console.error("Auth failed", e);
         }
-        
-        const initAuth = async () => {
-             // 1. Try to get current user session
-             let user = await auth.getMe();
-             console.log("User", user);
-             // 2. If not logged in, try to login
-             if (!user) {
-                 try {
-                     const success = await auth.login(eoaAddress, async ({ message }) => {
-                        return await signMessageAsync({ 
-                            message, 
-                            account: eoaAddress 
-                        });
-                     });
-                     if (success) {
-                         user = await auth.getMe();
-                     }
-                 } catch (e) {
-                     console.error("Auth failed", e);
-                 }
-             }
+      }
 
-             // 3. Update State
-             if (user) {
-                 setIsHumanVerified(user.isVerified);
-                 window.dispatchEvent(new Event("world-id-updated"));
-             }
-        };
-        
-        initAuth();
-   }, [eoaAddress, isConnected]);
+      // 5. Update State
+      if (user) {
+        setIsHumanVerified(user.isVerified);
+        window.dispatchEvent(new Event("world-id-updated"));
+      }
+    };
 
-   // Listen for verification updates handling (Legacy/Local updates)
-   useEffect(() => {
-        const handleVerificationUpdate = () => {
-            console.log("App: Received world-id-updated event. Optimistically verifying...");
-            
+    initAuth();
+  }, [eoaAddress, isConnected]);
 
-            // Re-fetch me to get latest status if local event triggers (Background Sync)
-                auth.getMe().then(user => {
-                    if(user) setIsHumanVerified(user.isVerified);
-                });
-        };
-        window.addEventListener("world-id-updated", handleVerificationUpdate);
-        return () => window.removeEventListener("world-id-updated", handleVerificationUpdate);
-   }, []);
+  // Listen for verification updates handling (Legacy/Local updates)
+  useEffect(() => {
+    const handleVerificationUpdate = () => {
+      console.log("App: Received world-id-updated event. Optimistically verifying...");
 
 
- 
-   return (
-     <div className="flex h-screen w-full bg-background-dark text-slate-300 font-display">
-       
-       {/* Modals */}
-       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
-       <ProfileModal isOpen={isProfileOpen} onClose={() => setIsProfileOpen(false)} />
- 
-       {/* Sidebar */}
-       <aside className="w-16 lg:w-20 border-r border-border-dark bg-surface-dark flex flex-col items-center py-6 z-30 shadow-2xl">
-         <div className="mb-8">
-            <div className="w-10 h-10 bg-primary/10 border border-primary flex items-center justify-center shadow-glow rounded-sm">
-              <Icon name="security" className="text-primary text-xl" />
-            </div>
-         </div>
- 
-         <nav className="flex flex-col gap-4">
-           {navItems.map((item) => {
-             return (
-               <NavLink
-                 key={item.path}
-                 to={item.path}
-                 className={({ isActive }) => `group relative w-10 h-10 flex items-center justify-center transition-all duration-300 ${isActive ? 'text-primary' : 'text-slate-500 hover:text-slate-200'}`}
-               >
-                 {({ isActive }) => (
-                    <>
-                        <Icon name={item.icon} className={`text-2xl transition-all ${isActive ? 'scale-110 drop-shadow-[0_0_5px_rgba(13,242,89,0.5)]' : ''}`} />
-                        {isActive && <div className="absolute -left-5 top-1/2 -translate-y-1/2 w-1 h-6 bg-primary rounded-r shadow-glow"></div>}
-                        
-                        {/* Tooltip */}
-                        <span className="absolute left-14 bg-surface-lighter border border-border-dark px-2 py-1 text-xs text-primary opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 font-mono shadow-xl pointer-events-none">
-                            {item.label}
-                        </span>
-                    </>
-                 )}
-               </NavLink>
-             );
-           })}
-         </nav>
-         
-         <div className="mt-auto flex flex-col items-center gap-6">
-           <button 
-             onClick={() => setIsProfileOpen(true)}
-             className="w-8 h-8 rounded-full overflow-hidden border border-border-dark hover:border-primary transition-all grayscale hover:grayscale-0 shadow-lg hover:shadow-glow"
-           >
-             <img 
-                src={eoaAddress ? `https://api.dicebear.com/7.x/identicon/svg?seed=${eoaAddress}` : "https://api.dicebear.com/7.x/identicon/svg?seed=fallback"} 
-                alt="User" 
-                className="w-full h-full object-cover" 
-             />
-           </button>
-           <button 
-             onClick={() => setIsSettingsOpen(true)}
-             className="text-slate-500 hover:text-primary transition-colors hover:rotate-90 duration-500"
-           >
-             <Icon name="settings" className="text-xl" />
-           </button>
-         </div>
-       </aside>
- 
-       {/* Main Area */}
-       <div className="flex-1 flex flex-col min-w-0">
-          {/* Header */}
-          <header className="h-16 border-b border-border-dark bg-surface-dark/50 backdrop-blur-md flex items-center justify-between px-8 shrink-0 z-20">
-             <div className="flex items-center gap-4">
-                <h1 className="text-lg font-bold text-white tracking-widest font-display flex items-center gap-2">
-                  SSL <span className="text-primary font-mono text-sm px-2 py-0.5 border border-primary/20 bg-primary/5 rounded">TERMINAL v1.0</span>
-                </h1>
-                {/* Human Status */}
-                <div 
-                   className="hidden md:flex items-center gap-2 ml-8 px-3 py-1 bg-white/5 rounded border border-white/10 cursor-pointer hover:bg-white/10 transition-colors"
-                   onClick={() => setIsProfileOpen(true)}
-                >
-                     <Icon name="fingerprint" className={`text-xs ${isHumanVerified ? "text-blue-400" : "text-slate-500"}`} />
-                     <span className="text-[10px] font-mono uppercase tracking-wide text-slate-400">
-                         Human: <span className={isHumanVerified ? "text-blue-400 font-bold" : "text-slate-500"}>
-                             {isHumanVerified ? "VERIFIED" : "UNVERIFIED"}
-                         </span>
-                     </span>
-                </div>
-             </div>
- 
-             {/* Top Identity - EOA (Authority) and Stealth (Privacy) */}
-             <div className="flex items-center justify-end gap-6 w-1/3">
-               <div className="flex flex-col items-end cursor-pointer hover:bg-white/5 p-2 rounded transition-colors" onClick={() => setIsProfileOpen(true)}>
-                  <div className="flex items-center gap-2">
-                     <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-primary shadow-glow' : 'bg-slate-700'}`}></span>
-                     <span className="text-xs font-mono text-slate-300 uppercase">{formattedEOA}</span>
-                  </div>
-                  <div className="flex items-center gap-1 mt-0.5">
-                     <Icon name="lock" className="text-[10px] text-slate-500" />
-                     <span className="text-[10px] font-mono uppercase tracking-wide text-slate-500 group-hover:text-primary transition-colors">
-                         Stealth Identity: Manage Keys
-                     </span>
-                  </div>
-               </div>
-              <div className="text-right hidden lg:block">
-                 <div className="text-[10px] text-slate-500 font-mono uppercase tracking-wider">Net Liquidity</div>
-                 <div className="text-sm font-mono font-bold text-white tracking-tight">$42,592,104.00</div>
-              </div>
-              
-              <button 
-                  onClick={() => auth.logout()}
-                  className="p-2 text-slate-500 hover:text-red-500 transition-colors"
-                  title="Logout"
+      // Re-fetch me to get latest status if local event triggers (Background Sync)
+      auth.getMe().then(user => {
+        if (user) setIsHumanVerified(user.isVerified);
+      });
+    };
+    window.addEventListener("world-id-updated", handleVerificationUpdate);
+    return () => window.removeEventListener("world-id-updated", handleVerificationUpdate);
+  }, []);
+
+
+
+  return (
+    <div className="flex h-screen w-full bg-background-dark text-slate-300 font-display">
+
+      {/* Modals */}
+      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+      <ProfileModal isOpen={isProfileOpen} onClose={() => setIsProfileOpen(false)} />
+
+      {/* Sidebar */}
+      <aside className="w-16 lg:w-20 border-r border-border-dark bg-surface-dark flex flex-col items-center py-6 z-30 shadow-2xl">
+        <div className="mb-8">
+          <div className="w-10 h-10 bg-primary/10 border border-primary flex items-center justify-center shadow-glow rounded-sm">
+            <Icon name="security" className="text-primary text-xl" />
+          </div>
+        </div>
+
+        <nav className="flex flex-col gap-4">
+          {navItems.map((item) => {
+            return (
+              <NavLink
+                key={item.path}
+                to={item.path}
+                className={({ isActive }) => `group relative w-10 h-10 flex items-center justify-center transition-all duration-300 ${isActive ? 'text-primary' : 'text-slate-500 hover:text-slate-200'}`}
               >
-                  <Icon name="logout" className="text-xl" />
-              </button>
-            </div>
-         </header>
+                {({ isActive }) => (
+                  <>
+                    <Icon name={item.icon} className={`text-2xl transition-all ${isActive ? 'scale-110 drop-shadow-[0_0_5px_rgba(13,242,89,0.5)]' : ''}`} />
+                    {isActive && <div className="absolute -left-5 top-1/2 -translate-y-1/2 w-1 h-6 bg-primary rounded-r shadow-glow"></div>}
 
-         {/* Content View — h-full wrapper propagates bounded height to child pages */}
-         <main className="flex-1 overflow-y-auto relative min-h-0">
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(13,242,89,0.03)_0%,transparent_50%)] pointer-events-none"></div>
-            <div className="h-full">
-              <Routes>
-                <Route path="/" element={<Terminal />} />
-                <Route path="/portfolio" element={<Portfolio />} />
-                <Route path="/compliance" element={<Compliance />} />
-                <Route path="/history" element={<History />} />
-              </Routes>
+                    {/* Tooltip */}
+                    <span className="absolute left-14 bg-surface-lighter border border-border-dark px-2 py-1 text-xs text-primary opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 font-mono shadow-xl pointer-events-none">
+                      {item.label}
+                    </span>
+                  </>
+                )}
+              </NavLink>
+            );
+          })}
+        </nav>
+
+        <div className="mt-auto flex flex-col items-center gap-6">
+          <button
+            onClick={() => setIsProfileOpen(true)}
+            className="w-8 h-8 rounded-full overflow-hidden border border-border-dark hover:border-primary transition-all grayscale hover:grayscale-0 shadow-lg hover:shadow-glow"
+          >
+            <img
+              src={eoaAddress ? `https://api.dicebear.com/7.x/identicon/svg?seed=${eoaAddress}` : "https://api.dicebear.com/7.x/identicon/svg?seed=fallback"}
+              alt="User"
+              className="w-full h-full object-cover"
+            />
+          </button>
+          <button
+            onClick={() => setIsSettingsOpen(true)}
+            className="text-slate-500 hover:text-primary transition-colors hover:rotate-90 duration-500"
+          >
+            <Icon name="settings" className="text-xl" />
+          </button>
+        </div>
+      </aside>
+
+      {/* Main Area */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Header */}
+        <header className="h-16 border-b border-border-dark bg-surface-dark/50 backdrop-blur-md flex items-center justify-between px-8 shrink-0 z-20">
+          <div className="flex items-center gap-4">
+            <h1 className="text-lg font-bold text-white tracking-widest font-display flex items-center gap-2">
+              SSL <span className="text-primary font-mono text-sm px-2 py-0.5 border border-primary/20 bg-primary/5 rounded">TERMINAL v1.0</span>
+            </h1>
+            {/* Human Status */}
+            <div
+              className="hidden md:flex items-center gap-2 ml-8 px-3 py-1 bg-white/5 rounded border border-white/10 cursor-pointer hover:bg-white/10 transition-colors"
+              onClick={() => setIsProfileOpen(true)}
+            >
+              <Icon name="fingerprint" className={`text-xs ${isHumanVerified ? "text-blue-400" : "text-slate-500"}`} />
+              <span className="text-[10px] font-mono uppercase tracking-wide text-slate-400">
+                Human: <span className={isHumanVerified ? "text-blue-400 font-bold" : "text-slate-500"}>
+                  {isHumanVerified ? "VERIFIED" : "UNVERIFIED"}
+                </span>
+              </span>
             </div>
-         </main>
+          </div>
+
+          {/* Top Identity - EOA (Authority) and Stealth (Privacy) */}
+          <div className="flex items-center justify-end gap-6 w-1/3">
+            <div className="flex flex-col items-end cursor-pointer hover:bg-white/5 p-2 rounded transition-colors" onClick={() => setIsProfileOpen(true)}>
+              <div className="flex items-center gap-2">
+                <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-primary shadow-glow' : 'bg-slate-700'}`}></span>
+                <span className="text-xs font-mono text-slate-300 uppercase">{formattedEOA}</span>
+              </div>
+              <div className="flex items-center gap-1 mt-0.5">
+                <Icon name="lock" className="text-[10px] text-slate-500" />
+                <span className="text-[10px] font-mono uppercase tracking-wide text-slate-500 group-hover:text-primary transition-colors">
+                  Stealth Identity: Manage Keys
+                </span>
+              </div>
+            </div>
+            <div className="text-right hidden lg:block">
+              <div className="text-[10px] text-slate-500 font-mono uppercase tracking-wider">Net Liquidity</div>
+              <div className="text-sm font-mono font-bold text-white tracking-tight">$42,592,104.00</div>
+            </div>
+
+            <button
+              onClick={() => auth.logout()}
+              className="p-2 text-slate-500 hover:text-red-500 transition-colors"
+              title="Logout"
+            >
+              <Icon name="logout" className="text-xl" />
+            </button>
+          </div>
+        </header>
+
+        {/* Content View — h-full wrapper propagates bounded height to child pages */}
+        <main className="flex-1 overflow-y-auto relative min-h-0">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(13,242,89,0.03)_0%,transparent_50%)] pointer-events-none"></div>
+          <div className="h-full">
+            <Routes>
+              <Route path="/" element={<Terminal />} />
+              <Route path="/portfolio" element={<Portfolio />} />
+              <Route path="/compliance" element={<Compliance />} />
+              <Route path="/history" element={<History />} />
+            </Routes>
+          </div>
+        </main>
       </div>
 
       {/* AI Chatbot */}

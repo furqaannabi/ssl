@@ -108,8 +108,8 @@ export async function matchOrders(newOrderId: string, onLog?: (log: string) => v
             break;
         }
 
-        if (!buyer.stealthAddress || !seller.stealthAddress) {
-            log(`Skipping match: missing stealthAddress (buyer: ${!!buyer.stealthAddress}, seller: ${!!seller.stealthAddress})`);
+        if (!buyer.shieldAddress || !seller.shieldAddress) {
+            log(`Skipping match: missing shieldAddress (buyer: ${!!buyer.shieldAddress}, seller: ${!!seller.shieldAddress})`);
             break;
         }
 
@@ -149,8 +149,8 @@ export async function matchOrders(newOrderId: string, onLog?: (log: string) => v
         // ── Settle via Convergence API private-transfers ──
         try {
             const result = await settleMatch({
-                buyerStealthAddress:  buyer.stealthAddress,
-                sellerStealthAddress: seller.stealthAddress,
+                buyerShieldAddress:  buyer.shieldAddress,
+                sellerShieldAddress: seller.shieldAddress,
                 baseTokenAddress:     baseToken.address,
                 quoteTokenAddress:    quoteToken.address,
                 baseAmountWei:        baseAmountWei.toString(),

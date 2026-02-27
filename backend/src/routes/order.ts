@@ -1,8 +1,8 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // Order routes
 //
-// POST /api/order              — place an order (encrypted TEE path + fallback)
-// GET  /api/order/book         — public order book (plaintext metadata)
+// POST /api/order              — place an encrypted order (CRE TEE only)
+// GET  /api/order/book         — public order book (obfuscated metadata)
 // GET  /api/order/cre-pubkey   — return the CRE TEE's secp256k1 public key
 // GET  /api/order/encrypted-book — encrypted order payloads for TEE to fetch
 // POST /api/order/cre-settle   — CRE callback: settle a matched pair
@@ -10,17 +10,14 @@
 // POST /api/order/:id/cancel   — cancel an open order
 // ──────────────────────────────────────────────────────────────────────────────
 
-import { Hono }       from "hono";
+import { Hono } from "hono";
 import { streamText } from "hono/streaming";
-import { SigningKey, parseUnits } from "ethers";
-import prisma         from "../clients/prisma";
-import { matchOrders } from "../lib/matching-engine";
+import { SigningKey } from "ethers";
+import prisma from "../clients/prisma";
 import { sendToMatchingWorkflow, type MatchOrderPayload } from "../lib/cre-client";
-import { settleMatch } from "../lib/convergence-client";
-import { config }     from "../lib/config";
+import { config } from "../lib/config";
 import { authMiddleware } from "../middleware/auth";
-import { checkWorldIDVerified } from "../lib/world-id-registry";
-import { NLParserService }  from "../services/nl-parser.service";
+import { NLParserService } from "../services/nl-parser.service";
 import { PriceFeedService } from "../services/price-feed.service";
 import { OrderSide, OrderStatus } from "../../generated/prisma/client";
 
@@ -73,7 +70,7 @@ order.get("/encrypted-book", async (c) => {
                 encryptedPayload: { not: null },
                 ...(pairId ? { pairId } : {}),
             },
-            select:  { id: true, encryptedPayload: true },
+            select: { id: true, encryptedPayload: true },
             orderBy: { createdAt: "asc" },
         });
         return c.json({ orders });
@@ -83,8 +80,48 @@ order.get("/encrypted-book", async (c) => {
     }
 });
 
+// ─── GET /settle-info ─────────────────────────────────────────────────────────
+// Single call: returns both shield addresses + token metadata for the TEE.
+// Replaces the separate /settle-meta and /:id/party calls to stay within the
+// CRE SDK HTTP call limit of 5 per workflow execution.
+
+order.get("/settle-info", async (c) => {
+    const secret = c.req.header("X-CRE-Secret");
+    if (!secret || secret !== config.creCallbackSecret) {
+        return c.json({ error: "Unauthorized" }, 401);
+    }
+    const buyerOrderId  = c.req.query("buyerOrderId");
+    const sellerOrderId = c.req.query("sellerOrderId");
+    const pairId        = c.req.query("pairId");
+    if (!buyerOrderId || !sellerOrderId || !pairId) {
+        return c.json({ error: "buyerOrderId, sellerOrderId, pairId required" }, 400);
+    }
+
+    const [buyerOrder, sellerOrder, pair] = await Promise.all([
+        prisma.order.findUnique({ where: { id: buyerOrderId },  select: { shieldAddress: true } }),
+        prisma.order.findUnique({ where: { id: sellerOrderId }, select: { shieldAddress: true } }),
+        prisma.pair.findUnique({ where: { id: pairId } }),
+    ]);
+    if (!buyerOrder || !sellerOrder || !pair) return c.json({ error: "Not found" }, 404);
+
+    const [baseToken, quoteToken] = await Promise.all([
+        prisma.token.findFirst({ where: { symbol: pair.baseSymbol, chainSelector: ETH_SEPOLIA_SELECTOR } }),
+        prisma.token.findFirst({ where: { symbol: "USDC",          chainSelector: ETH_SEPOLIA_SELECTOR } }),
+    ]);
+    if (!baseToken || !quoteToken) return c.json({ error: "Token metadata missing" }, 500);
+
+    return c.json({
+        buyerShieldAddress:  buyerOrder.shieldAddress,
+        sellerShieldAddress: sellerOrder.shieldAddress,
+        baseTokenAddress:    baseToken.address,
+        quoteTokenAddress:   quoteToken.address,
+        baseDecimals:        baseToken.decimals,
+        quoteDecimals:       quoteToken.decimals,
+    });
+});
+
 // ─── POST /cre-settle ────────────────────────────────────────────────────────
-// CRE TEE calls this after matching. Backend settles via Convergence API + updates DB.
+// CRE TEE calls this after settlement to update order status in DB.
 
 order.post("/cre-settle", async (c) => {
     const secret = c.req.header("X-CRE-Secret");
@@ -93,73 +130,25 @@ order.post("/cre-settle", async (c) => {
     }
 
     const body = await c.req.json<{
-        buyerOrderId:         string;
-        sellerOrderId:        string;
-        buyerStealthAddress:  string;
-        sellerStealthAddress: string;
-        tradeAmount:          string;
-        quoteAmount:          string;
-        pairId:               string;
+        buyerOrderId:  string;
+        sellerOrderId: string;
+        tradeAmount:   string;
+        quoteAmount:   string;
+        pairId:        string;
+        buyerTxId?:    string | null;
+        sellerTxId?:   string | null;
     }>();
 
-    console.log(`[cre-settle] buyer=${body.buyerOrderId} seller=${body.sellerOrderId}`);
+    console.log(`[cre-settle] buyer=${body.buyerOrderId} seller=${body.sellerOrderId} buyerTx=${body.buyerTxId} sellerTx=${body.sellerTxId}`);
 
     try {
-        const [buyerOrder, sellerOrder] = await Promise.all([
-            prisma.order.findUnique({
-                where:   { id: body.buyerOrderId },
-                include: { pair: true },
-            }),
-            prisma.order.findUnique({
-                where:   { id: body.sellerOrderId },
-                select:  { userAddress: true },
-            }),
-        ]);
-
-        // Both parties must be verified in the on-chain WorldIDVerifierRegistry
-        const [buyerVerified, sellerVerified] = await Promise.all([
-            buyerOrder?.userAddress  ? checkWorldIDVerified(buyerOrder.userAddress)  : Promise.resolve(false),
-            sellerOrder?.userAddress ? checkWorldIDVerified(sellerOrder.userAddress) : Promise.resolve(false),
-        ]);
-
-        if (!buyerVerified) {
-            console.warn(`[cre-settle] Rejected: buyer (${buyerOrder?.userAddress}) not verified on-chain`);
-            return c.json({ error: "Settlement rejected: buyer is not World ID verified" }, 403);
-        }
-        if (!sellerVerified) {
-            console.warn(`[cre-settle] Rejected: seller (${sellerOrder?.userAddress}) not verified on-chain`);
-            return c.json({ error: "Settlement rejected: seller is not World ID verified" }, 403);
-        }
-
-        const baseSymbol = buyerOrder?.pair?.baseSymbol ?? "";
-        const [exactBaseToken, quoteToken] = await Promise.all([
-            prisma.token.findFirst({ where: { chainSelector: ETH_SEPOLIA_SELECTOR, symbol: baseSymbol } }),
-            prisma.token.findFirst({ where: { chainSelector: ETH_SEPOLIA_SELECTOR, symbol: "USDC" } }),
-        ]);
-
-        if (!exactBaseToken || !quoteToken) {
-            return c.json({ error: "Token addresses not found" }, 500);
-        }
-
-        const baseAmountWei  = parseUnits(parseFloat(body.tradeAmount).toFixed(exactBaseToken.decimals), exactBaseToken.decimals);
-        const quoteAmountWei = parseUnits(parseFloat(body.quoteAmount).toFixed(quoteToken.decimals),     quoteToken.decimals);
-
         await prisma.$transaction([
-            prisma.order.update({ where: { id: body.buyerOrderId  }, data: { filledAmount: body.tradeAmount, status: OrderStatus.SETTLED } }),
+            prisma.order.update({ where: { id: body.buyerOrderId },  data: { filledAmount: body.tradeAmount, status: OrderStatus.SETTLED } }),
             prisma.order.update({ where: { id: body.sellerOrderId }, data: { filledAmount: body.tradeAmount, status: OrderStatus.SETTLED } }),
         ]);
 
-        const result = await settleMatch({
-            buyerStealthAddress:  body.buyerStealthAddress,
-            sellerStealthAddress: body.sellerStealthAddress,
-            baseTokenAddress:     exactBaseToken.address,
-            quoteTokenAddress:    quoteToken.address,
-            baseAmountWei:        baseAmountWei.toString(),
-            quoteAmountWei:       quoteAmountWei.toString(),
-        });
-
-        console.log(`[cre-settle] Done. buyerTx=${result.buyerTxId} sellerTx=${result.sellerTxId}`);
-        return c.json({ success: true, buyerTxId: result.buyerTxId, sellerTxId: result.sellerTxId });
+        console.log(`[cre-settle] Orders marked SETTLED`);
+        return c.json({ success: true, buyerTxId: body.buyerTxId, sellerTxId: body.sellerTxId });
 
     } catch (err: any) {
         console.error("[cre-settle] Failed:", err);
@@ -189,7 +178,7 @@ order.post("/parse", async (c) => {
         }
 
         let amount = parsed.amount;
-        let price  = parsed.price;
+        let price = parsed.price;
 
         if (parsed.dollarAmount && !parsed.amount) {
             let unitPrice: number;
@@ -198,7 +187,7 @@ order.post("/parse", async (c) => {
             } else {
                 const priceData = await PriceFeedService.getPriceOrMock(parsed.symbol);
                 unitPrice = priceData.price;
-                price     = priceData.price.toString();
+                price = priceData.price.toString();
             }
             amount = (parseFloat(parsed.dollarAmount) / unitPrice).toFixed(6);
         }
@@ -218,36 +207,38 @@ order.post("/parse", async (c) => {
 });
 
 // ─── POST / — Place order ─────────────────────────────────────────────────────
-// Accepts an encrypted order for the TEE path (recommended for privacy) or
-// plaintext fields for the fallback local matching path.
+// All orders must be encrypted for the CRE TEE. Plaintext fallback is removed.
+// Optional side/amount/price are stored as display metadata only (not used for matching).
 
 interface OrderBody {
-    pairId:             string;
-    stealthAddress:     string;
-    baseChainSelector:  string;
+    pairId: string;
+    shieldAddress: string;
+    baseChainSelector: string;
     quoteChainSelector: string;
-    // Encrypted TEE path
-    encrypted?:         string;   // base64 ECIES ciphertext
-    signature?:         string;   // ECDSA sig over encrypted payload
-    fallbackEnabled?:   boolean;
-    // Plaintext (for fallback + UI display)
-    side?:   "BUY" | "SELL";
+    // Required: encrypted TEE path
+    encrypted: string;   // base64 ECIES ciphertext
+    signature: string;   // ECDSA sig over encrypted payload
+    // Optional display metadata (stored in DB for order book UI, not used for matching)
+    side?: "BUY" | "SELL";
     amount?: string;
-    price?:  string;
+    price?: string;
 }
 
 order.post("/", authMiddleware, async (c) => {
-    const body        = await c.req.json<OrderBody>();
+    const body = await c.req.json<OrderBody>();
     const userAddress = (c.get("user") as string).toLowerCase();
 
-    if (!body.pairId || !body.stealthAddress || !body.baseChainSelector || !body.quoteChainSelector) {
+    if (!body.pairId || !body.shieldAddress || !body.baseChainSelector || !body.quoteChainSelector) {
         return c.json({ error: "Missing required field" }, 400);
     }
     if (body.baseChainSelector !== ETH_SEPOLIA_SELECTOR || body.quoteChainSelector !== ETH_SEPOLIA_SELECTOR) {
         return c.json({ error: `Only ETH Sepolia is supported — use "${ETH_SEPOLIA_SELECTOR}"` }, 400);
     }
-    if (!/^0x[0-9a-fA-F]{40}$/.test(body.stealthAddress)) {
-        return c.json({ error: "Invalid stealthAddress" }, 400);
+    if (!/^0x[0-9a-fA-F]{40}$/.test(body.shieldAddress)) {
+        return c.json({ error: "Invalid shieldAddress" }, 400);
+    }
+    if (!body.encrypted || !body.signature) {
+        return c.json({ error: "Orders must be encrypted. Provide encrypted and signature fields." }, 400);
     }
 
     // Require World ID verification before placing orders
@@ -256,44 +247,23 @@ order.post("/", authMiddleware, async (c) => {
         return c.json({ error: "World ID verification required. Complete verification in the Compliance tab." }, 403);
     }
 
-    const hasEncrypted = !!body.encrypted;
-    const hasPlaintext = !!(body.side && body.amount && body.price);
-
-    if (!hasEncrypted && !hasPlaintext) {
-        return c.json({ error: "Provide encrypted payload or plaintext side/amount/price" }, 400);
-    }
-
-    let side: OrderSide = (body.side ?? "BUY") as OrderSide;
-    let parsedAmount = 0;
-    let parsedPrice  = 0;
-
-    if (hasPlaintext) {
-        if (body.side !== "BUY" && body.side !== "SELL") return c.json({ error: "side must be BUY or SELL" }, 400);
-        parsedAmount = parseFloat(body.amount!);
-        parsedPrice  = parseFloat(body.price!);
-        if (isNaN(parsedAmount) || parsedAmount <= 0) return c.json({ error: "amount must be a positive number" }, 400);
-        if (isNaN(parsedPrice)  || parsedPrice  <= 0) return c.json({ error: "price must be a positive number"  }, 400);
-        if (Math.round(parsedAmount * parsedPrice * 100) / 100 < 4.99) {
-            return c.json({ error: `Minimum order value is 5 USDC (current: ${(parsedAmount * parsedPrice).toFixed(2)})` }, 400);
-        }
-        side = body.side! as OrderSide;
-    }
+    const side: OrderSide = (body.side ?? "BUY") as OrderSide;
 
     const pair = await prisma.pair.findUnique({ where: { id: body.pairId } });
     if (!pair) return c.json({ error: "Invalid pairId" }, 400);
 
     const newOrder = await prisma.order.create({
         data: {
-            pairId:             body.pairId,
+            pairId: body.pairId,
             side,
-            amount:             body.amount  ?? "0",
-            price:              body.price   ?? "0",
-            stealthAddress:     body.stealthAddress,
+            amount: body.amount ?? "0",
+            price: body.price ?? "0",
+            shieldAddress: body.shieldAddress,
             userAddress,
-            baseChainSelector:  body.baseChainSelector,
+            baseChainSelector: body.baseChainSelector,
             quoteChainSelector: body.quoteChainSelector,
-            status:             hasEncrypted ? OrderStatus.PENDING : OrderStatus.OPEN,
-            encryptedPayload:   body.encrypted ?? null,
+            status: OrderStatus.PENDING,
+            encryptedPayload: body.encrypted,
         },
     });
 
@@ -302,54 +272,31 @@ order.post("/", authMiddleware, async (c) => {
     return streamText(c, async (stream) => {
         const log = (msg: string) => stream.writeln(JSON.stringify({ type: "log", message: msg }));
 
-        // ── Encrypted TEE path ─────────────────────────────────────────────────
-        if (hasEncrypted) {
-            await log("Forwarding encrypted order to CRE TEE...");
-            try {
-                await prisma.order.update({ where: { id: newOrder.id }, data: { status: OrderStatus.OPEN } });
-
-                const rawResult = await sendToMatchingWorkflow(
-                    { action: "match_order", encryptedOrder: body.encrypted!, signature: body.signature ?? "", pairId: body.pairId, orderId: newOrder.id },
-                    async (l) => { await log(l); }
-                );
-                const result     = extractCREResult(rawResult);
-                const finalOrder = await prisma.order.findUnique({ where: { id: newOrder.id } });
-
-                await stream.writeln(JSON.stringify({
-                    type: "result", success: true,
-                    orderId: newOrder.id, status: finalOrder?.status ?? "OPEN",
-                    cre: result, mode: "tee",
-                }));
-                return;
-
-            } catch (err) {
-                await log(`[TEE] Failed: ${err instanceof Error ? err.message : String(err)}`);
-
-                if (body.fallbackEnabled && hasPlaintext) {
-                    await log("[Fallback] CRE unavailable — running local matching...");
-                    // continue to plaintext matching below
-                } else {
-                    await stream.writeln(JSON.stringify({ type: "error", error: "CRE matching failed", detail: String(err) }));
-                    return;
-                }
-            }
-        }
-
-        // ── Plaintext / fallback matching ──────────────────────────────────────
+        await log("Forwarding encrypted order to CRE TEE...");
         try {
-            await matchOrders(newOrder.id, async (l) => { await log(l); });
+            await prisma.order.update({ where: { id: newOrder.id }, data: { status: OrderStatus.OPEN } });
+
+            const rawResult = await sendToMatchingWorkflow(
+                {
+                    action:         "match_order",
+                    encryptedOrder: body.encrypted,
+                    signature:      body.signature,
+                    pairId:         body.pairId,
+                    orderId:        newOrder.id,
+                },
+                async (l) => { await log(l); }
+            );
+            const result = extractCREResult(rawResult);
             const finalOrder = await prisma.order.findUnique({ where: { id: newOrder.id } });
+
             await stream.writeln(JSON.stringify({
                 type: "result", success: true,
                 orderId: newOrder.id, status: finalOrder?.status ?? "OPEN",
-                mode: hasEncrypted ? "fallback" : "plaintext",
+                cre: result,
             }));
         } catch (err) {
-            console.error("[order] Matching failed:", err);
-            await stream.writeln(JSON.stringify({
-                type: "error", error: "Matching engine failed",
-                detail: err instanceof Error ? err.message : String(err),
-            }));
+            await log(`[TEE] Failed: ${err instanceof Error ? err.message : String(err)}`);
+            await stream.writeln(JSON.stringify({ type: "error", error: "CRE matching failed", detail: String(err) }));
         }
     });
 });
@@ -360,7 +307,7 @@ order.get("/book", async (c) => {
     const pairId = c.req.query("pairId");
     try {
         const orders = await prisma.order.findMany({
-            where:   { status: "OPEN", ...(pairId ? { pairId } : {}) },
+            where: { status: "OPEN", ...(pairId ? { pairId } : {}) },
             orderBy: { createdAt: "desc" },
             include: { pair: true },
         });
@@ -374,7 +321,7 @@ order.get("/book", async (c) => {
 // ─── POST /:id/cancel ─────────────────────────────────────────────────────────
 
 order.post("/:id/cancel", authMiddleware, async (c) => {
-    const id          = c.req.param("id");
+    const id = c.req.param("id");
     const userAddress = c.get("user") as string;
 
     try {

@@ -4,19 +4,20 @@ import { useConnection, useSignTypedData } from 'wagmi';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import WorldIdKit from './WorldIdKit';
 import { auth } from '../lib/auth';
+import { getAddress } from 'viem';
 
 // ─── EIP-712 constants (must match the Convergence API / backend) ─────────────
 
 const SHIELD_DOMAIN = {
-    name:              'CompliantPrivateTokenDemo',
-    version:           '0.0.1',
-    chainId:           11155111, // ETH Sepolia
+    name: 'CompliantPrivateTokenDemo',
+    version: '0.0.1',
+    chainId: 11155111, // ETH Sepolia
     verifyingContract: '0xE588a6c73933BFD66Af9b4A07d48bcE59c0D2d13' as `0x${string}`,
 } as const;
 
 const SHIELD_TYPES = {
     'Generate Shielded Address': [
-        { name: 'account',   type: 'address' },
+        { name: 'account', type: 'address' },
         { name: 'timestamp', type: 'uint256' },
     ],
 } as const;
@@ -43,19 +44,20 @@ const ShieldedAddressGenerator: React.FC = () => {
 
             // User signs the EIP-712 request with their own wallet
             const signature = await signTypedDataAsync({
-                domain:      SHIELD_DOMAIN,
-                types:       SHIELD_TYPES,
+                account: getAddress(eoaAddress),
+                domain: SHIELD_DOMAIN,
+                types: SHIELD_TYPES,
                 primaryType: 'Generate Shielded Address',
                 message: {
-                    account:   eoaAddress as `0x${string}`,
+                    account: getAddress(eoaAddress),
                     timestamp: BigInt(timestamp),
                 },
             });
 
             // Backend proxies signed request to the Convergence API
             const res = await fetch('/api/user/shield-address', {
-                method:      'POST',
-                headers:     { 'Content-Type': 'application/json' },
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
                 body: JSON.stringify({ timestamp, auth: signature }),
             });
@@ -186,8 +188,8 @@ export const ProfileModal: React.FC<{ isOpen: boolean; onClose: () => void }> = 
         if (isOpen) checkStatus();
 
         const handleVerificationUpdate = () => {
-             setIsHumanVerified(true);
-             setTimeout(checkStatus, 1000);
+            setIsHumanVerified(true);
+            setTimeout(checkStatus, 1000);
         };
 
         window.addEventListener("world-id-updated", handleVerificationUpdate);
@@ -208,9 +210,9 @@ export const ProfileModal: React.FC<{ isOpen: boolean; onClose: () => void }> = 
                 <div className="flex flex-col items-center">
                     <div className="mb-4">
                         <ConnectButton
-                          accountStatus="address"
-                          chainStatus="icon"
-                          showBalance={false}
+                            accountStatus="address"
+                            chainStatus="icon"
+                            showBalance={false}
                         />
                     </div>
                     {isConnected && (
@@ -250,11 +252,11 @@ export const ProfileModal: React.FC<{ isOpen: boolean; onClose: () => void }> = 
                             </p>
                         )}
                     </div>
-                     {!isHumanVerified && (
+                    {!isHumanVerified && (
                         <div className="w-full max-w-[200px]">
                             <WorldIdKit />
                         </div>
-                     )}
+                    )}
                 </div>
             </div>
 

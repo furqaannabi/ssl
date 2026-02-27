@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Button, Icon, useToast } from './UI';
-import { useConnection, useSignMessage } from 'wagmi';
-import { encryptOrder }                  from '../lib/crypto';
+import { useConnection, useSignMessage, useAccount } from 'wagmi';
+import { encryptOrder } from '../lib/crypto';
 import { fetchCREPublicKey, signEncryptedOrder } from '../lib/cre-client';
 
 interface ParsedOrder {
@@ -32,7 +32,7 @@ interface OrderPreviewModalProps {
         amount: string;
         price: string;
         side: 'BUY' | 'SELL';
-        stealthAddress: string;
+        shieldAddress: string;
         baseChainSelector: string;
         quoteChainSelector: string;
     }, onLog?: (log: string) => void) => Promise<{ success: boolean; logs?: string[]; error?: string }>;
@@ -54,7 +54,7 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
 }) => {
     const { toast } = useToast();
     const [isLoading, setIsLoading] = useState(false);
-    
+
     const [side, setSide] = useState<'BUY' | 'SELL'>('BUY');
     const [amount, setAmount] = useState('');
     const [price, setPrice] = useState('');
@@ -63,8 +63,8 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
     const [chain, setChain] = useState('');
     const [chainSelector, setChainSelector] = useState('');
     const [pairId, setPairId] = useState('');
-    const [stealthAddress, setStealthAddress] = useState('');
-    
+    const [shieldAddress, setStealthAddress] = useState('');
+
     const [localBalanceCheck, setLocalBalanceCheck] = useState<BalanceCheck | null>(null);
 
     // Track which field user is editing to avoid circular updates
@@ -91,7 +91,7 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
             setChainSelector(ETH_SEPOLIA_SELECTOR);
             setPairId(parsed.pairId || '');
             setLocalBalanceCheck(balanceCheck);
-            
+
             // Calculate total value from parsed data
             const amt = parseFloat(parsed.amount || '0');
             const prc = parseFloat(parsed.price || '0');
@@ -104,7 +104,7 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
     const handleAmountChange = (value: string) => {
         setAmount(value);
         setEditingField('amount');
-        
+
         const amt = parseFloat(value);
         const prc = parseFloat(price);
         if (!isNaN(amt) && !isNaN(prc) && prc > 0) {
@@ -118,7 +118,7 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
     const handleTotalValueChange = (value: string) => {
         setTotalValue(value);
         setEditingField('totalValue');
-        
+
         const total = parseFloat(value);
         const prc = parseFloat(price);
         if (!isNaN(total) && !isNaN(prc) && prc > 0) {
@@ -131,9 +131,9 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
     // Handle price change - recalculate both amount and total value
     const handlePriceChange = (value: string) => {
         setPrice(value);
-        
+
         const prc = parseFloat(value);
-        
+
         // If editing amount, recalculate total
         if (editingField === 'amount') {
             const amt = parseFloat(amount);
@@ -142,7 +142,7 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
                 setTotalValue(total.toFixed(2));
             }
         }
-        
+
         // If editing total value, recalculate amount
         if (editingField === 'totalValue') {
             const total = parseFloat(totalValue);
@@ -154,16 +154,16 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
     };
 
     const calcTotalValue = parseFloat(amount || '0') * parseFloat(price || '0');
-    const isValidOrder = 
-        side && 
-        amount && 
-        parseFloat(amount) > 0 && 
-        price && 
-        parseFloat(price) > 0 && 
-        chain && 
+    const isValidOrder =
+        side &&
+        amount &&
+        parseFloat(amount) > 0 &&
+        price &&
+        parseFloat(price) > 0 &&
+        chain &&
         pairId &&
-        stealthAddress && 
-        /^0x[0-9a-fA-F]{40}$/.test(stealthAddress);
+        shieldAddress &&
+        /^0x[0-9a-fA-F]{40}$/.test(shieldAddress);
 
     const logsEndRef = React.useRef<HTMLDivElement>(null);
 
@@ -172,6 +172,7 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
         logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [orderLogs]);
 
+    const { address } = useAccount();
     const { signMessageAsync } = useSignMessage();
 
     const handleConfirm = async () => {
@@ -193,17 +194,11 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
         let encrypted: string | undefined;
         let signature: string | undefined;
 
-        try {
-            const crePublicKey = await fetchCREPublicKey();
-            const orderPayload = { pairId, side, amount, price, stealthAddress };
-            encrypted = await encryptOrder(orderPayload, crePublicKey);
-            signature = await signEncryptedOrder(encrypted, signMessageAsync as any);
-            setOrderLogs(prev => [...prev, 'Order encrypted. Submitting...']);
-        } catch (encErr: any) {
-            // Encryption failed — fall back to plaintext (less private but functional)
-            console.warn('[OrderModal] Encryption failed, using fallback:', encErr?.message);
-            setOrderLogs(prev => [...prev, '[Fallback] Encryption unavailable — submitting plaintext order.']);
-        }
+        const crePublicKey = await fetchCREPublicKey();
+        const orderPayload = { pairId, side, amount, price, shieldAddress, userAddress: address || '' };
+        encrypted = await encryptOrder(orderPayload, crePublicKey);
+        signature = await signEncryptedOrder(encrypted, signMessageAsync as any);
+        setOrderLogs(prev => [...prev, 'Order encrypted. Submitting...']);
 
         try {
             const result = await onConfirm({
@@ -211,16 +206,16 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
                 amount,
                 price,
                 side,
-                stealthAddress,
+                shieldAddress,
                 baseChainSelector: chainSelector,
                 quoteChainSelector: chainSelector,
-                // Encrypted fields (added to the order body if encryption succeeded)
-                ...(encrypted ? { encrypted, signature, fallbackEnabled: true } : {}),
+                encrypted,
+                signature,
             } as any, (log) => {
                 // Live log updates while streaming
                 setOrderLogs(prev => [...prev, log]);
             });
-            
+
             if (result.success) {
                 setOrderStatus('success');
                 if (result.logs) {
@@ -255,7 +250,7 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
                             {side}
                         </span>
                     </div>
-                    
+
                     <div className="flex items-center justify-between">
                         <span className="text-slate-400 text-xs uppercase">Token</span>
                         <span className="text-white font-mono text-sm">{symbol}</span>
@@ -331,19 +326,18 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
 
                 {/* Balance Check */}
                 {localBalanceCheck && (
-                    <div className={`border rounded-lg p-3 ${
-                        localBalanceCheck.hasSufficientBalance 
-                            ? 'bg-green-900/20 border-green-500/30' 
+                    <div className={`border rounded-lg p-3 ${localBalanceCheck.hasSufficientBalance
+                            ? 'bg-green-900/20 border-green-500/30'
                             : 'bg-red-900/20 border-red-500/30'
-                    }`}>
+                        }`}>
                         <div className="flex items-center gap-2">
-                            <Icon 
-                                name={localBalanceCheck.hasSufficientBalance ? 'check' : 'warning'} 
+                            <Icon
+                                name={localBalanceCheck.hasSufficientBalance ? 'check' : 'warning'}
                                 className={`text-sm ${localBalanceCheck.hasSufficientBalance ? 'text-green-400' : 'text-red-400'}`}
                             />
                             <span className={`text-xs ${localBalanceCheck.hasSufficientBalance ? 'text-green-400' : 'text-red-400'}`}>
-                                {localBalanceCheck.hasSufficientBalance 
-                                    ? 'Sufficient balance' 
+                                {localBalanceCheck.hasSufficientBalance
+                                    ? 'Sufficient balance'
                                     : 'Insufficient balance'
                                 }
                             </span>
@@ -361,7 +355,7 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
                     </label>
                     <input
                         type="text"
-                        value={stealthAddress}
+                        value={shieldAddress}
                         onChange={(e) => setStealthAddress(e.target.value)}
                         placeholder="0x..."
                         className="w-full bg-black border border-border-dark text-white text-sm px-3 py-2 rounded font-mono focus:border-primary outline-none"
