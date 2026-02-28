@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Icon, Card, Button, Badge, useToast } from './UI';
 import { OracleIndicator } from './OracleIndicator';
 import { FundingModal } from './FundingModal';
-import { useAccount, useSignMessage } from 'wagmi';
+import { useConnection, useSignMessage } from 'wagmi';
 import { signTypedData } from '@wagmi/core';
 import { CHAINS } from '../lib/chain-config';
 import { auth } from '../lib/auth';
@@ -37,7 +37,7 @@ export const Terminal: React.FC = () => {
     const [price, setPrice] = useState('100.00');
     const logEndRef = useRef<HTMLDivElement>(null);
 
-    const { address: eoaAddress, isConnected } = useAccount();
+    const { address: eoaAddress, isConnected } = useConnection();
     const { signMessageAsync } = useSignMessage();
 
     const API_URL = ""; // Use Vite proxy for CORS/cookie consistency

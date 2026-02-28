@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Modal, Button, Icon } from './UI';
 import { TOKEN_DECIMALS, ERC20_ABI, RWA_TOKENS, ETH_SEPOLIA_TOKENS } from '../lib/contracts';
 import { CONVERGENCE_VAULT_ABI, CONVERGENCE_VAULT_ADDRESS, CONVERGENCE_CHAIN_ID } from '../lib/abi/convergence_vault_abi';
-import { useAccount, useWaitForTransactionReceipt, useSwitchChain } from 'wagmi';
+import { useConnection, useWaitForTransactionReceipt, useSwitchChain } from 'wagmi';
 import { auth } from '../lib/auth';
 import { simulateContract, writeContract, getGasPrice, readContract, getBalance } from '@wagmi/core';
 import { parseUnits, formatUnits } from 'viem';
@@ -41,7 +41,7 @@ export const FundingModal: React.FC<FundingModalProps> = ({
     const [walletBalance, setWalletBalance] = useState<string | null>(null);
     const [balanceLoading, setBalanceLoading] = useState(false);
 
-    const { isConnected, address: eoaAddress, chain } = useAccount();
+    const { isConnected, address: eoaAddress, chain } = useConnection();
     const { switchChainAsync } = useSwitchChain();
 
     // Fetch tokens from backend on open
@@ -112,7 +112,7 @@ export const FundingModal: React.FC<FundingModalProps> = ({
                 functionName: 'balanceOf',
                 args: [eoaAddress as `0x${string}`],
                 chainId: CONVERGENCE_CHAIN_ID,
-            });
+            } as any);
             const decimals = selectedToken.decimals || TOKEN_DECIMALS[selectedToken.symbol] || 18;
             setWalletBalance(formatUnits(raw as bigint, decimals));
         } catch (err) {
@@ -168,7 +168,7 @@ export const FundingModal: React.FC<FundingModalProps> = ({
                 functionName: 'sPolicyEngines',
                 args: [selectedToken.address as `0x${string}`],
                 chainId: CONVERGENCE_CHAIN_ID,
-            }) as `0x${string}`;
+            } as any) as `0x${string}`;
 
             if (!policyEngine || policyEngine === '0x0000000000000000000000000000000000000000') {
                 setError(
@@ -188,7 +188,7 @@ export const FundingModal: React.FC<FundingModalProps> = ({
                 functionName: 'allowance',
                 args: [eoaAddress as `0x${string}`, CONVERGENCE_VAULT_ADDRESS],
                 chainId: CONVERGENCE_CHAIN_ID,
-            }) as bigint;
+            } as any) as bigint;
 
             if (allowance >= amountUnits) {
                 // Allowance already covers this deposit — go straight to depositing

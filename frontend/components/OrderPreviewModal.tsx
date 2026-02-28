@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Button, Icon, useToast } from './UI';
-import { useConnection, useSignMessage, useAccount } from 'wagmi';
+import { useConnection, useSignMessage } from 'wagmi';
 import { encryptOrder } from '../lib/crypto';
 import { fetchCREPublicKey, signEncryptedOrder } from '../lib/cre-client';
 
@@ -35,6 +35,8 @@ interface OrderPreviewModalProps {
         shieldAddress: string;
         baseChainSelector: string;
         quoteChainSelector: string;
+        encrypted: string;
+        signature: string;
     }, onLog?: (log: string) => void) => Promise<{ success: boolean; logs?: string[]; error?: string }>;
 }
 
@@ -172,7 +174,7 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
         logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [orderLogs]);
 
-    const { address } = useAccount();
+    const { address } = useConnection();
     const { signMessageAsync } = useSignMessage();
 
     const handleConfirm = async () => {
@@ -190,17 +192,13 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
         setOrderStatus('placing');
         setOrderLogs(['Encrypting order for CRE TEE...']);
 
-        // ── Encrypt the order for the TEE before submitting ────────────────────
-        let encrypted: string | undefined;
-        let signature: string | undefined;
-
-        const crePublicKey = await fetchCREPublicKey();
-        const orderPayload = { pairId, side, amount, price, shieldAddress, userAddress: address || '' };
-        encrypted = await encryptOrder(orderPayload, crePublicKey);
-        signature = await signEncryptedOrder(encrypted, signMessageAsync as any);
-        setOrderLogs(prev => [...prev, 'Order encrypted. Submitting...']);
-
         try {
+            // Encrypt the order for the CRE TEE before submitting
+            const crePublicKey = await fetchCREPublicKey();
+            const orderPayload = { pairId, side, amount, price, shieldAddress, userAddress: address || '' };
+            const encrypted = await encryptOrder(orderPayload, crePublicKey);
+            const signature = await signEncryptedOrder(encrypted, signMessageAsync as any);
+            setOrderLogs(prev => [...prev, 'Order encrypted. Submitting...']);
             const result = await onConfirm({
                 pairId,
                 amount,
@@ -211,7 +209,7 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
                 quoteChainSelector: chainSelector,
                 encrypted,
                 signature,
-            } as any, (log) => {
+            }, (log) => {
                 // Live log updates while streaming
                 setOrderLogs(prev => [...prev, log]);
             });

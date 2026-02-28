@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Icon } from './UI';
 import { useConnection } from 'wagmi';
 import { OrderPreviewModal } from './OrderPreviewModal';
+import { auth } from '../lib/auth';
 
 interface ChatMessage {
     role: 'user' | 'assistant';
@@ -187,7 +188,7 @@ export const AIChatbot: React.FC = () => {
         return tradingKeywords.some(kw => lower.includes(kw));
     };
 
-    // Handle order confirmation from modal
+    // Handle order confirmation from modal — must include encrypted + signature for CRE TEE
     const handleOrderConfirm = async (order: {
         pairId: string;
         amount: string;
@@ -196,6 +197,8 @@ export const AIChatbot: React.FC = () => {
         shieldAddress: string;
         baseChainSelector: string;
         quoteChainSelector: string;
+        encrypted: string;
+        signature: string;
     }, onLog?: (log: string) => void): Promise<{ success: boolean; logs?: string[]; error?: string }> => {
         const logs: string[] = [];
 
@@ -288,10 +291,21 @@ export const AIChatbot: React.FC = () => {
         // Check for trading intent BEFORE sending to chat
         if (hasTradingIntent(text)) {
             if (!eoaAddress) {
-                // User not connected - show error in chat
                 const errorMsg: ChatMessage = {
                     role: 'assistant',
                     content: 'To place an order, please connect your wallet first.',
+                    timestamp: Date.now(),
+                };
+                setMessages(prev => [...prev, errorMsg]);
+                return;
+            }
+
+            // Gate: World ID verification required before trading
+            const user = await auth.getMe();
+            if (!user?.isVerified) {
+                const errorMsg: ChatMessage = {
+                    role: 'assistant',
+                    content: 'World ID verification is required before placing orders. Head to the **Compliance** tab to verify your identity.',
                     timestamp: Date.now(),
                 };
                 setMessages(prev => [...prev, errorMsg]);
@@ -487,14 +501,14 @@ export const AIChatbot: React.FC = () => {
                                     <Icon name="bolt" className="text-primary text-2xl" />
                                 </div>
                                 <div>
-                                    {renderMarkdown(`Hello there! Welcome to SSL (Stealth Settlement Layer), your private cross-chain platform for trading RWA tokens.
+                                    {renderMarkdown(`Hello there! Welcome to SSL (Stealth Settlement Layer), your private platform for trading tokenized Real World Assets.
 
-I see you haven't deposited any tokens yet. What can I help you with today? Are you looking to:
+What can I help you with today? You can:
 
-* **Learn more about the platform?**
-* **See what tokens are available for trading?**
-* **Find out how to deposit funds?**
-* **Or something else entirely?**
+* **Learn more about the platform**
+* **See what tokens are available for trading**
+* **Find out how to deposit funds**
+* **Place trades in natural language** — e.g. "Buy 0.5 tNVDA at $800"
 
 Let me know how I can assist!`)}
                                 </div>

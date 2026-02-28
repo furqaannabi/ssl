@@ -109,8 +109,8 @@ export class AIContextService {
 
         // 5. Platform info
         sections.push(`PLATFORM INFO:
-  - Platform: SSL (Stealth Settlement Layer) — private cross-chain RWA trading
-  - Supported chains: Base Sepolia, Arbitrum Sepolia
+  - Platform: SSL (Stealth Settlement Layer) — private RWA trading with stealth addresses
+  - Chain: Ethereum Sepolia (single-chain)
   - Tokens: Only whitelisted RWA tokens (stocks, ETFs, bonds) can be traded
   - Settlement: Orders are matched off-chain and settled on-chain via stealth addresses
   - Users can deposit, trade, and withdraw whitelisted tokens`);

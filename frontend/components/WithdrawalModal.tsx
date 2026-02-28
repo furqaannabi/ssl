@@ -99,6 +99,7 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({ isOpen, onClos
             // Step 1 — sign EIP-712 "Withdraw Tokens"
             setStep('SIGNING');
             const sig = await signTypedData(config, {
+                account: eoaAddress as `0x${string}`,
                 domain: CONVERGENCE_DOMAIN,
                 types: WITHDRAW_TYPES,
                 primaryType: 'Withdraw Tokens',
