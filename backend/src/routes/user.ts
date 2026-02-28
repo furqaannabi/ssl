@@ -193,4 +193,47 @@ user.post("/vault-balances", authMiddleware, async (c) => {
     }
 });
 
+// ── POST /vault-transactions ──
+// User signs EIP-712 "List Transactions" client-side and passes { timestamp, auth, cursor?, limit? }.
+// Backend injects their address from session and proxies to the Convergence API.
+user.post("/vault-transactions", authMiddleware, async (c) => {
+    const userAddress = (c.get("user") as string);
+    const body = await c.req.json<{ timestamp: number; auth: string; cursor?: string; limit?: number }>();
+
+    if (!body.timestamp || !body.auth) {
+        return c.json({ error: "timestamp and auth are required" }, 400);
+    }
+    if (Math.abs(Date.now() / 1000 - body.timestamp) > 300) {
+        return c.json({ error: "timestamp expired (must be within 5 minutes)" }, 400);
+    }
+
+    try {
+        const payload: Record<string, unknown> = {
+            account: getAddress(userAddress),
+            timestamp: body.timestamp,
+            auth: body.auth,
+        };
+        if (body.cursor !== undefined) payload.cursor = body.cursor;
+        if (body.limit !== undefined) payload.limit = body.limit;
+
+        const res = await fetch(`${CONVERGENCE_API}/transactions`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            console.error("[user/vault-transactions] Convergence error:", err);
+            return c.json({ error: (err as any).error_details || (err as any).error || "Failed to fetch transactions" }, 502);
+        }
+
+        const json = await res.json();
+        return c.json({ success: true, transactions: json.transactions ?? [], has_more: json.has_more ?? false, next_cursor: json.next_cursor });
+    } catch (err: any) {
+        console.error("[user/vault-transactions]", err);
+        return c.json({ error: err.message || "Failed to fetch transactions" }, 500);
+    }
+});
+
 export { user };

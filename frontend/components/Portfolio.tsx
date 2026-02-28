@@ -21,6 +21,15 @@ const RETRIEVE_BALANCES_TYPES = {
     ],
 } as const;
 
+const LIST_TRANSACTIONS_TYPES = {
+    'List Transactions': [
+        { name: 'account', type: 'address' },
+        { name: 'timestamp', type: 'uint256' },
+        { name: 'cursor', type: 'string' },
+        { name: 'limit', type: 'uint256' },
+    ],
+} as const;
+
 const TYPE_ICONS: Record<string, { icon: string; colorClass: string }> = {
     STOCK: { icon: 'show_chart', colorClass: 'text-blue-400' },
     ETF: { icon: 'pie_chart', colorClass: 'text-purple-400' },
@@ -30,6 +39,20 @@ const TYPE_ICONS: Record<string, { icon: string; colorClass: string }> = {
 };
 
 interface VaultBalance { token: string; amount: string; }
+
+interface VaultTransaction {
+    id: string;
+    type: 'deposit' | 'withdrawal' | 'transfer';
+    account: string;
+    token: string;
+    amount: string;
+    tx_hash: string;
+    sender: string;
+    recipient: string;
+    is_incoming: boolean;
+    is_sender_hidden: boolean;
+    withdraw_status?: string;
+}
 
 export const Portfolio: React.FC = () => {
     const [isFundingOpen, setIsFundingOpen] = useState(false);
@@ -106,6 +129,66 @@ export const Portfolio: React.FC = () => {
         }
     }, [isConnected, eoaAddress, signTypedDataAsync]);
 
+    const [transactions, setTransactions] = useState<VaultTransaction[]>([]);
+    const [isTxLoading, setIsTxLoading] = useState(false);
+    const [txError, setTxError] = useState<string | null>(null);
+    const [txNextCursor, setTxNextCursor] = useState<string | undefined>(undefined);
+    const [txHasMore, setTxHasMore] = useState(false);
+
+    const fetchTransactions = useCallback(async (cursor?: string) => {
+        if (!isConnected || !eoaAddress) return;
+
+        setIsTxLoading(true);
+        setTxError(null);
+
+        try {
+            const timestamp = Math.floor(Date.now() / 1000);
+            const cursorVal = cursor ?? '';
+            const limitVal = 20;
+
+            const signature = await signTypedDataAsync({
+                account: getAddress(eoaAddress),
+                domain: CONVERGENCE_DOMAIN,
+                types: LIST_TRANSACTIONS_TYPES,
+                primaryType: 'List Transactions',
+                message: {
+                    account: getAddress(eoaAddress),
+                    timestamp: BigInt(timestamp),
+                    cursor: cursorVal,
+                    limit: BigInt(limitVal),
+                },
+            });
+
+            const res = await fetch('/api/user/vault-transactions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ timestamp, auth: signature, cursor: cursorVal || undefined, limit: limitVal }),
+            });
+
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.error || 'Failed to fetch transactions');
+            }
+
+            const data = await res.json();
+            if (data.success) {
+                setTransactions(prev => cursor ? [...prev, ...data.transactions] : data.transactions);
+                setTxHasMore(data.has_more ?? false);
+                setTxNextCursor(data.next_cursor);
+            }
+        } catch (err: any) {
+            console.error('Failed to fetch transactions:', err);
+            if (err.message?.includes('User rejected') || err.message?.includes('rejected')) {
+                setTxError('Signature rejected.');
+            } else {
+                setTxError(err.message || 'Failed to fetch transactions');
+            }
+        } finally {
+            setIsTxLoading(false);
+        }
+    }, [isConnected, eoaAddress, signTypedDataAsync]);
+
     const [prices, setPrices] = useState<Record<string, { current: number; changePercent?: number }>>({});
 
     // Fetch live prices from backend every 15s
@@ -134,6 +217,12 @@ export const Portfolio: React.FC = () => {
     contextBalances.forEach(b => {
         const addr = b.contractAddress?.toLowerCase() || '';
         balanceMap[addr] = b.balance;
+    });
+
+    // address → token symbol lookup
+    const tokenSymbolMap: Record<string, { symbol: string; decimals: number }> = {};
+    ETH_SEPOLIA_TOKENS.forEach(t => {
+        tokenSymbolMap[t.address.toLowerCase()] = { symbol: t.symbol, decimals: t.decimals };
     });
 
     const totalValue = ETH_SEPOLIA_TOKENS.reduce((sum, t) => {
@@ -333,6 +422,131 @@ export const Portfolio: React.FC = () => {
                             </tbody>
                         </table>
                     </div>
+                </Card>
+            </div>
+
+            {/* Transaction History */}
+            <div className="pb-6">
+                <Card className="flex flex-col">
+                    <div className="p-5 border-b border-border-dark flex justify-between items-center bg-surface-lighter">
+                        <h2 className="text-lg font-medium text-white flex items-center gap-2">
+                            <Icon name="receipt_long" className="text-slate-500" />
+                            Transaction History
+                        </h2>
+                        <Button
+                            variant="ghost"
+                            icon={isTxLoading ? 'hourglass_empty' : 'history'}
+                            onClick={() => { setTransactions([]); setTxNextCursor(undefined); fetchTransactions(); }}
+                            disabled={isTxLoading || !isConnected}
+                            className="border border-slate-700 text-slate-400 hover:bg-white/5 text-xs"
+                        >
+                            {isTxLoading ? 'Loading…' : transactions.length === 0 ? 'Load History' : 'Refresh'}
+                        </Button>
+                    </div>
+
+                    {txError && (
+                        <div className="mx-5 mt-4 bg-red-500/10 border border-red-500/20 p-3 rounded flex items-center gap-3 text-red-400 text-xs font-mono">
+                            <Icon name="error" className="text-sm shrink-0" />
+                            {txError}
+                        </div>
+                    )}
+
+                    {transactions.length === 0 && !isTxLoading ? (
+                        <div className="p-10 text-center text-slate-500 text-sm font-mono">
+                            {isConnected
+                                ? 'Click "Load History" to fetch your vault transaction history.'
+                                : 'Connect your wallet to view transaction history.'}
+                        </div>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse">
+                                <thead>
+                                    <tr className="text-xs uppercase tracking-wider text-slate-500 border-b border-border-dark bg-black/20 font-mono">
+                                        <th className="px-6 py-4 font-semibold">Type</th>
+                                        <th className="px-6 py-4 font-semibold">Direction</th>
+                                        <th className="px-6 py-4 font-semibold">Token</th>
+                                        <th className="px-6 py-4 font-semibold text-right">Amount</th>
+                                        <th className="px-6 py-4 font-semibold">Tx Hash</th>
+                                        <th className="px-6 py-4 font-semibold">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-border-dark text-xs font-mono">
+                                    {transactions.map(tx => {
+                                        const tokenInfo = tokenSymbolMap[tx.token?.toLowerCase()];
+                                        const decimals = tokenInfo?.decimals ?? 18;
+                                        const symbol = tokenInfo?.symbol ?? `${tx.token?.slice(0, 6)}…`;
+                                        const amount = tx.amount
+                                            ? parseFloat(formatUnits(BigInt(tx.amount), decimals)).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })
+                                            : '—';
+                                        const isIn = tx.is_incoming || tx.type === 'deposit';
+                                        const typeColors: Record<string, string> = {
+                                            deposit: 'text-primary bg-primary/10 border-primary/20',
+                                            withdrawal: 'text-amber-400 bg-amber-400/10 border-amber-400/20',
+                                            transfer: 'text-blue-400 bg-blue-400/10 border-blue-400/20',
+                                        };
+                                        const typeColor = typeColors[tx.type] ?? 'text-slate-400 bg-slate-400/10 border-slate-400/20';
+                                        const shortHash = tx.tx_hash ? `${tx.tx_hash.slice(0, 8)}…${tx.tx_hash.slice(-6)}` : '—';
+
+                                        return (
+                                            <tr key={tx.id} className="hover:bg-white/5 transition-colors">
+                                                <td className="px-6 py-3">
+                                                    <span className={`text-[10px] font-mono border px-2 py-0.5 rounded uppercase ${typeColor}`}>
+                                                        {tx.type}
+                                                    </span>
+                                                </td>
+                                                <td className="px-6 py-3">
+                                                    <span className={`font-bold ${isIn ? 'text-primary' : 'text-red-400'}`}>
+                                                        {isIn ? '↓ IN' : '↑ OUT'}
+                                                    </span>
+                                                </td>
+                                                <td className="px-6 py-3 text-white font-display uppercase">{symbol}</td>
+                                                <td className="px-6 py-3 text-right text-white">{amount}</td>
+                                                <td className="px-6 py-3">
+                                                    {tx.tx_hash ? (
+                                                        <span className="text-slate-400 hover:text-slate-200 cursor-pointer transition-colors" title={tx.tx_hash}>
+                                                            {shortHash}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-slate-600">—</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-6 py-3">
+                                                    {tx.type === 'withdrawal' && tx.withdraw_status ? (
+                                                        <span className={`text-[10px] border px-2 py-0.5 rounded uppercase ${tx.withdraw_status === 'completed' ? 'text-primary border-primary/30' : tx.withdraw_status === 'refunded' ? 'text-red-400 border-red-400/30' : 'text-amber-400 border-amber-400/30'}`}>
+                                                            {tx.withdraw_status}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-[10px] text-primary border border-primary/30 px-2 py-0.5 rounded uppercase">confirmed</span>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                    {isTxLoading && (
+                                        <tr>
+                                            <td colSpan={6} className="px-6 py-4 text-center text-slate-500">
+                                                <span className="inline-block w-3 h-3 border border-primary border-t-transparent rounded-full animate-spin mr-2"></span>
+                                                Loading…
+                                            </td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                            {txHasMore && (
+                                <div className="p-4 border-t border-border-dark text-center">
+                                    <Button
+                                        variant="ghost"
+                                        icon="expand_more"
+                                        onClick={() => fetchTransactions(txNextCursor)}
+                                        disabled={isTxLoading}
+                                        className="text-slate-400 border border-slate-700 hover:bg-white/5 text-xs"
+                                    >
+                                        Load More
+                                    </Button>
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </Card>
             </div>
 
