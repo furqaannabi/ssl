@@ -159,14 +159,18 @@ order.post("/cre-settle", async (c) => {
 // ─── POST /parse ─────────────────────────────────────────────────────────────
 
 order.post("/parse", async (c) => {
-    const body = await c.req.json<{ message: string; userAddress?: string }>();
+    const body = await c.req.json<{
+        message: string;
+        userAddress?: string;
+        conversationHistory?: Array<{ role: string; content: string }>;
+    }>();
 
     if (!body.message || typeof body.message !== "string") {
         return c.json({ error: "Message is required" }, 400);
     }
 
     try {
-        const parsed = await NLParserService.parseOrderMessage(body.message);
+        const parsed = await NLParserService.parseOrderMessage(body.message, body.conversationHistory || []);
 
         if (!parsed.isValid) {
             return c.json({ parsed, requiresConfirmation: false, balanceCheck: null });

@@ -9,6 +9,7 @@ import { streamSSE } from 'hono/streaming';
 import { AIAdvisorService, type ChatMessage } from '../services/ai-advisor.service';
 import { ArbitrageMonitorService } from '../services/arbitrage-monitor.service';
 import { PriceFeedService } from '../services/price-feed.service';
+import type { LiveBalance } from '../services/ai-context.service';
 
 const chat = new Hono();
 
@@ -18,6 +19,8 @@ chat.post('/', async (c) => {
         message: string;
         conversationHistory?: ChatMessage[];
         userAddress?: string;
+        // Live balances from the frontend — ephemeral, never persisted, used only for this response
+        portfolioBalances?: LiveBalance[];
     }>();
 
     if (!body.message || typeof body.message !== 'string') {
@@ -26,11 +29,12 @@ chat.post('/', async (c) => {
 
     const userAddress = body.userAddress || 'anonymous';
     const history = body.conversationHistory || [];
+    const liveBalances = body.portfolioBalances;
 
     return streamSSE(c, async (stream) => {
         let fullResponse = '';
 
-        for await (const chunk of AIAdvisorService.streamChat(userAddress, body.message, history)) {
+        for await (const chunk of AIAdvisorService.streamChat(userAddress, body.message, history, liveBalances)) {
             fullResponse += chunk;
             await stream.writeSSE({
                 data: JSON.stringify({ type: 'chunk', content: chunk }),

@@ -10,20 +10,21 @@ export interface OracleSignal {
 }
 
 export class OracleService {
-  private static readonly PRIVACY_THRESHOLD = 5;
+  private static readonly PRIVACY_THRESHOLD = 2;
   private static readonly WINDOW_SIZE = 20;
 
   static async getSignal(pairId: string): Promise<OracleSignal> {
-    const settlements = await prisma.settlement.findMany({
+    // Query settled orders for the pair — Settlement table is not populated; Order is the source of truth
+    const settledOrders = await prisma.order.findMany({
       where: {
-        // SETTLED = same-chain settlement done; COMPLETED = cross-chain bridge finished
-        status: { in: ['SETTLED', 'COMPLETED'] },
+        pairId,
+        status: { in: ['SETTLED', 'MATCHED'] },
       },
       orderBy: { createdAt: 'desc' },
       take: this.WINDOW_SIZE,
     });
 
-    const sampleSize = settlements.length;
+    const sampleSize = settledOrders.length;
     const thresholdMet = sampleSize >= this.PRIVACY_THRESHOLD;
 
     if (!thresholdMet) {
@@ -37,28 +38,22 @@ export class OracleService {
       };
     }
 
-    // VWAP calculation: sum(price * amount) / sum(volume)
+    // VWAP: sum(price * filledAmount) / sum(filledAmount)
     let totalVolume = 0;
     let totalValue = 0;
 
-    settlements.forEach((s: any) => {
-      const price = parseFloat(s.amount || '0') / 1000; // Mock price logic if not directly in schema
-      const amount = parseFloat(s.amount || '0');
-      // Note: Real logic would depend on how price/amount are stored.
-      // For the demo, we'll use the 'amount' field as a proxy for price/vol if needed,
-      // or assume 'amount' is the settlement value.
-      
-      // Let's assume s.amount is the price for this demo logic
-      const p = parseFloat(s.amount || '0');
-      totalValue += p * 1; // Assuming unit volume for simplicity if not present
-      totalVolume += 1;
+    settledOrders.forEach((o) => {
+      const price = parseFloat(o.price || '0');
+      const filled = parseFloat(o.filledAmount || o.amount || '0');
+      totalValue += price * filled;
+      totalVolume += filled;
     });
 
-    const vwap = totalValue / totalVolume;
-    const lastPrice = parseFloat(settlements[0].amount || '0');
-    
-    const strength = Math.min(Math.round((Math.abs(lastPrice - vwap) / vwap) * 100), 100);
-    const status = lastPrice > vwap ? 'BULLISH' : 'BEARISH';
+    const vwap = totalVolume > 0 ? totalValue / totalVolume : 0;
+    const lastPrice = parseFloat(settledOrders[0].price || '0');
+    const priceDiff = vwap > 0 ? Math.abs(lastPrice - vwap) / vwap : 0;
+    const strength = Math.min(Math.round(priceDiff * 100), 100);
+    const status = lastPrice >= vwap ? 'BULLISH' : 'BEARISH';
 
     return {
       status,

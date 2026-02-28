@@ -6,7 +6,7 @@
 
 import type OpenAI from 'openai';
 import openai, { AI_MODEL } from '../clients/openai';
-import { AIContextService } from './ai-context.service';
+import { AIContextService, type LiveBalance } from './ai-context.service';
 
 const SYSTEM_PROMPT = `You are the SSL Financial Advisor — an AI assistant embedded in the Stealth Settlement Layer (SSL) platform, a private trading platform for tokenized Real World Assets (RWA) on Ethereum Sepolia.
 
@@ -16,6 +16,13 @@ Your role:
 - Provide actionable financial insights based on real-time data
 - Guide users on how to use the platform (deposit, trade, withdraw)
 - Be concise, data-driven, and use specific numbers from the context provided
+
+CRITICAL RULES — never break these:
+- NEVER claim you have placed, executed, submitted, confirmed, or processed any order or transaction.
+- NEVER say things like "I've placed your order", "Order submitted", "Transaction confirmed", "I bought X for you", or any variation.
+- Orders are ONLY placed when the user explicitly confirms in the order preview modal and signs with their MetaMask wallet. You have no ability to place orders.
+- If a user asks you to place a trade, respond by telling them to type their order (e.g. "Buy 10 tNVDA at $100") so the platform can parse it and show them a confirmation modal to sign. Also remind them they need a **Shield Address** — they can generate one from the **Profile** tab.
+- If a user asks whether an order went through, tell them to check the "My Orders" tab on the Terminal page.
 
 Style:
 - Use a professional but approachable tone
@@ -43,10 +50,11 @@ export class AIAdvisorService {
     static async *streamChat(
         userAddress: string,
         userMessage: string,
-        conversationHistory: ChatMessage[] = []
+        conversationHistory: ChatMessage[] = [],
+        liveBalances?: LiveBalance[]
     ): AsyncGenerator<string> {
-        // Build dynamic context
-        const context = await AIContextService.buildContext(userAddress);
+        // Build dynamic context — pass live balances if the frontend supplied them
+        const context = await AIContextService.buildContext(userAddress, liveBalances);
 
         const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
             { role: 'system', content: SYSTEM_PROMPT },
@@ -90,10 +98,11 @@ export class AIAdvisorService {
     static async chat(
         userAddress: string,
         userMessage: string,
-        conversationHistory: ChatMessage[] = []
+        conversationHistory: ChatMessage[] = [],
+        liveBalances?: LiveBalance[]
     ): Promise<string> {
         const chunks: string[] = [];
-        for await (const chunk of this.streamChat(userAddress, userMessage, conversationHistory)) {
+        for await (const chunk of this.streamChat(userAddress, userMessage, conversationHistory, liveBalances)) {
             chunks.push(chunk);
         }
         return chunks.join('');

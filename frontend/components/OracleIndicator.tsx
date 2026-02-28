@@ -61,7 +61,7 @@ export const OracleIndicator: React.FC<{ pairId: string }> = ({ pairId }) => {
 
   if (!data || data.status === 'GATHERING_INTEL') {
     const sampleSize = data?.sampleSize || 0;
-    const progress = (sampleSize / 5) * 100;
+    const progress = (sampleSize / 2) * 100;
     return (
       <div className="flex flex-col gap-1 p-2 bg-primary/5 border border-primary/30 rounded font-mono shadow-[0_0_15px_rgba(var(--primary-rgb),0.1)]">
         <div className="flex justify-between items-center">
@@ -76,7 +76,7 @@ export const OracleIndicator: React.FC<{ pairId: string }> = ({ pairId }) => {
         </div>
         <div className="flex justify-between items-center">
             <span className="text-[8px] text-slate-300 uppercase font-medium">Privacy Guard Active</span>
-            <span className="text-[9px] text-white font-black uppercase">{sampleSize} / 5 Settlements</span>
+            <span className="text-[9px] text-white font-black uppercase">{sampleSize} / 2 Settlements</span>
         </div>
       </div>
     );

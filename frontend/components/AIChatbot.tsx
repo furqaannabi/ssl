@@ -1,6 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Icon } from './UI';
-import { useConnection } from 'wagmi';
+import { useConnection, useSignTypedData } from 'wagmi';
+import { getAddress } from 'viem';
+import { TOKEN_DECIMALS, ETH_SEPOLIA_TOKENS } from '../lib/contracts';
+import { formatUnits } from 'viem';
 import { OrderPreviewModal } from './OrderPreviewModal';
 import { auth } from '../lib/auth';
 
@@ -152,6 +155,24 @@ function renderInline(text: string): React.ReactNode {
     });
 }
 
+// EIP-712 domain for Convergence vault balance retrieval (mirrors Portfolio.tsx)
+const CONVERGENCE_VAULT = '0xE588a6c73933BFD66Af9b4A07d48bcE59c0D2d13' as const;
+const CONVERGENCE_DOMAIN = {
+    name: 'CompliantPrivateTokenDemo',
+    version: '0.0.1',
+    chainId: 11155111,
+    verifyingContract: CONVERGENCE_VAULT,
+} as const;
+const RETRIEVE_BALANCES_TYPES = {
+    'Retrieve Balances': [
+        { name: 'account', type: 'address' },
+        { name: 'timestamp', type: 'uint256' },
+    ],
+} as const;
+
+/** Balance shape forwarded to the backend AI context — ephemeral, never persisted */
+interface LiveBalance { token: string; symbol: string; balance: number; }
+
 export const AIChatbot: React.FC = () => {
     const [isOpen, setIsOpen] = useState(false);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -161,8 +182,81 @@ export const AIChatbot: React.FC = () => {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
     const { address: eoaAddress } = useConnection();
+    const { signTypedDataAsync } = useSignTypedData();
+
+    // In-memory portfolio balances — set by Sync Portfolio, cleared on disconnect, never stored to DB
+    const [portfolioBalances, setPortfolioBalances] = useState<LiveBalance[]>([]);
+    const [isSyncing, setIsSyncing] = useState(false);
 
     const API_URL = "";
+
+    // Clear portfolio from memory when wallet disconnects
+    useEffect(() => {
+        if (!eoaAddress) setPortfolioBalances([]);
+    }, [eoaAddress]);
+
+    /** Fetch live vault balances via EIP-712 sign — stores in React state only, never in DB */
+    const syncPortfolio = async () => {
+        if (!eoaAddress || isSyncing) return;
+        setIsSyncing(true);
+        try {
+            const timestamp = Math.floor(Date.now() / 1000);
+            const signature = await signTypedDataAsync({
+                account: getAddress(eoaAddress),
+                domain: CONVERGENCE_DOMAIN,
+                types: RETRIEVE_BALANCES_TYPES,
+                primaryType: 'Retrieve Balances',
+                message: {
+                    account: getAddress(eoaAddress),
+                    timestamp: BigInt(timestamp),
+                },
+            });
+
+            const res = await fetch(`${API_URL}/api/user/vault-balances`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ timestamp, auth: signature }),
+            });
+
+            if (!res.ok) throw new Error('Failed to fetch vault balances');
+
+            const data = await res.json();
+            if (data.success && data.balances) {
+                const mapped: LiveBalance[] = data.balances
+                    .map((b: { token: string; amount: string }) => {
+                        const addr = b.token.toLowerCase();
+                        const tokenMeta = ETH_SEPOLIA_TOKENS.find(t => t.address.toLowerCase() === addr);
+                        if (!tokenMeta) return null;
+                        const decimals = tokenMeta.decimals ?? TOKEN_DECIMALS[tokenMeta.symbol] ?? 18;
+                        const balance = parseFloat(formatUnits(BigInt(b.amount), decimals));
+                        return { token: b.token, symbol: tokenMeta.symbol, balance };
+                    })
+                    .filter((b: LiveBalance | null): b is LiveBalance => b !== null && b.balance > 0);
+                setPortfolioBalances(mapped);
+                // Inform the user in the chat
+                const syncMsg: ChatMessage = {
+                    role: 'assistant',
+                    content: mapped.length > 0
+                        ? `Portfolio synced! I can now see ${mapped.length} token${mapped.length > 1 ? 's' : ''} in your vault: ${mapped.map(b => `**${b.balance.toFixed(4)} ${b.symbol}**`).join(', ')}. Ask me anything about your holdings.`
+                        : 'Portfolio synced — your vault appears to be empty. Deposit tokens first from the Portfolio tab.',
+                    timestamp: Date.now(),
+                };
+                setMessages(prev => [...prev, syncMsg]);
+            }
+        } catch (err: any) {
+            if (!err.message?.includes('rejected')) {
+                const errMsg: ChatMessage = {
+                    role: 'assistant',
+                    content: 'Could not sync portfolio. Make sure your wallet is connected and try again.',
+                    timestamp: Date.now(),
+                };
+                setMessages(prev => [...prev, errMsg]);
+            }
+        } finally {
+            setIsSyncing(false);
+        }
+    };
 
     // Order Preview Modal State
     const [isOrderPreviewOpen, setIsOrderPreviewOpen] = useState(false);
@@ -181,11 +275,15 @@ export const AIChatbot: React.FC = () => {
         if (isOpen) inputRef.current?.focus();
     }, [isOpen]);
 
-    // Check for trading intent keywords
+    // Only treat as trading intent if the message has both a trade keyword AND a token symbol.
+    // This prevents general questions like "is there any market to buy from?" from triggering the parser.
     const hasTradingIntent = (text: string): boolean => {
-        const tradingKeywords = ['buy', 'sell', 'purchase', 'trade', 'order', 'long', 'short'];
         const lower = text.toLowerCase();
-        return tradingKeywords.some(kw => lower.includes(kw));
+        const hasKeyword = ['buy', 'sell', 'purchase', 'trade', 'order', 'long', 'short'].some(kw => lower.includes(kw));
+        if (!hasKeyword) return false;
+        // Must also mention a known token to be an actionable order
+        const hasToken = /\b(t?meta|t?googl|t?aapl|t?tsla|t?amzn|t?nvda|t?spy|t?qqq|t?bond|usdc)\b/i.test(text);
+        return hasToken;
     };
 
     // Handle order confirmation from modal — must include encrypted + signature for CRE TEE
@@ -285,11 +383,14 @@ export const AIChatbot: React.FC = () => {
         const text = messageText || input.trim();
         if (!text || isStreaming) return;
 
-        // Clear input immediately
         setInput('');
 
         // Check for trading intent BEFORE sending to chat
         if (hasTradingIntent(text)) {
+            // Always show the user's message immediately — regardless of what path is taken next
+            const userMsg: ChatMessage = { role: 'user', content: text, timestamp: Date.now() };
+            setMessages(prev => [...prev, userMsg]);
+
             if (!eoaAddress) {
                 const errorMsg: ChatMessage = {
                     role: 'assistant',
@@ -322,17 +423,16 @@ export const AIChatbot: React.FC = () => {
                     body: JSON.stringify({
                         message: text,
                         userAddress: eoaAddress,
+                        // Pass conversation history so parser resolves context like "buy the tMETA"
+                        conversationHistory: messages.slice(-10),
                     }),
                 });
 
-                if (!res.ok) {
-                    throw new Error(`HTTP ${res.status}`);
-                }
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
                 const data = await res.json();
 
                 if (data.requiresConfirmation && data.parsed) {
-                    // Show the order preview modal
                     setParsedOrder(data.parsed);
                     setBalanceCheck(data.balanceCheck);
                     setOrderTotalValue(data.totalValue);
@@ -352,8 +452,16 @@ export const AIChatbot: React.FC = () => {
                     setTimeout(() => inputRef.current?.focus(), 10);
                     return;
                 } else {
-                    // Parse succeeded but not a valid order - continue to regular chat
-                    console.log('[OrderParse] Not a valid order, continuing to chat');
+                    // Parse returned but no actionable order — guide user instead of letting AI hallucinate
+                    const guideMsg: ChatMessage = {
+                        role: 'assistant',
+                        content: `I couldn't parse that as a specific order. To place a trade, use a format like:\n\n**"Buy 10 tNVDA at $100"** or **"Sell 5 tAAPL at $220"**\n\nIf you have a general question, feel free to ask without a token name.`,
+                        timestamp: Date.now(),
+                    };
+                    setMessages(prev => [...prev, guideMsg]);
+                    setIsStreaming(false);
+                    setTimeout(() => inputRef.current?.focus(), 10);
+                    return;
                 }
             } catch (err: any) {
                 console.error('[OrderParse] Error:', err);
@@ -387,6 +495,8 @@ export const AIChatbot: React.FC = () => {
                     message: text,
                     userAddress: eoaAddress || 'anonymous',
                     conversationHistory: messages.slice(-10),
+                    // Forward in-memory balances for AI context — ephemeral, not persisted
+                    portfolioBalances: portfolioBalances.length > 0 ? portfolioBalances : undefined,
                 }),
             });
 
@@ -485,12 +595,30 @@ export const AIChatbot: React.FC = () => {
                                 </p>
                             </div>
                         </div>
-                        <button
-                            onClick={() => setIsOpen(false)}
-                            className="text-slate-500 hover:text-white transition-colors"
-                        >
-                            <Icon name="close" className="text-lg" />
-                        </button>
+                        <div className="flex items-center gap-2">
+                            {/* Sync Portfolio button — signs EIP-712 to fetch live balances into memory */}
+                            {eoaAddress && (
+                                <button
+                                    onClick={syncPortfolio}
+                                    disabled={isSyncing}
+                                    title={portfolioBalances.length > 0 ? `${portfolioBalances.length} tokens synced — click to refresh` : 'Sync portfolio so AI can see your holdings'}
+                                    className={`flex items-center gap-1 text-[9px] font-mono px-2 py-1 rounded border transition-colors ${
+                                        portfolioBalances.length > 0
+                                            ? 'border-primary/40 text-primary bg-primary/10 hover:bg-primary/20'
+                                            : 'border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-600'
+                                    } disabled:opacity-40 disabled:cursor-not-allowed`}
+                                >
+                                    <Icon name={isSyncing ? 'hourglass_empty' : 'account_balance_wallet'} className="text-[10px]" />
+                                    {isSyncing ? 'Syncing…' : portfolioBalances.length > 0 ? `${portfolioBalances.length} synced` : 'Sync Portfolio'}
+                                </button>
+                            )}
+                            <button
+                                onClick={() => setIsOpen(false)}
+                                className="text-slate-500 hover:text-white transition-colors"
+                            >
+                                <Icon name="close" className="text-lg" />
+                            </button>
+                        </div>
                     </div>
 
                     {/* Messages */}

@@ -406,7 +406,7 @@ export const Terminal: React.FC = () => {
             <div className="absolute inset-0 pointer-events-none opacity-5 bg-grid-pattern z-0"></div>
 
             {/* Order Entry */}
-            <div className="col-span-12 md:col-span-3 flex flex-col z-10">
+            <div className="col-span-12 md:col-span-3 flex flex-col z-10 min-h-0">
                 <Card className="h-full flex flex-col shadow-heavy border-border-dark">
                     <div className="px-4 py-3 border-b border-border-dark bg-obsidian flex justify-between items-center">
                         <h2 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2 font-mono">
@@ -693,9 +693,9 @@ export const Terminal: React.FC = () => {
             </div>
 
             {/* Center Engine & Logs */}
-            <div className="col-span-12 md:col-span-5 flex flex-col gap-4 z-10">
+            <div className="col-span-12 md:col-span-5 flex flex-col gap-4 z-10 min-h-0 overflow-hidden">
                 {/* Execution Engine */}
-                <Card className="flex-1 flex flex-col shadow-heavy relative transition-all duration-500">
+                <Card className="min-h-0 flex-1 flex flex-col shadow-heavy relative transition-all duration-500">
                     <div className="absolute inset-0 z-0 opacity-10 bg-[radial-gradient(#1f3324_1px,transparent_1px)] bg-[length:20px_20px]"></div>
                     <div className="px-4 py-3 border-b border-border-dark bg-obsidian flex justify-between items-center z-10">
                         <h2 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2 font-mono">
@@ -713,7 +713,7 @@ export const Terminal: React.FC = () => {
                         <OracleIndicator pairId={selectedPairId} />
                     </div>
 
-                    <div className="flex-1 relative z-10 p-6 flex flex-col justify-between bg-black/50 backdrop-blur-sm">
+                    <div className="min-h-0 flex-1 relative z-10 p-6 flex flex-col justify-between bg-black/50 backdrop-blur-sm overflow-y-auto">
                         {/* Steps */}
                         {(() => {
                             const stepIndex = status === 'IDLE' ? -1 : status === 'SENDING' ? 0 : status === 'MATCHING' ? 1 : 3;
@@ -773,8 +773,8 @@ export const Terminal: React.FC = () => {
                     </div>
                 </Card>
 
-                {/* Logs */}
-                <Card className="min-h-0 h-1/3 flex flex-col shadow-heavy">
+                {/* Logs — fixed max height so it never pushes engine card out of view */}
+                <Card className="flex-shrink-0 max-h-56 flex flex-col shadow-heavy">
                     <div className="px-3 py-2 border-b border-border-dark flex items-center justify-between bg-obsidian shrink-0">
                         <div className="flex items-center gap-2">
                             <Icon name="terminal" className="text-slate-500 text-sm" />
@@ -830,7 +830,7 @@ export const Terminal: React.FC = () => {
             </div>
 
             {/* Order Book */}
-            <div className="col-span-12 md:col-span-4 flex flex-col z-10">
+            <div className="col-span-12 md:col-span-4 flex flex-col z-10 min-h-0">
                 <Card className="flex-1 flex flex-col shadow-heavy">
                     <div className="px-4 py-3 border-b border-border-dark bg-obsidian flex justify-between items-center">
                         <div className="flex gap-2">

@@ -8,58 +8,93 @@ import prisma from '../clients/prisma';
 import { PriceFeedService } from './price-feed.service';
 import { ArbitrageMonitorService } from './arbitrage-monitor.service';
 
+
+/** Shape of a live balance entry forwarded from the frontend (Convergence API response) */
+export interface LiveBalance {
+    token: string;       // contract address
+    symbol: string;      // e.g. "tNVDA"
+    balance: number;     // already in human-readable units
+}
+
 export class AIContextService {
-    static async buildContext(userAddress: string): Promise<string> {
+    static async buildContext(userAddress: string, liveBalances?: LiveBalance[]): Promise<string> {
         // Normalise — auth stores addresses lowercase; wagmi sends checksummed mixed-case
         const address = userAddress.toLowerCase();
         const sections: string[] = [];
 
         // 1. User Portfolio
-        try {
-            const balances = await prisma.tokenBalance.findMany({
-                where: { userAddress: address },
-            });
+        // If the frontend passed live (signed) balances, use those — no DB read, preserving privacy.
+        // Otherwise fall back to the local DB (which may be empty).
+        if (liveBalances && liveBalances.length > 0) {
+            const portfolioLines: string[] = [];
+            let totalValue = 0;
 
-            if (balances.length > 0) {
-                const portfolioLines: string[] = [];
-                let totalValue = 0;
+            for (const bal of liveBalances) {
+                if (bal.balance <= 0) continue;
 
-                for (const bal of balances) {
-                    const token = await prisma.token.findUnique({ where: { address: bal.token } });
-                    const symbol = token?.symbol || bal.token.slice(0, 8);
-                    const decimals = token?.decimals || 18;
-                    const rawBalance = parseFloat(bal.balance);
-                    const humanBalance = rawBalance / (10 ** decimals);
+                const isUSDC = bal.symbol.toLowerCase().includes('usdc');
+                let priceObj = { price: 1.0, changePercent: 0 };
 
-                    if (humanBalance <= 0) continue;
-
-                    const isUSDC = symbol.toLowerCase().includes('usdc');
-                    let priceObj = { price: 1.0, changePercent: 0 };
-                    
-                    if (!isUSDC) {
-                        try {
-                            priceObj = await PriceFeedService.getPriceOrMock(symbol);
-                        } catch {
-                            // Skip non-stablecoins with no price feed
-                            continue;
-                        }
+                if (!isUSDC) {
+                    try {
+                        priceObj = await PriceFeedService.getPriceOrMock(bal.symbol);
+                    } catch {
+                        continue;
                     }
-
-                    const value = humanBalance * priceObj.price;
-                    totalValue += value;
-
-                    portfolioLines.push(
-                        `  - ${humanBalance.toFixed(4)} ${symbol} @ $${priceObj.price.toFixed(2)} = $${value.toFixed(2)}${!isUSDC ? ` (${priceObj.changePercent >= 0 ? '+' : ''}${priceObj.changePercent.toFixed(2)}% today)` : ''}`
-                    );
                 }
 
+                const value = bal.balance * priceObj.price;
+                totalValue += value;
+
+                portfolioLines.push(
+                    `  - ${bal.balance.toFixed(4)} ${bal.symbol} @ $${priceObj.price.toFixed(2)} = $${value.toFixed(2)}${!isUSDC ? ` (${priceObj.changePercent >= 0 ? '+' : ''}${priceObj.changePercent.toFixed(2)}% today)` : ''}`
+                );
+            }
+
+            if (portfolioLines.length > 0) {
                 sections.push(`USER PORTFOLIO (Total: ~$${totalValue.toFixed(2)}):\n${portfolioLines.join('\n')}`);
             } else {
-                sections.push('USER PORTFOLIO: No holdings. User has not deposited any tokens yet.');
+                sections.push('USER PORTFOLIO: No holdings with positive balance.');
             }
-        } catch (err) {
-            sections.push('USER PORTFOLIO: Unable to fetch.');
+        } else {
+            // Fallback: try DB (likely empty — user should sync from chat)
+            try {
+                const dbBalances = await prisma.tokenBalance.findMany({ where: { userAddress: address } });
+                if (dbBalances.length > 0) {
+                    const portfolioLines: string[] = [];
+                    let totalValue = 0;
+
+                    for (const bal of dbBalances) {
+                        const token = await prisma.token.findUnique({ where: { address: bal.token } });
+                        const symbol = token?.symbol || bal.token.slice(0, 8);
+                        const decimals = token?.decimals || 18;
+                        const humanBalance = parseFloat(bal.balance) / (10 ** decimals);
+                        if (humanBalance <= 0) continue;
+
+                        const isUSDC = symbol.toLowerCase().includes('usdc');
+                        let priceObj = { price: 1.0, changePercent: 0 };
+                        if (!isUSDC) {
+                            try { priceObj = await PriceFeedService.getPriceOrMock(symbol); } catch { continue; }
+                        }
+                        const value = humanBalance * priceObj.price;
+                        totalValue += value;
+                        portfolioLines.push(
+                            `  - ${humanBalance.toFixed(4)} ${symbol} @ $${priceObj.price.toFixed(2)} = $${value.toFixed(2)}`
+                        );
+                    }
+
+                    sections.push(portfolioLines.length > 0
+                        ? `USER PORTFOLIO (Total: ~$${totalValue.toFixed(2)}):\n${portfolioLines.join('\n')}`
+                        : 'USER PORTFOLIO: No holdings. Use the "Sync Portfolio" button in this chat to share your live balances.'
+                    );
+                } else {
+                    sections.push('USER PORTFOLIO: Not synced. Use the "Sync Portfolio" button in this chat to let me see your holdings.');
+                }
+            } catch {
+                sections.push('USER PORTFOLIO: Unable to fetch.');
+            }
         }
+
 
         // 2. Market Prices
         try {
