@@ -149,10 +149,10 @@ function AppContent() {
         <div className="mt-auto flex flex-col items-center gap-6">
           <button
             onClick={() => setIsProfileOpen(true)}
-            className="w-8 h-8 rounded-full overflow-hidden border border-border-dark hover:border-primary transition-all grayscale hover:grayscale-0 shadow-lg hover:shadow-glow"
+            className="w-8 h-8 rounded-full overflow-hidden border border-border-dark hover:border-primary transition-all grayscale hover:grayscale-0 shadow-lg hover:shadow-glow bg-black/50"
           >
             <img
-              src={eoaAddress ? `https://api.dicebear.com/7.x/identicon/svg?seed=${eoaAddress}` : "https://api.dicebear.com/7.x/identicon/svg?seed=fallback"}
+              src={`https://api.dicebear.com/9.x/shapes/svg?seed=${eoaAddress || 'fallback'}&backgroundColor=0a0a0a`}
               alt="User"
               className="w-full h-full object-cover"
             />
@@ -202,10 +202,7 @@ function AppContent() {
                 </span>
               </div>
             </div>
-            <div className="text-right hidden lg:block">
-              <div className="text-[10px] text-slate-500 font-mono uppercase tracking-wider">Net Liquidity</div>
-              <div className="text-sm font-mono font-bold text-white tracking-tight">$42,592,104.00</div>
-            </div>
+
 
             <button
               onClick={() => auth.logout()}

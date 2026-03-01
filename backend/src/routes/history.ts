@@ -16,15 +16,15 @@ history.get("/", authMiddleware, async (c) => {
     try {
         // 1. Fetch Orders
         const orders = await prisma.order.findMany({
-            where: { userAddress: address },
+            where: { userAddress: { equals: address, mode: 'insensitive' } },
             orderBy: { createdAt: "desc" },
-            take: 50, // Limit for now
+            take: 50,
             include: { pair: true }
         });
 
         // 2. Fetch Transactions (Deposits/Withdrawals)
         const transactions = await prisma.transaction.findMany({
-            where: { userAddress: address },
+            where: { userAddress: { equals: address, mode: 'insensitive' } },
             orderBy: { createdAt: "desc" },
             take: 50
         });

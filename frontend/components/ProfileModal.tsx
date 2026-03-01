@@ -188,8 +188,10 @@ export const ProfileModal: React.FC<{ isOpen: boolean; onClose: () => void }> = 
         if (isOpen) checkStatus();
 
         const handleVerificationUpdate = () => {
-            setIsHumanVerified(true);
-            setTimeout(checkStatus, 1000);
+            // Don't optimistically show verified — wait for DB to confirm.
+            // Retry a couple of times to allow the CRE onReport to propagate.
+            setTimeout(checkStatus, 1500);
+            setTimeout(checkStatus, 4000);
         };
 
         window.addEventListener("world-id-updated", handleVerificationUpdate);

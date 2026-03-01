@@ -6,13 +6,13 @@
 
 **Stealth Settlement Layer (SSL)** is a privacy-preserving, sybil-resistant trading platform for tokenized Real World Assets (RWAs).
 
-Public blockchains natively expose trading activity, leaving institutional traders and whales vulnerable to front-running, copy-trading, and strategy leakage. SSL mitigates these risks by providing a "dark pool" trading experience: identities are verified for compliance, but order matching and settlement remain completely confidential through the use of **Trusted Execution Environments (TEEs)** and **Stealth Addresses**.
+Public blockchains natively expose trading activity, leaving institutional traders and whales vulnerable to front-running, copy-trading, and strategy leakage. SSL mitigates these risks by providing a "dark pool" trading experience: identities are verified for compliance, but order matching and settlement remain completely confidential through the use of **Trusted Execution Environments (TEEs)** and **Shield Addresses**.
 
 ## 🌟 Core Value Proposition
 
 1. **Confidential Order Matching:** Orders are client-side encrypted (ECIES). The order book is matched entirely inside a **Chainlink CRE (Confidential Routing Engine) TEE**. Order details (price, size, direction) are mathematically proven to be invisible to the public, the blockchain, and even the platform operator.
 2. **Sybil-Resistant Compliance via ACE:** Leveraging **World ID** and **Chainlink ACE** (Arbitrary Compute Environment), SSL enforces strict on-chain compliance. Unverified entities are blocked from depositing into the settlement vault by on-chain policies.
-3. **Private Settlement:** Upon matching, matched tokens are transferred to single-use **Stealth Addresses** generated exclusively for that trade. The on-chain footprint guarantees liquidity without directly linking the settlement destination back to the trader's primary wallet.
+3. **Private Settlement:** Upon matching, matched tokens are transferred to single-use **Shield Addresses** generated exclusively for that trade. The on-chain footprint guarantees liquidity without directly linking the settlement destination back to the trader's primary wallet.
 4. **AI-Powered Trading Interface:** Features a natural language AI chatbot (powered by Google Gemini) acting as a trading terminal assistant. It parses complex context-aware trading orders and provides "Stealth Intelligence"—a real-time trend confidence indicator based on anonymized settlement data.
 
 ---
@@ -26,7 +26,7 @@ flowchart TD
     subgraph USER["🧑 User — Browser"]
         A(["Connect EOA Wallet"])
         B(["World ID Verification"])
-        C(["Generate Stealth Address"])
+        C(["Generate Shield Address"])
         D(["Encrypt Order\n ECIES / AES-256-GCM"])
         E(["Sign Order\n EIP-712 via MetaMask"])
     end
@@ -47,7 +47,7 @@ flowchart TD
         L(["WorldIDVerifierRegistry\n isVerified mapping"])
         M(["WorldIDPolicy — ACE\n Guards deposit()"])
         N(["Convergence Vault\n RWA + USDC"])
-        O(["Stealth Address\n One-time settlement dest."])
+        O(["Shield Address\n One-time settlement dest."])
     end
 
     A --> B --> F
@@ -80,7 +80,7 @@ sequenceDiagram
     TEE->>SC: onReport → WorldIDVerifierRegistry.isVerified = true
 
     Note over U, TEE: Phase 2 — Confidential Matching
-    U->>U: Generate Stealth Address + Encrypt Order
+    U->>U: Generate Shield Address + Encrypt Order
     U->>B: Submit Encrypted Order (blob only)
     B->>TEE: matching-workflow (encrypted order book)
     TEE->>SC: Check isVerified(buyer) + isVerified(seller)
@@ -89,7 +89,7 @@ sequenceDiagram
 
     Note over U, TEE: Phase 3 — Private Settlement
     B->>SC: settleMatch() via Convergence Vault
-    SC->>SC: Transfer RWA + USDC to Stealth Addresses
+    SC->>SC: Transfer RWA + USDC to Shield Addresses
 ```
 
 

@@ -17,6 +17,7 @@ import oracle from "./routes/oracle";
 import { chat } from "./routes/chat";
 import { tokens } from "./routes/tokens";
 import { compliance } from "./routes/compliance";
+import history from "./routes/history";
 import { ArbitrageMonitorService } from "./services/arbitrage-monitor.service";
 import { seedTokens } from "./lib/seed-tokens";
 
@@ -45,6 +46,7 @@ app.route("/api/oracle", oracle);
 app.route("/api/chat", chat);
 app.route("/api/tokens", tokens);
 app.route("/api/compliance", compliance);
+app.route("/api/history", history);
 
 // ── 404 ──
 app.notFound((c) => c.json({ error: "Not found" }, 404));
