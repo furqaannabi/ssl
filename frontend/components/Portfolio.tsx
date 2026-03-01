@@ -466,7 +466,7 @@ export const Portfolio: React.FC = () => {
                                         <th className="px-6 py-4 font-semibold">Direction</th>
                                         <th className="px-6 py-4 font-semibold">Token</th>
                                         <th className="px-6 py-4 font-semibold text-right">Amount</th>
-                                        <th className="px-6 py-4 font-semibold">Tx Hash</th>
+                                        <th className="px-6 py-4 font-semibold">Tx Hash / ID</th>
                                         <th className="px-6 py-4 font-semibold">Status</th>
                                     </tr>
                                 </thead>
@@ -503,11 +503,19 @@ export const Portfolio: React.FC = () => {
                                                 <td className="px-6 py-3 text-right text-white">{amount}</td>
                                                 <td className="px-6 py-3">
                                                     {tx.tx_hash ? (
-                                                        <span className="text-slate-400 hover:text-slate-200 cursor-pointer transition-colors" title={tx.tx_hash}>
+                                                        <a
+                                                            href={`https://sepolia.etherscan.io/tx/${tx.tx_hash}`}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="text-slate-400 hover:text-primary transition-colors"
+                                                            title={tx.tx_hash}
+                                                        >
                                                             {shortHash}
-                                                        </span>
+                                                        </a>
                                                     ) : (
-                                                        <span className="text-slate-600">—</span>
+                                                        <span className="text-slate-500" title={tx.id}>
+                                                            {`${tx.id.slice(0, 8)}…${tx.id.slice(-6)}`}
+                                                        </span>
                                                     )}
                                                 </td>
                                                 <td className="px-6 py-3">
