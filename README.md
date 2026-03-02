@@ -1,14 +1,14 @@
 # SSL — Stealth Settlement Layer
 
 [![Network](https://img.shields.io/badge/Network-Ethereum_Sepolia-lightgrey.svg)]()
-[![Built with Chainlink](https://img.shields.io/badge/Built_with-Chainlink-blue.svg)](https://chain.link/ccip)
+[![Built with Chainlink](https://img.shields.io/badge/Built_with-Chainlink_CRE_&_ACE-blue.svg)](https://chain.link)
 [![World ID Validated](https://img.shields.io/badge/Identity-World_ID-black.svg)](https://worldcoin.org/world-id)
 
 **Stealth Settlement Layer (SSL)** is a privacy-preserving, sybil-resistant trading platform for tokenized Real World Assets (RWAs).
 
 Public blockchains natively expose trading activity, leaving institutional traders and whales vulnerable to front-running, copy-trading, and strategy leakage. SSL mitigates these risks by providing a "dark pool" trading experience: identities are verified for compliance, but order matching and settlement remain completely confidential through the use of **Trusted Execution Environments (TEEs)** and **Shield Addresses**.
 
-## 🌟 Core Value Proposition
+## Core Value Proposition
 
 1. **Confidential Order Matching:** Orders are client-side encrypted (ECIES). The order book is matched entirely inside a **Chainlink CRE (Confidential Routing Engine) TEE**. Order details (price, size, direction) are mathematically proven to be invisible to the public, the blockchain, and even the platform operator.
 2. **Sybil-Resistant Compliance via ACE:** Leveraging **World ID** and **Chainlink ACE** (Arbitrary Compute Environment), SSL enforces strict on-chain compliance. Unverified entities are blocked from depositing into the settlement vault by on-chain policies.
@@ -17,7 +17,7 @@ Public blockchains natively expose trading activity, leaving institutional trade
 
 ---
 
-## 🏗️ System Architecture
+## System Architecture
 
 ### System Workflow
 
@@ -38,6 +38,10 @@ flowchart TD
         I(["Convergence Relay"])
     end
 
+    subgraph EXTERNAL["📡 External APIs"]
+        P(["Finnhub API\n Real-time RWA Prices"])
+    end
+
     subgraph CRE["🔒 Chainlink CRE TEE Enclaves"]
         J(["verify-workflow\n ZK Proof Validation"])
         K(["matching-workflow\n Private Order Matching"])
@@ -55,6 +59,9 @@ flowchart TD
     J -->|"ZK Proof Valid"| L
     L -->|"isVerified = true"| M
     M -->|"Allows deposit()"| N
+
+    P -->|"Live prices"| G
+    P -->|"Confidential HTTP"| K
 
     C --> D --> E --> G
     G -->|"Trigger matching"| H
@@ -95,7 +102,7 @@ sequenceDiagram
 
 ---
 
-## 🤖 AI System Workflow
+## AI System Workflow
 
 SSL includes a Gemini-powered AI chatbot embedded in the platform. It provides two distinct capabilities:
 
@@ -153,7 +160,7 @@ flowchart TD
 
 ---
 
-## 📦 Project Structure
+## Project Structure
 
 | Directory | Description |
 |-----------|-------------|
@@ -165,7 +172,7 @@ flowchart TD
 
 ---
 
-## 🔑 Key Addresses (Ethereum Sepolia)
+## Key Addresses (Ethereum Sepolia)
 
 | Contract | Address |
 |---|---|
@@ -182,7 +189,7 @@ flowchart TD
 
 ---
 
-## 🚀 Local Development Setup
+## Local Development Setup
 
 ### Prerequisites
 - [Bun](https://bun.sh/) v1.2+
@@ -243,7 +250,7 @@ bun run dev
 - **Identity:** World ID (Zero-Knowledge Proofs)
 - **Backend:** Bun, Hono, PostgreSQL, Prisma, Viem
 - **Frontend:** React 19, Vite, TailwindCSS (Dark-mode optimized)
-- **AI & Data:** Google Gemini (via OpenAI SDK), Finnhub API
+- **AI & Data:** Google Gemini (via OpenAI SDK), Finnhub API (real-time RWA price feeds)
 
 ## License
 MIT
