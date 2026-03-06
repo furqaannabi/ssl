@@ -21,145 +21,57 @@ Public blockchains natively expose trading activity, leaving institutional trade
 
 ## System Architecture
 
-### System Workflow
+### 1. Identity Verification (World ID + ACE)
+Before any trading can occur, users must prove they are unique humans to prevent sybil attacks and enforce compliance.
+- The user completes a **World ID** verification flow in the browser.
+- The resulting Zero-Knowledge (ZK) proof is sent to the backend.
+- The backend triggers the `verify-workflow` inside a **Chainlink CRE TEE**.
+- The TEE validates the proof. If valid, it submits an on-chain report to the Ethereum Sepolia `WorldIDVerifierRegistry` contract, marking the user's EOA address as `isVerified = true`.
+- An **ACE (Arbitrary Compute Environment)** policy contract guards the Convergence Vault. It queries the registry and only allows `deposit()` transactions from verified addresses.
 
-```mermaid
-flowchart TD
-    subgraph USER["🧑 User — Browser"]
-        A(["Connect EOA Wallet"])
-        B(["World ID Verification"])
-        C(["Generate Shield Address"])
-        D(["Encrypt Order\n ECIES / AES-256-GCM"])
-        E(["Sign Order\n EIP-712 via MetaMask"])
-    end
+### 2. Confidential Order Matching (The Dark Pool)
+Orders are matched without revealing the trader's intent to the public or the platform operator.
+- The user generates a single-use **Shield Address** (stealth address) for settlement.
+- The order details (pair, size, price, side, shield address) are encrypted in the browser using ECIES with the CRE TEE's public key.
+- The frontend submits the encrypted order blob to the backend, which stores it as `PENDING`.
+- The backend triggers the `matching-workflow` inside the **CRE TEE**, passing the new encrypted order.
+- The TEE decrypts the new order, securely fetches the encrypted resting order book via HTTP, and decrypts it in memory.
+- The TEE executes a price-time priority matching engine entirely within the enclave.
+- **Privacy Track Feature A (Credential Isolation):** During matching, the TEE securely fetches the live market price from the **Finnhub API** via `ConfidentialHTTPClient`. The API key is injected directly into the enclave using `runtime.getSecret()` (compatible with Vault DON Secrets), never exposing it to the node operator. If the match deviates by more than 5% from the live price, the slippage guard aborts the trade.
+- Finally, the TEE checks the `WorldIDVerifierRegistry` on-chain to ensure both the buyer and seller EOAs are still verified.
 
-    subgraph BACKEND["⚙️ SSL Backend — Bun + Hono"]
-        F(["Auth & Session"])
-        G(["Order Book\n Encrypted Blobs only"])
-        H(["CRE Bridge"])
-        I(["Convergence Relay"])
-    end
-
-    subgraph EXTERNAL["📡 External APIs"]
-        P(["Finnhub API\n Real-time RWA Prices"])
-    end
-
-    subgraph CRE["🔒 Chainlink CRE TEE Enclaves"]
-        J(["verify-workflow\n ZK Proof Validation"])
-        K(["matching-workflow\n Private Order Matching"])
-    end
-
-    subgraph CHAIN["⛓️ Ethereum Sepolia"]
-        L(["WorldIDVerifierRegistry\n isVerified mapping"])
-        M(["WorldIDPolicy — ACE\n Guards deposit()"])
-        N(["Convergence Vault\n RWA + USDC"])
-        O(["Shield Address\n One-time settlement dest."])
-    end
-
-    A --> B --> F
-    F --> J
-    J -->|"ZK Proof Valid"| L
-    L -->|"isVerified = true"| M
-    M -->|"Allows deposit()"| N
-
-    P -->|"Live prices"| G
-    P -->|"Confidential HTTP"| K
-
-    C --> D --> E --> G
-    G -->|"Trigger matching"| H
-    H --> K
-    K -->|"Verify both parties"| L
-    K -->|"Settlement intent"| I
-    I -->|"settleMatch()"| N
-    N -->|"Transfer tokens"| O
-```
-
-### 3-Phase Settlement Flow
-
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant SC as Smart Contracts
-    participant B as Backend
-    participant TEE as CRE TEE
-
-    Note over U, TEE: Phase 1 — Identity
-    U->>B: Submit World ID ZK Proof
-    B->>TEE: verify-workflow
-    TEE->>SC: onReport → WorldIDVerifierRegistry.isVerified = true
-
-    Note over U, TEE: Phase 2 — Confidential Matching
-    U->>U: Generate Shield Address + Encrypt Order
-    U->>B: Submit Encrypted Order (blob only)
-    B->>TEE: matching-workflow (encrypted order book + baseSymbol)
-    TEE->>TEE: Match orders privately inside enclave
-    TEE->>TEE: 🔒 Confidential Finnhub price check (using baseSymbol + runtime secrets)
-    TEE->>SC: Check isVerified(buyer) + isVerified(seller)
-
-    Note over U, TEE: Phase 3 — Private Settlement
-    TEE->>SC: Convergence private transfers to Shield Addresses
-    TEE->>B: 🔒 Encrypted settlement callback (encryptOutput: true)
-    B->>B: Update order status in DB
-```
-
+### 3. Private Settlement (Convergence + Encrypted Callbacks)
+Once matched, assets are exchanged without linking them back to the traders' main wallets.
+- Inside the TEE, the workflow signs EIP-712 payloads authorizing Convergence private transfers: the Base token (e.g., tAAPL) goes to the buyer's Shield Address, and the Quote token (USDC) goes to the seller's Shield Address.
+- **Privacy Track Feature B (Response Encryption):** After successful on-chain transfers, the TEE must notify the backend to update the database. It calls the backend via `ConfidentialHTTPClient` with `encryptOutput: true`. The settlement details (trade amounts, transaction IDs) are AES-GCM encrypted *before* leaving the enclave. The backend decrypts this payload and marks the orders as `SETTLED`.
 
 ---
 
-## AI System Workflow
+## AI System Workflows (Powered by Gemini)
 
-SSL includes a Gemini-powered AI chatbot embedded in the platform. It provides two distinct capabilities:
+SSL includes an embedded AI chatbot powered by Google Gemini, providing three distinct capabilities:
 
 ### 1. Natural Language Order Parsing
-
-The AI parses free-text trading commands using conversation context — e.g. *"buy the tMETA we discussed at market"* — resolving ambiguous tokens from previous messages in the same chat session.
-
-```mermaid
-flowchart TD
-    A(["User types message\n e.g. Buy 10 tNVDA at market"]) --> B{"Has trading keyword\nAND token symbol?"}
-    B -->|No| C(["Route to Gemini advisor\n for general Q&A"])
-    B -->|Yes| D{"Wallet connected?"}
-    D -->|No| E(["Prompt: Connect Wallet"])
-    D -->|Yes| F{"World ID verified?"}
-    F -->|No| G(["Prompt: Verify with World ID"])
-    F -->|Yes| H(["POST /api/order/parse\n with last 10 messages as context"])
-    H --> I{"Order valid?"}
-    I -->|No| J(["Show format guide\n Buy X tTKN at $Y"])
-    I -->|Yes| K(["Open Order Preview Modal\n with parsed order prefilled"])
-    K --> L(["User signs via MetaMask"])
-    L --> M(["POST /api/order\n with ECIES encrypted payload"])
-    M --> N(["CRE Matching Workflow triggered"])
-```
+The AI acts as a trading assistant, understanding complex context-aware commands.
+- A user types: *"buy 10 of the tNVDA we discussed at market price"*.
+- The backend's NLP service sends the message and the last 10 chat messages to Gemini.
+- Gemini extracts the intent, resolving ambiguities based on chat history.
+- If valid, the UI opens a pre-filled Order Preview Modal. The user reviews the details, signs via MetaMask, and the encrypted order is submitted to the CRE TEE.
 
 ### 2. Stealth Intelligence Oracle
-
-The oracle aggregates anonymized settlement data to produce a VWAP-based trend signal for each trading pair, without revealing any individual trade.
-
-```mermaid
-flowchart LR
-    A(["Settled Orders DB\n per pairId"]) --> B(["Calculate VWAP\n price × filledAmount"])
-    B --> C{"≥ 2 settlements?"}
-    C -->|No| D(["GATHERING INTEL\n show progress bar"])
-    C -->|Yes| E{"Latest price vs VWAP"}
-    E -->|Above| F(["BULLISH signal\n + confidence %"])
-    E -->|Below| G(["BEARISH signal\n + confidence %"])
-    F --> H(["OracleIndicator UI\n refreshes every 5s"])
-    G --> H
-```
+A unique feature that leverages dark pool data to provide market sentiment without revealing individual trades.
+- As orders settle privately, the backend aggregates the data to calculate a Volume-Weighted Average Price (VWAP) for each pair.
+- The oracle compares the current live price against the hidden VWAP.
+- If the volume threshold is met (≥ 2 settlements), it emits a "BULLISH" or "BEARISH" signal with a confidence percentage to the frontend UI.
+- This provides traders with insight into dark pool sentiment while preserving total individual privacy.
 
 ### 3. AI Advisor Context Pipeline
-
-For general chat messages, the AI advisor is given privacy-safe portfolio context from the user's synced wallet balances — held in browser memory only, never persisted.
-
-```mermaid
-flowchart TD
-    A(["User clicks Sync Portfolio"]) --> B(["EIP-712 sign\n to authenticate"])
-    B --> C(["Fetch live balances\n from Convergence Vault"])
-    C --> D(["Store balances in\n React state only"])
-    D --> E(["Every /api/chat request\n includes balances in body"])
-    E --> F(["AI Context Service\n uses passed balances"])
-    F --> G(["Gemini generates\n portfolio-aware advice"])
-    G --> H(["Streamed SSE response\n to chatbot UI"])
-```
+The chatbot provides personalized, portfolio-aware advice without compromising privacy.
+- Users can "Sync Portfolio" by signing an EIP-712 message.
+- The frontend fetches live balances securely from the Convergence Vault.
+- These balances are stored **only in React state** (browser memory) and are never saved to the backend database.
+- Every chat request to the AI includes these ephemeral balances in the payload.
+- Gemini uses this context to provide tailored advice (e.g., *"Your portfolio is heavily weighted in equities, consider diversifying"*), streaming the response back via SSE.
 
 ---
 
