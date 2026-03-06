@@ -73,7 +73,14 @@ order.get("/encrypted-book", async (c) => {
             select: { id: true, encryptedPayload: true },
             orderBy: { createdAt: "asc" },
         });
-        return c.json({ orders });
+
+        let baseSymbol = "UNKNOWN";
+        if (pairId && typeof pairId === "string") {
+            const pair = await prisma.pair.findUnique({ where: { id: pairId }, select: { baseSymbol: true } });
+            if (pair) baseSymbol = pair.baseSymbol;
+        }
+
+        return c.json({ orders, baseSymbol });
     } catch (err) {
         console.error("[encrypted-book]", err);
         return c.json({ error: "Failed" }, 500);
@@ -90,15 +97,15 @@ order.get("/settle-info", async (c) => {
     if (!secret || secret !== config.creCallbackSecret) {
         return c.json({ error: "Unauthorized" }, 401);
     }
-    const buyerOrderId  = c.req.query("buyerOrderId");
+    const buyerOrderId = c.req.query("buyerOrderId");
     const sellerOrderId = c.req.query("sellerOrderId");
-    const pairId        = c.req.query("pairId");
+    const pairId = c.req.query("pairId");
     if (!buyerOrderId || !sellerOrderId || !pairId) {
         return c.json({ error: "buyerOrderId, sellerOrderId, pairId required" }, 400);
     }
 
     const [buyerOrder, sellerOrder, pair] = await Promise.all([
-        prisma.order.findUnique({ where: { id: buyerOrderId },  select: { shieldAddress: true } }),
+        prisma.order.findUnique({ where: { id: buyerOrderId }, select: { shieldAddress: true } }),
         prisma.order.findUnique({ where: { id: sellerOrderId }, select: { shieldAddress: true } }),
         prisma.pair.findUnique({ where: { id: pairId } }),
     ]);
@@ -106,17 +113,17 @@ order.get("/settle-info", async (c) => {
 
     const [baseToken, quoteToken] = await Promise.all([
         prisma.token.findFirst({ where: { symbol: pair.baseSymbol, chainSelector: ETH_SEPOLIA_SELECTOR } }),
-        prisma.token.findFirst({ where: { symbol: "USDC",          chainSelector: ETH_SEPOLIA_SELECTOR } }),
+        prisma.token.findFirst({ where: { symbol: "USDC", chainSelector: ETH_SEPOLIA_SELECTOR } }),
     ]);
     if (!baseToken || !quoteToken) return c.json({ error: "Token metadata missing" }, 500);
 
     return c.json({
-        buyerShieldAddress:  buyerOrder.shieldAddress,
+        buyerShieldAddress: buyerOrder.shieldAddress,
         sellerShieldAddress: sellerOrder.shieldAddress,
-        baseTokenAddress:    baseToken.address,
-        quoteTokenAddress:   quoteToken.address,
-        baseDecimals:        baseToken.decimals,
-        quoteDecimals:       quoteToken.decimals,
+        baseTokenAddress: baseToken.address,
+        quoteTokenAddress: quoteToken.address,
+        baseDecimals: baseToken.decimals,
+        quoteDecimals: quoteToken.decimals,
     });
 });
 
@@ -130,20 +137,20 @@ order.post("/cre-settle", async (c) => {
     }
 
     const body = await c.req.json<{
-        buyerOrderId:  string;
+        buyerOrderId: string;
         sellerOrderId: string;
-        tradeAmount:   string;
-        quoteAmount:   string;
-        pairId:        string;
-        buyerTxId?:    string | null;
-        sellerTxId?:   string | null;
+        tradeAmount: string;
+        quoteAmount: string;
+        pairId: string;
+        buyerTxId?: string | null;
+        sellerTxId?: string | null;
     }>();
 
     console.log(`[cre-settle] buyer=${body.buyerOrderId} seller=${body.sellerOrderId} buyerTx=${body.buyerTxId} sellerTx=${body.sellerTxId}`);
 
     try {
         await prisma.$transaction([
-            prisma.order.update({ where: { id: body.buyerOrderId },  data: { filledAmount: body.tradeAmount, status: OrderStatus.SETTLED } }),
+            prisma.order.update({ where: { id: body.buyerOrderId }, data: { filledAmount: body.tradeAmount, status: OrderStatus.SETTLED } }),
             prisma.order.update({ where: { id: body.sellerOrderId }, data: { filledAmount: body.tradeAmount, status: OrderStatus.SETTLED } }),
         ]);
 
@@ -282,11 +289,11 @@ order.post("/", authMiddleware, async (c) => {
 
             const rawResult = await sendToMatchingWorkflow(
                 {
-                    action:         "match_order",
+                    action: "match_order",
                     encryptedOrder: body.encrypted,
-                    signature:      body.signature,
-                    pairId:         body.pairId,
-                    orderId:        newOrder.id,
+                    signature: body.signature,
+                    pairId: body.pairId,
+                    orderId: newOrder.id,
                 },
                 async (l) => { await log(l); }
             );

@@ -281,8 +281,8 @@ export const Terminal: React.FC = () => {
         }
 
         const totalValue = Number(amount) * Number(price);
-        if (totalValue < 5) {
-            toast.error(`Order value must be at least 5 USDC (Current: ${totalValue.toFixed(2)} USDC)`);
+        if (totalValue < 0.5) {
+            toast.error(`Order value must be at least 0.5 USDC (Current: ${totalValue.toFixed(2)} USDC)`);
             return;
         }
 
@@ -674,15 +674,15 @@ export const Terminal: React.FC = () => {
 
                         <Button
                             fullWidth
-                            icon={status === 'IDLE' ? (shieldAddress ? ((Number(amount) * Number(price)) >= 5 ? "lock" : "warning") : "lock_open") : "pending"}
-                            className={`py-4 mt-6 uppercase tracking-wider ${(Number(amount) * Number(price)) < 5 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            icon={status === 'IDLE' ? (shieldAddress ? ((Number(amount) * Number(price)) >= 0.5 ? "lock" : "warning") : "lock_open") : "pending"}
+                            className={`py-4 mt-6 uppercase tracking-wider ${(Number(amount) * Number(price)) < 0.5 ? 'opacity-50 cursor-not-allowed' : ''}`}
                             onClick={handlePlaceOrder}
-                            disabled={status !== 'IDLE' || (Number(amount) * Number(price)) < 5}
+                            disabled={status !== 'IDLE' || (Number(amount) * Number(price)) < 0.5}
                         >
                             {status === 'SENDING' ? "Placing Order..." :
                                 status === 'MATCHING' ? "Matching Engine..." :
                                     status === 'SETTLED' ? "Order Settled!" :
-                                        (Number(amount) * Number(price)) < 5 ? "Min Order Value: 5 USDC" :
+                                        (Number(amount) * Number(price)) < 0.5 ? "Min Order Value: 0.5 USDC" :
                                             shieldAddress ? "Place Order" : "Enter Shield Address"}
                         </Button>
                         <div className="text-[9px] text-slate-600 text-center font-mono uppercase tracking-wide mt-2">
@@ -718,22 +718,22 @@ export const Terminal: React.FC = () => {
                         {(() => {
                             const stepIndex = status === 'IDLE' ? -1 : status === 'SENDING' ? 0 : status === 'MATCHING' ? 1 : 3;
                             const steps = [
-                                { id: '01', title: 'Order Placement',   desc: 'Encrypted order forwarded to CRE TEE.'         },
-                                { id: '02', title: 'Dark Pool Match',   desc: 'CRE TEE matching against dark pool liquidity.' },
+                                { id: '01', title: 'Order Placement', desc: 'Encrypted order forwarded to CRE TEE.' },
+                                { id: '02', title: 'Dark Pool Match', desc: 'CRE TEE matching against dark pool liquidity.' },
                                 { id: '03', title: 'Settlement Report', desc: 'CRE TEE reporting settlement to Convergence Vault.' },
-                                { id: '04', title: 'Confirmed',         desc: 'Assets settled to your shielded address.'      },
+                                { id: '04', title: 'Confirmed', desc: 'Assets settled to your shielded address.' },
                             ];
                             return steps.map((step, i) => {
                                 const isCompleted = i < stepIndex;
-                                const isActive    = i === stepIndex;
-                                const isPending   = i > stepIndex;
+                                const isActive = i === stepIndex;
+                                const isPending = i > stepIndex;
                                 return (
                                     <div key={i} className={`flex items-center gap-4 transition-all duration-500 ${isActive ? 'scale-105' : isPending ? 'opacity-30' : ''}`}>
                                         {/* Node */}
                                         <div className={`w-8 h-8 border flex items-center justify-center text-xs font-mono font-bold shrink-0 transition-all duration-300
                                             ${isCompleted ? 'bg-primary/20 border-primary text-primary' :
-                                              isActive    ? 'bg-primary/10 border-primary text-primary shadow-glow animate-pulse' :
-                                                            'bg-black border-border-dark text-slate-600'}`}>
+                                                isActive ? 'bg-primary/10 border-primary text-primary shadow-glow animate-pulse' :
+                                                    'bg-black border-border-dark text-slate-600'}`}>
                                             {isCompleted
                                                 ? <Icon name="check" className="text-[14px] text-primary" />
                                                 : step.id}
@@ -742,8 +742,8 @@ export const Terminal: React.FC = () => {
                                         {i < 3 && (
                                             <div className={`flex-1 h-px relative overflow-hidden
                                                 ${isCompleted ? 'bg-primary/40' :
-                                                  isActive    ? 'bg-border-dark' :
-                                                                'border-b border-dashed border-border-dark bg-transparent'}`}>
+                                                    isActive ? 'bg-border-dark' :
+                                                        'border-b border-dashed border-border-dark bg-transparent'}`}>
                                                 {isActive && (
                                                     <div className="absolute inset-0 bg-gradient-to-r from-transparent via-primary/60 to-transparent animate-shimmer" />
                                                 )}
@@ -752,14 +752,14 @@ export const Terminal: React.FC = () => {
                                         {/* Card */}
                                         <div className={`w-56 border p-3 transition-all duration-300 shrink-0
                                             ${isCompleted ? 'bg-primary/5  border-primary/30' :
-                                              isActive    ? 'bg-surface-lighter border-primary shadow-glow-strong/20' :
-                                                            'bg-black border-border-dark'}`}>
+                                                isActive ? 'bg-surface-lighter border-primary shadow-glow-strong/20' :
+                                                    'bg-black border-border-dark'}`}>
                                             <div className={`text-[10px] font-bold uppercase tracking-wide mb-1 flex justify-between
                                                 ${isCompleted ? 'text-primary/70' :
-                                                  isActive    ? 'text-primary' :
-                                                                'text-slate-500'}`}>
+                                                    isActive ? 'text-primary' :
+                                                        'text-slate-500'}`}>
                                                 {step.title}
-                                                {isActive    && <Icon name="settings"  className="text-[12px] animate-spin" />}
+                                                {isActive && <Icon name="settings" className="text-[12px] animate-spin" />}
                                                 {isCompleted && <Icon name="check_circle" className="text-[12px] text-primary/60" />}
                                             </div>
                                             <div className="text-[10px] font-mono text-slate-500 line-clamp-2">
@@ -797,28 +797,28 @@ export const Terminal: React.FC = () => {
                                 <span className="text-[10px] italic">Awaiting execution...</span>
                             </div>
                         ) : logs.map((log, i) => {
-                            const isTee   = log.startsWith('[TEE]');
-                            const isErr   = /error|fail|denied/i.test(log);
-                            const isOk    = /success|settled|matched|confirmed/i.test(log);
-                            const isCre   = log.startsWith('[convergence]') || log.startsWith('[cre]');
+                            const isTee = log.startsWith('[TEE]');
+                            const isErr = /error|fail|denied/i.test(log);
+                            const isOk = /success|settled|matched|confirmed/i.test(log);
+                            const isCre = log.startsWith('[convergence]') || log.startsWith('[cre]');
                             return (
                                 <div key={i} className="flex gap-2 items-start leading-relaxed">
                                     <span className="text-slate-700 shrink-0 tabular-nums">
                                         {new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                                     </span>
                                     <span className={`shrink-0 font-bold uppercase text-[9px] px-1 border
-                                        ${isTee  ? 'text-primary/80  border-primary/30  bg-primary/5'  :
-                                          isCre  ? 'text-violet-400  border-violet-400/30 bg-violet-400/5' :
-                                          isErr  ? 'text-red-400     border-red-400/30   bg-red-400/5'   :
-                                          isOk   ? 'text-green-400   border-green-400/30 bg-green-400/5' :
-                                                   'text-slate-500   border-border-dark  bg-black'}`}>
+                                        ${isTee ? 'text-primary/80  border-primary/30  bg-primary/5' :
+                                            isCre ? 'text-violet-400  border-violet-400/30 bg-violet-400/5' :
+                                                isErr ? 'text-red-400     border-red-400/30   bg-red-400/5' :
+                                                    isOk ? 'text-green-400   border-green-400/30 bg-green-400/5' :
+                                                        'text-slate-500   border-border-dark  bg-black'}`}>
                                         {isTee ? 'TEE' : isCre ? 'CRE' : isErr ? 'ERR' : isOk ? ' OK' : 'SYS'}
                                     </span>
                                     <span className={`break-all
                                         ${isErr ? 'text-red-300' :
-                                          isOk  ? 'text-green-300' :
-                                          isTee ? 'text-primary/90' :
-                                                  'text-slate-300'}`}>
+                                            isOk ? 'text-green-300' :
+                                                isTee ? 'text-primary/90' :
+                                                    'text-slate-300'}`}>
                                         {log.replace(/^\[(TEE|convergence|cre)\]\s*/i, '')}
                                     </span>
                                 </div>

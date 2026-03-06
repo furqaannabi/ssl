@@ -183,8 +183,8 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
             return;
         }
 
-        if (Math.round(calcTotalValue * 100) / 100 < 4.99) {
-            toast.error(`Minimum order value is 5 USDC (current: ${calcTotalValue.toFixed(2)} USDC)`);
+        if (Math.round(calcTotalValue * 100) / 100 < 0.49) {
+            toast.error(`Minimum order value is 0.5 USDC (current: ${calcTotalValue.toFixed(2)} USDC)`);
             return;
         }
 
@@ -325,8 +325,8 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
                 {/* Balance Check */}
                 {localBalanceCheck && (
                     <div className={`border rounded-lg p-3 ${localBalanceCheck.hasSufficientBalance
-                            ? 'bg-green-900/20 border-green-500/30'
-                            : 'bg-red-900/20 border-red-500/30'
+                        ? 'bg-green-900/20 border-green-500/30'
+                        : 'bg-red-900/20 border-red-500/30'
                         }`}>
                         <div className="flex items-center gap-2">
                             <Icon
@@ -364,10 +364,10 @@ export const OrderPreviewModal: React.FC<OrderPreviewModalProps> = ({
                 </div>
 
                 {/* Min Order Value Warning */}
-                {calcTotalValue > 0 && Math.round(calcTotalValue * 100) / 100 < 4.99 && (
+                {calcTotalValue > 0 && Math.round(calcTotalValue * 100) / 100 < 0.49 && (
                     <div className="bg-yellow-900/20 border border-yellow-500/30 rounded p-2">
                         <p className="text-yellow-400 text-xs">
-                            Minimum order value is 5 USDC. Current: ${calcTotalValue.toFixed(2)} USDC
+                            Minimum order value is 0.5 USDC. Current: ${calcTotalValue.toFixed(2)} USDC
                         </p>
                     </div>
                 )}

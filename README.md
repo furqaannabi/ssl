@@ -3,6 +3,7 @@
 [![Network](https://img.shields.io/badge/Network-Ethereum_Sepolia-lightgrey.svg)]()
 [![Built with Chainlink](https://img.shields.io/badge/Built_with-Chainlink_CRE_&_ACE-blue.svg)](https://chain.link)
 [![World ID Validated](https://img.shields.io/badge/Identity-World_ID-black.svg)](https://worldcoin.org/world-id)
+[![Privacy Track](https://img.shields.io/badge/Track-Privacy_(Confidential_HTTP)-purple.svg)]()
 
 **Stealth Settlement Layer (SSL)** is a privacy-preserving, sybil-resistant trading platform for tokenized Real World Assets (RWAs).
 
@@ -11,9 +12,10 @@ Public blockchains natively expose trading activity, leaving institutional trade
 ## Core Value Proposition
 
 1. **Confidential Order Matching:** Orders are client-side encrypted (ECIES). The order book is matched entirely inside a **Chainlink CRE (Confidential Routing Engine) TEE**. Order details (price, size, direction) are mathematically proven to be invisible to the public, the blockchain, and even the platform operator.
-2. **Sybil-Resistant Compliance via ACE:** Leveraging **World ID** and **Chainlink ACE** (Arbitrary Compute Environment), SSL enforces strict on-chain compliance. Unverified entities are blocked from depositing into the settlement vault by on-chain policies.
-3. **Private Settlement:** Upon matching, matched tokens are transferred to single-use **Shield Addresses** generated exclusively for that trade. The on-chain footprint guarantees liquidity without directly linking the settlement destination back to the trader's primary wallet.
-4. **AI-Powered Trading Interface:** Features a natural language AI chatbot (powered by Google Gemini) acting as a trading terminal assistant. It parses complex context-aware trading orders and provides "Stealth Intelligence"—a real-time trend confidence indicator based on anonymized settlement data.
+2. **Privacy-Preserving External Data (Confidential HTTP):** Real-time asset prices are fetched from Finnhub **inside the TEE enclave** using `ConfidentialHTTPClient` with Vault DON secret injection — API credentials never leave the enclave. A 5% slippage guard rejects trades that deviate from the live market price. Settlement callbacks use `encryptOutput: true` so trade details are AES-GCM encrypted before exiting the enclave.
+3. **Sybil-Resistant Compliance via ACE:** Leveraging **World ID** and **Chainlink ACE** (Arbitrary Compute Environment), SSL enforces strict on-chain compliance. Unverified entities are blocked from depositing into the settlement vault by on-chain policies.
+4. **Private Settlement:** Upon matching, matched tokens are transferred to single-use **Shield Addresses** generated exclusively for that trade. The on-chain footprint guarantees liquidity without directly linking the settlement destination back to the trader's primary wallet.
+5. **AI-Powered Trading Interface:** Features a natural language AI chatbot (powered by Google Gemini) acting as a trading terminal assistant. It parses complex context-aware trading orders and provides "Stealth Intelligence"—a real-time trend confidence indicator based on anonymized settlement data.
 
 ---
 
@@ -89,14 +91,15 @@ sequenceDiagram
     Note over U, TEE: Phase 2 — Confidential Matching
     U->>U: Generate Shield Address + Encrypt Order
     U->>B: Submit Encrypted Order (blob only)
-    B->>TEE: matching-workflow (encrypted order book)
-    TEE->>SC: Check isVerified(buyer) + isVerified(seller)
+    B->>TEE: matching-workflow (encrypted order book + baseSymbol)
     TEE->>TEE: Match orders privately inside enclave
-    TEE->>B: Settlement intent (no plaintext order data)
+    TEE->>TEE: 🔒 Confidential Finnhub price check (using baseSymbol + runtime secrets)
+    TEE->>SC: Check isVerified(buyer) + isVerified(seller)
 
     Note over U, TEE: Phase 3 — Private Settlement
-    B->>SC: settleMatch() via Convergence Vault
-    SC->>SC: Transfer RWA + USDC to Shield Addresses
+    TEE->>SC: Convergence private transfers to Shield Addresses
+    TEE->>B: 🔒 Encrypted settlement callback (encryptOutput: true)
+    B->>B: Update order status in DB
 ```
 
 
@@ -233,6 +236,7 @@ cre workflow simulate matching-workflow --target=staging-settings
 cd ../verify-workflow && bun install
 cre workflow simulate verify-workflow --target=staging-settings
 ```
+*(Note: Ensure your `cre/.env` contains `FINNHUB_API_KEY` and `CRE_CALLBACK_SECRET` before simulating the matching workflow).*
 
 ### 4. Frontend Terminal
 ```bash
@@ -246,11 +250,12 @@ bun run dev
 ## 🛠️ Tech Stack
 
 - **Smart Contracts:** Solidity, Foundry, Chainlink ACE (Arbitrary Compute Environment)
-- **Confidential Computing:** Chainlink CRE (Confidential Routing Engine)
+- **Confidential Computing:** Chainlink CRE (Confidential Routing Engine), Confidential HTTP (`ConfidentialHTTPClient`)
+- **Privacy Features:** Vault DON Secret Injection, AES-GCM Response Encryption (`encryptOutput`), Slippage Protection
 - **Identity:** World ID (Zero-Knowledge Proofs)
 - **Backend:** Bun, Hono, PostgreSQL, Prisma, Viem
 - **Frontend:** React 19, Vite, TailwindCSS (Dark-mode optimized)
-- **AI & Data:** Google Gemini (via OpenAI SDK), Finnhub API (real-time RWA price feeds)
+- **AI & Data:** Google Gemini (via OpenAI SDK), Finnhub API (real-time RWA price feeds via Confidential HTTP)
 
 ## License
 MIT
