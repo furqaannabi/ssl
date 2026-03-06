@@ -1,5 +1,6 @@
 # SSL — Stealth Settlement Layer
 
+*Built with ❤️ by Furqaan Nabi and Chukwunonso Ikeji for the Chainlink Convergence Hackathon.*
 [![Network](https://img.shields.io/badge/Network-Ethereum_Sepolia-lightgrey.svg)]()
 [![Built with Chainlink](https://img.shields.io/badge/Built_with-Chainlink_CRE_&_ACE-blue.svg)](https://chain.link)
 [![World ID Validated](https://img.shields.io/badge/Identity-World_ID-black.svg)](https://worldcoin.org/world-id)
