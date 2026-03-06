@@ -170,5 +170,13 @@ bun run dev
 - **Frontend:** React 19, Vite, TailwindCSS (Dark-mode optimized)
 - **AI & Data:** Google Gemini (via OpenAI SDK), Finnhub API (real-time RWA price feeds via Confidential HTTP)
 
+## 🚀 Upcoming Milestones
+
+1. **Cross-Chain Settlement via CCIP:** Seamless cross-chain liquidity. For example, a user pays USDC on Ethereum and receives tMETA on Arbitrum.
+2. **KYC & Institutional Compliance:** Enhancing our World ID integration to support strict, configurable KYC checks for onboarding institutional liquidity while preserving dark pool privacy using ACE.
+3. **Mainnet Launch:** Deploying the full CRE TEE enclave and Convergence Vault infrastructure to Ethereum Mainnet.
+
+---
+
 ## License
 MIT
