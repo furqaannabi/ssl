@@ -46,6 +46,36 @@ Once matched, assets are exchanged without linking them back to the traders' mai
 - Inside the TEE, the workflow signs EIP-712 payloads authorizing Convergence private transfers: the Base token (e.g., tAAPL) goes to the buyer's Shield Address, and the Quote token (USDC) goes to the seller's Shield Address.
 - **Privacy Track Feature B (Response Encryption):** After successful on-chain transfers, the TEE must notify the backend to update the database. It calls the backend via `ConfidentialHTTPClient` with `encryptOutput: true`. The settlement details (trade amounts, transaction IDs) are AES-GCM encrypted *before* leaving the enclave. The backend decrypts this payload and marks the orders as `SETTLED`.
 
+### CRE Workflow Responses
+
+#### `verify-workflow` — World ID Verification Result
+```json
+{
+  "status": "verified",
+  "nullifier_hash": "0x2a7c...b3f1",
+  "userAddress": "0xdc468db7a8ab8da86cf0bb099afd15bb9bfea0bb",
+  "chains": {
+    "ethereum-testnet-sepolia": "0xabc123...txhash",
+    "arbitrum-sepolia": "already_verified"
+  }
+}
+```
+On success, the TEE validates the World ID ZK proof, encodes an on-chain report (`reportType=0, user=address`), and submits it to the `WorldIDVerifierRegistry` on each target chain. If a user is already verified on a chain, that chain is skipped. On failure, returns `{ "status": "failed", "error": "...", "worldErrorCode": "..." }`.
+
+#### `matching-workflow` — Confidential Order Matching Result
+```json
+{
+  "status": "matched",
+  "buyerOrderId": "3131ea1d-9012-4b72-80e5-a1e407fcda90",
+  "sellerOrderId": "798d2025-ada9-430d-9df9-1abbf5a9a4db",
+  "tradeAmount": "0.001",
+  "quoteAmount": "0.000500",
+  "buyerTxId": "019cc251-4863-7a0f-9fbc-5a60a11bfd1e",
+  "sellerTxId": "019cc251-4aca-72fc-91ff-6011fe64e6ce"
+}
+```
+The TEE decrypts orders, matches them privately, verifies both parties on-chain, fetches the live Finnhub price via `ConfidentialHTTPClient`, executes Convergence private transfers to Shield Addresses, and sends an encrypted settlement callback to the backend. If no match is found, returns `{ "status": "pending", "orderId": "..." }`. If slippage exceeds 5%, returns `{ "status": "pending", "reason": "price_check_failed" }`.
+
 ---
 
 ## AI System Workflows (Powered by Gemini)
