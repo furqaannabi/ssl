@@ -8966,6 +8966,37 @@ class ClientLogTrigger {
     return rawOutput;
   }
 }
+var file_capabilities_networking_confidentialhttp_v1alpha_client = /* @__PURE__ */ fileDesc("Cj1jYXBhYmlsaXRpZXMvbmV0d29ya2luZy9jb25maWRlbnRpYWxodHRwL3YxYWxwaGEvY2xpZW50LnByb3RvEjBjYXBhYmlsaXRpZXMubmV0d29ya2luZy5jb25maWRlbnRpYWxodHRwLnYxYWxwaGEiUAoQU2VjcmV0SWRlbnRpZmllchILCgNrZXkYASABKAkSEQoJbmFtZXNwYWNlGAIgASgJEhIKBW93bmVyGAMgASgJSACIAQFCCAoGX293bmVyIh4KDEhlYWRlclZhbHVlcxIOCgZ2YWx1ZXMYASADKAki1wQKC0hUVFBSZXF1ZXN0EgsKA3VybBgBIAEoCRIOCgZtZXRob2QYAiABKAkSFQoLYm9keV9zdHJpbmcYAyABKAlIABIUCgpib2R5X2J5dGVzGAggASgMSAASZgoNbXVsdGlfaGVhZGVycxgEIAMoCzJPLmNhcGFiaWxpdGllcy5uZXR3b3JraW5nLmNvbmZpZGVudGlhbGh0dHAudjFhbHBoYS5IVFRQUmVxdWVzdC5NdWx0aUhlYWRlcnNFbnRyeRJ3ChZ0ZW1wbGF0ZV9wdWJsaWNfdmFsdWVzGAUgAygLMlcuY2FwYWJpbGl0aWVzLm5ldHdvcmtpbmcuY29uZmlkZW50aWFsaHR0cC52MWFscGhhLkhUVFBSZXF1ZXN0LlRlbXBsYXRlUHVibGljVmFsdWVzRW50cnkSHwoXY3VzdG9tX3Jvb3RfY2FfY2VydF9wZW0YBiABKAwSKgoHdGltZW91dBgHIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbhIWCg5lbmNyeXB0X291dHB1dBgJIAEoCBpzChFNdWx0aUhlYWRlcnNFbnRyeRILCgNrZXkYASABKAkSTQoFdmFsdWUYAiABKAsyPi5jYXBhYmlsaXRpZXMubmV0d29ya2luZy5jb25maWRlbnRpYWxodHRwLnYxYWxwaGEuSGVhZGVyVmFsdWVzOgI4ARo7ChlUZW1wbGF0ZVB1YmxpY1ZhbHVlc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAFCBgoEYm9keSKPAgoMSFRUUFJlc3BvbnNlEhMKC3N0YXR1c19jb2RlGAEgASgNEgwKBGJvZHkYAiABKAwSZwoNbXVsdGlfaGVhZGVycxgDIAMoCzJQLmNhcGFiaWxpdGllcy5uZXR3b3JraW5nLmNvbmZpZGVudGlhbGh0dHAudjFhbHBoYS5IVFRQUmVzcG9uc2UuTXVsdGlIZWFkZXJzRW50cnkacwoRTXVsdGlIZWFkZXJzRW50cnkSCwoDa2V5GAEgASgJEk0KBXZhbHVlGAIgASgLMj4uY2FwYWJpbGl0aWVzLm5ldHdvcmtpbmcuY29uZmlkZW50aWFsaHR0cC52MWFscGhhLkhlYWRlclZhbHVlczoCOAEiyAEKF0NvbmZpZGVudGlhbEhUVFBSZXF1ZXN0El0KEXZhdWx0X2Rvbl9zZWNyZXRzGAEgAygLMkIuY2FwYWJpbGl0aWVzLm5ldHdvcmtpbmcuY29uZmlkZW50aWFsaHR0cC52MWFscGhhLlNlY3JldElkZW50aWZpZXISTgoHcmVxdWVzdBgCIAEoCzI9LmNhcGFiaWxpdGllcy5uZXR3b3JraW5nLmNvbmZpZGVudGlhbGh0dHAudjFhbHBoYS5IVFRQUmVxdWVzdDLKAQoGQ2xpZW50EpgBCgtTZW5kUmVxdWVzdBJJLmNhcGFiaWxpdGllcy5uZXR3b3JraW5nLmNvbmZpZGVudGlhbGh0dHAudjFhbHBoYS5Db25maWRlbnRpYWxIVFRQUmVxdWVzdBo+LmNhcGFiaWxpdGllcy5uZXR3b3JraW5nLmNvbmZpZGVudGlhbGh0dHAudjFhbHBoYS5IVFRQUmVzcG9uc2UaJYK1GCEIARIdY29uZmlkZW50aWFsLWh0dHBAMS4wLjAtYWxwaGFCpgIKNGNvbS5jYXBhYmlsaXRpZXMubmV0d29ya2luZy5jb25maWRlbnRpYWxodHRwLnYxYWxwaGFCC0NsaWVudFByb3RvUAGiAgNDTkOqAjBDYXBhYmlsaXRpZXMuTmV0d29ya2luZy5Db25maWRlbnRpYWxodHRwLlYxYWxwaGHKAjBDYXBhYmlsaXRpZXNcTmV0d29ya2luZ1xDb25maWRlbnRpYWxodHRwXFYxYWxwaGHiAjxDYXBhYmlsaXRpZXNcTmV0d29ya2luZ1xDb25maWRlbnRpYWxodHRwXFYxYWxwaGFcR1BCTWV0YWRhdGHqAjNDYXBhYmlsaXRpZXM6Ok5ldHdvcmtpbmc6OkNvbmZpZGVudGlhbGh0dHA6OlYxYWxwaGFiBnByb3RvMw", [file_google_protobuf_duration, file_tools_generator_v1alpha_cre_metadata]);
+var HTTPResponseSchema = /* @__PURE__ */ messageDesc(file_capabilities_networking_confidentialhttp_v1alpha_client, 3);
+var ConfidentialHTTPRequestSchema = /* @__PURE__ */ messageDesc(file_capabilities_networking_confidentialhttp_v1alpha_client, 4);
+
+class ClientCapability2 {
+  static CAPABILITY_ID = "confidential-http@1.0.0-alpha";
+  static CAPABILITY_NAME = "confidential-http";
+  static CAPABILITY_VERSION = "1.0.0-alpha";
+  sendRequest(runtime, input) {
+    let payload;
+    if (input.$typeName) {
+      payload = input;
+    } else {
+      payload = fromJson(ConfidentialHTTPRequestSchema, input);
+    }
+    const capabilityId = ClientCapability2.CAPABILITY_ID;
+    const capabilityResponse = runtime.callCapability({
+      capabilityId,
+      method: "SendRequest",
+      payload,
+      inputSchema: ConfidentialHTTPRequestSchema,
+      outputSchema: HTTPResponseSchema
+    });
+    return {
+      result: () => {
+        const result = capabilityResponse.result();
+        return result;
+      }
+    };
+  }
+}
 var file_capabilities_networking_http_v1alpha_client = /* @__PURE__ */ fileDesc("CjFjYXBhYmlsaXRpZXMvbmV0d29ya2luZy9odHRwL3YxYWxwaGEvY2xpZW50LnByb3RvEiRjYXBhYmlsaXRpZXMubmV0d29ya2luZy5odHRwLnYxYWxwaGEiSgoNQ2FjaGVTZXR0aW5ncxINCgVzdG9yZRgBIAEoCBIqCgdtYXhfYWdlGAIgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uIh4KDEhlYWRlclZhbHVlcxIOCgZ2YWx1ZXMYASADKAki7wMKB1JlcXVlc3QSCwoDdXJsGAEgASgJEg4KBm1ldGhvZBgCIAEoCRJPCgdoZWFkZXJzGAMgAygLMjouY2FwYWJpbGl0aWVzLm5ldHdvcmtpbmcuaHR0cC52MWFscGhhLlJlcXVlc3QuSGVhZGVyc0VudHJ5QgIYARIMCgRib2R5GAQgASgMEioKB3RpbWVvdXQYBSABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24SSwoOY2FjaGVfc2V0dGluZ3MYBiABKAsyMy5jYXBhYmlsaXRpZXMubmV0d29ya2luZy5odHRwLnYxYWxwaGEuQ2FjaGVTZXR0aW5ncxJWCg1tdWx0aV9oZWFkZXJzGAcgAygLMj8uY2FwYWJpbGl0aWVzLm5ldHdvcmtpbmcuaHR0cC52MWFscGhhLlJlcXVlc3QuTXVsdGlIZWFkZXJzRW50cnkaLgoMSGVhZGVyc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEaZwoRTXVsdGlIZWFkZXJzRW50cnkSCwoDa2V5GAEgASgJEkEKBXZhbHVlGAIgASgLMjIuY2FwYWJpbGl0aWVzLm5ldHdvcmtpbmcuaHR0cC52MWFscGhhLkhlYWRlclZhbHVlczoCOAEi8QIKCFJlc3BvbnNlEhMKC3N0YXR1c19jb2RlGAEgASgNElAKB2hlYWRlcnMYAiADKAsyOy5jYXBhYmlsaXRpZXMubmV0d29ya2luZy5odHRwLnYxYWxwaGEuUmVzcG9uc2UuSGVhZGVyc0VudHJ5QgIYARIMCgRib2R5GAMgASgMElcKDW11bHRpX2hlYWRlcnMYBCADKAsyQC5jYXBhYmlsaXRpZXMubmV0d29ya2luZy5odHRwLnYxYWxwaGEuUmVzcG9uc2UuTXVsdGlIZWFkZXJzRW50cnkaLgoMSGVhZGVyc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEaZwoRTXVsdGlIZWFkZXJzRW50cnkSCwoDa2V5GAEgASgJEkEKBXZhbHVlGAIgASgLMjIuY2FwYWJpbGl0aWVzLm5ldHdvcmtpbmcuaHR0cC52MWFscGhhLkhlYWRlclZhbHVlczoCOAEymAEKBkNsaWVudBJsCgtTZW5kUmVxdWVzdBItLmNhcGFiaWxpdGllcy5uZXR3b3JraW5nLmh0dHAudjFhbHBoYS5SZXF1ZXN0Gi4uY2FwYWJpbGl0aWVzLm5ldHdvcmtpbmcuaHR0cC52MWFscGhhLlJlc3BvbnNlGiCCtRgcCAISGGh0dHAtYWN0aW9uc0AxLjAuMC1hbHBoYULqAQooY29tLmNhcGFiaWxpdGllcy5uZXR3b3JraW5nLmh0dHAudjFhbHBoYUILQ2xpZW50UHJvdG9QAaICA0NOSKoCJENhcGFiaWxpdGllcy5OZXR3b3JraW5nLkh0dHAuVjFhbHBoYcoCJENhcGFiaWxpdGllc1xOZXR3b3JraW5nXEh0dHBcVjFhbHBoYeICMENhcGFiaWxpdGllc1xOZXR3b3JraW5nXEh0dHBcVjFhbHBoYVxHUEJNZXRhZGF0YeoCJ0NhcGFiaWxpdGllczo6TmV0d29ya2luZzo6SHR0cDo6VjFhbHBoYWIGcHJvdG8z", [file_google_protobuf_duration, file_tools_generator_v1alpha_cre_metadata]);
 var RequestSchema = /* @__PURE__ */ messageDesc(file_capabilities_networking_http_v1alpha_client, 2);
 var ResponseSchema = /* @__PURE__ */ messageDesc(file_capabilities_networking_http_v1alpha_client, 3);
@@ -8982,7 +9013,7 @@ class SendRequester {
   }
 }
 
-class ClientCapability2 {
+class ClientCapability3 {
   static CAPABILITY_ID = "http-actions@1.0.0-alpha";
   static CAPABILITY_NAME = "http-actions";
   static CAPABILITY_VERSION = "1.0.0-alpha";
@@ -9001,7 +9032,7 @@ class ClientCapability2 {
     } else {
       payload = fromJson(RequestSchema, input);
     }
-    const capabilityId = ClientCapability2.CAPABILITY_ID;
+    const capabilityId = ClientCapability3.CAPABILITY_ID;
     const capabilityResponse = runtime.callCapability({
       capabilityId,
       method: "SendRequest",
@@ -10412,7 +10443,7 @@ function sendRequesterSendReport(report, fn) {
   const request = fn(rawReport);
   return this.sendRequest(request);
 }
-ClientCapability2.prototype.sendReport = sendReport;
+ClientCapability3.prototype.sendReport = sendReport;
 SendRequester.prototype.sendReport = sendRequesterSendReport;
 var network = {
   chainId: "1",
@@ -22632,6 +22663,10 @@ function decryptOrder(encryptedBase64, privateKeyHex) {
   const plaintext = gcm(aesKey, iv).decrypt(ciphertext);
   return JSON.parse(new TextDecoder().decode(plaintext));
 }
+function pairIdToFinnhubSymbol(pairId) {
+  const base = pairId.split("/")[0];
+  return base.startsWith("t") ? base.slice(1) : base;
+}
 function findMatch(newOrder, resting) {
   if (newOrder.side === "BUY") {
     const candidates = resting.filter((o) => o.side === "SELL" && parseFloat(o.price) <= parseFloat(newOrder.price)).sort((a, b) => parseFloat(a.price) - parseFloat(b.price));
@@ -22669,11 +22704,13 @@ var onHttpTrigger = (runtime2, payload) => {
     return JSON.stringify({ status: "failed", error: "Decryption failed" });
   }
   runtime2.log("[TEE] Decrypted: " + newOrder.side + " " + newOrder.amount + " @ " + newOrder.price);
-  const httpClient = new ClientCapability2;
+  const httpClient = new ClientCapability3;
   const bookResult = httpClient.sendRequest(runtime2, (sender, cfg) => httpCall(sender, cfg.backendUrl + "/api/order/encrypted-book?pairId=" + newOrder.pairId, "GET"), consensusIdenticalAggregation())(runtime2.config).result();
   const restingOrders = [];
+  let baseSymbol = "";
   try {
     const parsed = JSON.parse(bookResult.body);
+    baseSymbol = parsed.baseSymbol ?? "";
     for (const rec of parsed.orders ?? []) {
       if (rec.id === input.orderId || !rec.encryptedPayload)
         continue;
@@ -22693,6 +22730,42 @@ var onHttpTrigger = (runtime2, payload) => {
     return JSON.stringify({ status: "pending", orderId: input.orderId });
   }
   runtime2.log("[TEE] Match: " + newOrder.id + " <-> " + matchedOrder.id);
+  const confClient = new ClientCapability2;
+  const finnhubSymbol = pairIdToFinnhubSymbol(baseSymbol);
+  const execPrice = newOrder.side === "BUY" ? parseFloat(matchedOrder.price) : parseFloat(newOrder.price);
+  try {
+    const finnhubSecret = runtime2.getSecret({ id: "finnhubApiKey", namespace: "ssl-secrets" }).result();
+    const finnhubApiKey = finnhubSecret.value;
+    const priceRes = confClient.sendRequest(runtime2, {
+      request: {
+        url: "https://finnhub.io/api/v1/quote?symbol=" + finnhubSymbol,
+        method: "GET",
+        multiHeaders: {
+          "X-Finnhub-Token": { values: [finnhubApiKey] }
+        },
+        encryptOutput: false
+      },
+      vaultDonSecrets: []
+    }).result();
+    const priceBody = new TextDecoder().decode(priceRes.body);
+    runtime2.log("[TEE] Finnhub response: " + priceBody);
+    const quote = JSON.parse(priceBody);
+    const marketPrice = quote.c;
+    const MAX_SLIPPAGE = 0.05;
+    if (marketPrice > 0) {
+      const deviation = Math.abs(execPrice - marketPrice) / marketPrice;
+      if (deviation > MAX_SLIPPAGE) {
+        runtime2.log("[TEE] Slippage " + (deviation * 100).toFixed(2) + "% exceeds " + MAX_SLIPPAGE * 100 + "% limit — rejecting match");
+        return JSON.stringify({ status: "pending", orderId: input.orderId, reason: "slippage_exceeded" });
+      }
+      runtime2.log("[TEE] Market price $" + marketPrice + " — slippage " + (deviation * 100).toFixed(2) + "% OK");
+    } else {
+      runtime2.log("[TEE] Finnhub returned zero/invalid market price — proceeding without slippage check");
+    }
+  } catch (err) {
+    runtime2.log("[TEE] Finnhub confidential price check failed: " + err + " — aborting match");
+    return JSON.stringify({ status: "pending", orderId: input.orderId, reason: "price_check_failed" });
+  }
   const buyerAddr = (newOrder.side === "BUY" ? newOrder : matchedOrder).userAddress;
   const sellerAddr = (newOrder.side === "SELL" ? newOrder : matchedOrder).userAddress;
   if (!checkIsVerifiedOnChain(runtime2, buyerAddr)) {
@@ -22704,7 +22777,6 @@ var onHttpTrigger = (runtime2, payload) => {
     return JSON.stringify({ status: "pending", orderId: input.orderId, reason: "seller_not_verified" });
   }
   const tradeAmt = Math.min(parseFloat(newOrder.amount), parseFloat(matchedOrder.amount));
-  const execPrice = newOrder.side === "BUY" ? parseFloat(matchedOrder.price) : parseFloat(newOrder.price);
   const quoteAmt = tradeAmt * execPrice;
   const buyer = newOrder.side === "BUY" ? newOrder : matchedOrder;
   const seller = newOrder.side === "SELL" ? newOrder : matchedOrder;
@@ -22786,7 +22858,8 @@ var onHttpTrigger = (runtime2, payload) => {
   try {
     sellerTxId = JSON.parse(sellerTxRes.body).transaction_id ?? null;
   } catch {}
-  const settleResult = httpClient.sendRequest(runtime2, (sender, cfg) => httpCall(sender, cfg.backendUrl + "/api/order/cre-settle", "POST", {
+  const confClientSettle = new ClientCapability2;
+  const settlePayload = JSON.stringify({
     buyerOrderId: buyer.id,
     sellerOrderId: seller.id,
     tradeAmount: tradeAmt.toString(),
@@ -22794,8 +22867,23 @@ var onHttpTrigger = (runtime2, payload) => {
     pairId: input.pairId,
     buyerTxId,
     sellerTxId
-  }, { "X-CRE-Secret": cfg.callbackSecret }), consensusIdenticalAggregation())(runtime2.config).result();
-  runtime2.log("[TEE] DB update HTTP " + settleResult.statusCode);
+  });
+  const callbackSecretObj = runtime2.getSecret({ id: "callbackSecret", namespace: "ssl-secrets" }).result();
+  const callbackSecretValue = callbackSecretObj.value;
+  const settleResult = confClientSettle.sendRequest(runtime2, {
+    request: {
+      url: runtime2.config.backendUrl + "/api/order/cre-settle",
+      method: "POST",
+      bodyString: settlePayload,
+      multiHeaders: {
+        "Content-Type": { values: ["application/json"] },
+        "X-CRE-Secret": { values: [callbackSecretValue] }
+      },
+      encryptOutput: true
+    },
+    vaultDonSecrets: []
+  }).result();
+  runtime2.log("[TEE] Encrypted DB update HTTP " + settleResult.statusCode);
   return JSON.stringify({
     status: "matched",
     buyerOrderId: buyer.id,
